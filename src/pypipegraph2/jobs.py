@@ -11,6 +11,7 @@ from enum import Enum, auto
 from io import StringIO
 from . import hashers, exceptions
 
+module_type = type(sys)
 
 class Resources(Enum):
     SingleCore = "SingleCore"
@@ -124,7 +125,11 @@ class FunctionInvariant(Job):
         res = {"source": self.get_source()}
         if is_python_func:
             python_version = tuple(sys.version_info)
-            res[python_version] = self.get_dis(self.function)
+            res[python_version] = (
+                self.get_dis(self.function),
+                self.extract_closure(self.function),
+            )
+
         return {self.job_id: res}
 
     def get_source(self):

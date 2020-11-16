@@ -107,6 +107,29 @@ class TestPypipegraph2:
         assert Path('B').read_text() == 'Bc'
 
 
+    def test_changing_bound_variables(self, ppg_per_test):
+        varA = 'hello'
+        jobA = ppg.FileGeneratingJob('A', lambda of, varA=varA: of.write_text(varA))
+        ppg.run()
+        assert Path('A').read_text() == 'hello'
+
+        varA = 'world'
+        jobA = ppg.FileGeneratingJob('A', lambda of, varA=varA: of.write_text(varA))
+        ppg.run()
+        assert Path('A').read_text() == 'hello'
+
+    def test_capturing_closures(self, ppg_per_test):
+        varA = ['hello']
+        jobA = ppg.FileGeneratingJob('A', lambda of: of.write_text(str(varA)))
+        ppg.run()
+        assert Path('A').read_text() == str(['hello'])
+
+        varA.append('world')
+        jobA = ppg.FileGeneratingJob('A', lambda of: of.write_text(str(varA)))
+        ppg.run()
+        assert Path('A').read_text() == str(['hello', 'world'])
+
+
     def test_job_redefinition(self):
         raise NotImplementedError()
 
