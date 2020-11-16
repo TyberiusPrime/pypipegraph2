@@ -1,11 +1,31 @@
 # -*- coding: utf-8 -*-
-from pkg_resources import get_distribution, DistributionNotFound
+__version__ = "0.1"
 
-try:
-    # Change here if project is renamed and does not equal the package name
-    dist_name = __name__
-    __version__ = get_distribution(dist_name).version
-except DistributionNotFound:
-    __version__ = 'unknown'
-finally:
-    del get_distribution, DistributionNotFound
+import networkx
+from pathlib import Path
+import loguru
+import logging
+from loguru import logger
+from .graph import PyPipeGraph, ALL_CORES
+from .jobs import *  # TODO
+from .exceptions import * # TODO
+
+
+def new(
+    cores=ALL_CORES,
+    log_dir=Path(".ppg/logs"),
+    history_dir=Path(".ppg/history"),
+    log_level=logging.INFO,
+):
+    global global_pipegraph
+    global_pipegraph = PyPipeGraph(
+        cores=cores, log_dir=log_dir, history_dir=history_dir, log_level=log_level
+    )
+    return global_pipegraph
+
+
+global_pipegraph = new()
+
+
+def run():
+    global_pipegraph.run()

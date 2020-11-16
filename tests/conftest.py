@@ -251,3 +251,18 @@ def both_ppg_and_no_ppg(request):
         finally:
             os.chdir(old_dir)
 
+
+from _pytest.logging import caplog as _caplog
+import logging
+from loguru import logger
+
+@pytest.fixture
+def caplog(_caplog):
+    class PropogateHandler(logging.Handler):
+        def emit(self, record):
+            logging.getLogger(record.name).handle(record)
+
+    handler_id = logger.add(PropogateHandler(), format="{message}", level=5)
+    yield _caplog
+    logger.remove(handler_id)
+

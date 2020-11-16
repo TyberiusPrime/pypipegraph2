@@ -1,4 +1,5 @@
 from pathlib import Path
+from loguru import logger
 import pytest
 import pypipegraph2 as ppg
 
@@ -35,7 +36,7 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "BBBAAA"
 
 
-    def test_very_simple_chain_rerun(self, ppg_per_test):
+    def test_very_simple_chain_rerun(self, ppg_per_test, caplog):
         assert not Path("A").exists()
         assert not Path("B").exists()
         counter = 0
@@ -51,7 +52,7 @@ class TestPypipegraph2:
         Path("A").unlink()
         counter = 1
         ppg.run()
-        assert Path("B").read_text() == "BBB0"
+        assert Path("B").read_text() == "BBB1"
 
     def test_isolation(self, ppg_per_test):
         assert not Path("B").exists()
@@ -88,6 +89,23 @@ class TestPypipegraph2:
         assert Path("outcount").read_text() == "1"
         # but C was not rerun, since the B output did not change.
         assert Path("C").read_text() == "CCC0"
+
+    def test_changing_inputs(self, ppg_per_test, caplog):
+        jobA = ppg.FileGeneratingJob('A', lambda of: of.write_text("A"))
+        jobB = ppg.FileGeneratingJob('B', lambda of: of.write_text("B" + Path('A').read_text()))
+        assert not Path('A').exists()
+        assert not Path('B').exists()
+        jobB.depends_on(jobA)
+        logger.warning("first  run")
+        ppg.run()
+        assert Path('A').read_text() == 'A'
+        assert Path('B').read_text() == 'BA'
+        jobA = ppg.FileGeneratingJob('A', lambda of: of.write_text("c"))
+        logger.warning("Change run")
+        ppg.run()
+        assert Path('A').read_text() == 'c'
+        assert Path('B').read_text() == 'Bc'
+
 
     def test_job_redefinition(self):
         raise NotImplementedError()
