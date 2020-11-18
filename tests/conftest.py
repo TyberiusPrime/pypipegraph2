@@ -257,12 +257,38 @@ import logging
 from loguru import logger
 
 @pytest.fixture
-def caplog(_caplog):
-    class PropogateHandler(logging.Handler):
-        def emit(self, record):
-            logging.getLogger(record.name).handle(record)
-
-    handler_id = logger.add(PropogateHandler(), format="{message}", level=5)
-    yield _caplog
+def job_trace_log():
+    def fmt(record):
+        lvl = str(record['level'].name).ljust(8)
+        m = record['module'] + ':'
+        func = f"{m:12}{record['line']:4}"
+        func = func.ljust(12+4)
+        out = f"{record['level'].icon} {lvl} | {func} | {record['message']}\n"
+        if record['level'].name == 'ERROR':
+            out = f'<blue>{out}</blue>'
+        return out
+    old = logger.remove()
+    handler_id = logger.add(sys.stderr, format=fmt, level=6)
+    yield
     logger.remove(handler_id)
+    logger.add(old)
+
+
+@pytest.fixture
+def trace_log(): # could not find out how to abstract pytest fixtures
+    def fmt(record):
+        lvl = str(record['level'].name).ljust(8)
+        m = record['module'] + ':'
+        func = f"{m:12}{record['line']:4}"
+        func = func.ljust(12+4)
+        out = f"{record['level'].icon} {lvl} | {func} | {record['message']}\n"
+        if record['level'].name == 'ERROR':
+            out = f'<blue>{out}</blue>'
+        return out
+    logger.remove() # no coming back after this :(
+    handler_id = logger.add(sys.stderr, format=fmt, level=5)
+    yield
+    logger.remove(handler_id)
+    #logger.add(old)
+
 

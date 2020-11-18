@@ -10,8 +10,10 @@ from pathlib import Path
 from enum import Enum, auto
 from io import StringIO
 from . import hashers, exceptions
+from .runner import WillNeedToRun, InvalidationState
 
 module_type = type(sys)
+
 
 class Resources(Enum):
     SingleCore = "SingleCore"
@@ -42,23 +44,46 @@ class Job:
             self.mapped_outputs = outputs
         elif isinstance(outputs, list):
             self.outputs = outputs
+            self.mapped_outputs = {}
         else:
             raise ValueError("Invalid output definition")
         self.outputs = sorted([str(x) for x in self.outputs])
         self.job_id = ":::".join(self.outputs)
+        self.cleanup_job = None
         global_pipegraph.add(self)
 
-    def depends_on(self, other_job: Union[Job, List[Job]]):
+    def depends_on(
+        self,
+        other_job: Union[Union[str, Job], List[Union[str, Job]]],
+        *other_jobs: Union[Union[str, Job], List[Union[str, Job]]],
+    ):
         from . import global_pipegraph
 
-        global_pipegraph.add_edge(other_job, self)
+        if isinstance(other_job, list):
+            for x in other_job:
+                self.depends_on(x)
+        else:
+            if isinstance(other_job, Job):
+                o_job = other_job
+                o_inputs = other_job.outputs
+            else:
+                o_job = global_pipegraph.jobs[
+                    global_pipegraph.outputs_to_job_ids[other_job]
+                ]
+                o_inputs = [other_job]
+            global_pipegraph.add_edge(o_job, self)
+            global_pipegraph.job_inputs[self.job_id].update(o_inputs)
+        if other_jobs:
+            for o in other_jobs:
+                self.depends_on(o)
+        return self
 
 
 class MultiFileGeneratingJob(Job):
     def __init__(
         self,
-        files: List[Path],
-        generating_function: Callable[Path],
+        files: List[Path],  # todo: extend type attribute to allow mapping
+        generating_function: Callable[List[Path]],
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
     ):
@@ -70,20 +95,22 @@ class MultiFileGeneratingJob(Job):
             func_invariant = FunctionInvariant(self.generating_function, self.job_id)
             self.depends_on(func_invariant)
 
-    def run(self, was_invalidated):
+    def run(self, _was_invalidated):
         for fn in self.files:  # we rebuild anyway!
             if fn.exists():
                 fn.unlink()
         self.generating_function(
             self.mapped_outputs if self.mapped_outputs else self.files
         )
-        return {hashers.hash_file(of) for of in self.files}
+        return {of.name: hashers.hash_file(of) for of in self.files}
 
-    def must_make_outputs(self):
+    def are_you_ready_to_run(self, _runner, invalidated):
+        if invalidated:
+            return WillNeedToRun.Yes
         for fn in self.files:
             if not fn.exists():
-                return True
-        return False
+                return WillNeedToRun.Yes
+        return WillNeedToRun.DontBother
 
     def invalidated(self):
         for fn in self.files:
@@ -102,21 +129,130 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
             self, [output_filename], generating_function, resources, depend_on_function
         )
 
-    def run(self, old_hash):
+    def run(self, _was_invalidated):
         """Call the generating function with just the one filename"""
         self.generating_function(self.files[0])
         return {str(of): hashers.hash_file(of) for of in self.files}
 
 
+class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
+    def __init__(
+        self,
+        files: List[Path],
+        generating_function: Callable[List[Path]],
+        resources: Resources = Resources.SingleCore,
+        depend_on_function: bool = True,
+    ):
+        MultiFileGeneratingJob.__init__(
+            self, files, generating_function, resources, depend_on_function
+        )
+
+        def do_unlink():
+            for fn in self.files:
+                if fn.exists():
+                    fn.unlink()
+
+        self.cleanup_job = _CleanupJob(self.job_id, do_unlink)
+
+    def are_you_ready_to_run(self, runner, invalidated):
+        # now this one is tricky.
+        # temp jobs must run: iff one of their direct downstream descendands must be run.
+        # but the first time we're asking these, the downstreams can't tell -
+        # they are possibly not yet invalidated, but will be by an upstream we'll be looking
+        # at *after* this TempFileGeneratingJob - or they might be being invalidated
+        # by the actual run of this TempFileGeneratingJob, but then that's cool.
+        logger.trace(
+            f"MultiTempFileGeneratingJob.are_you_ready_to_run {self.job_id}, {invalidated}"
+        )
+        downstreams = runner.job_graph.job_dag.neighbors(self.job_id)
+        at_least_one_downstream = False
+        for job_id in downstreams:
+            logger.trace(f"Downstream {job_id}")
+            state = runner.job_stati[job_id]
+            if state.invalidation_state is InvalidationState.Invalidated:
+                logger.trace(f"{job_id} was invalidated")
+                return WillNeedToRun.Yes
+            else:
+                rtr = runner.job_graph.jobs[job_id].are_you_ready_to_run(
+                    runner, state.invalidation_state is InvalidationState.Invalidated
+                )
+                logger.trace(f"Querying {job_id}.are_you_ready_to_run - result {rtr}")
+                if rtr is WillNeedToRun.Yes:
+                    logger.trace(f"{job_id} was are_you_ready_to_run()")
+                    return WillNeedToRun.Yes
+                elif rtr is WillNeedToRun.CleanUp:
+                    continue
+                elif rtr is WillNeedToRun.DontBother and not invalidated:
+                    continue
+                else:
+                    at_least_one_downstream = True
+        logger.trace(f"at_least_one_downstream {at_least_one_downstream}")
+        if at_least_one_downstream:
+            if (
+                invalidated
+            ):  # invalidating the job means we bust rerun it to see if the output cahnge
+                logger.trace(f"Leaving with Yes")
+                result = WillNeedToRun.Yes
+            else:  # we don't know whether the downstreams need to run.
+                logger.trace(f"Leaving with CantDecide")
+                result = WillNeedToRun.CantDecide
+        else:
+            result = WillNeedToRun.DontBother  # tempfiles without downstreams don't get run.
+        logger.trace(f"Leaving {job_id} with {result}")
+        return result
+
+
+class TempFileGeneratingJob(MultiTempFileGeneratingJob):
+    def __init__(
+        self,
+        output_filename: Union[Path, str],
+        generating_function: Callable[Path],
+        resources: Resources = Resources.SingleCore,
+        depend_on_function: bool = True,
+    ):
+        MultiTempFileGeneratingJob.__init__(
+            self, [output_filename], generating_function, resources, depend_on_function
+        )
+
+    def run(self, _was_invalidated):
+        """Call the generating function with just the one filename"""
+        self.generating_function(self.files[0])
+        return {str(of): hashers.hash_file(of) for of in self.files}
+
+
+class _CleanupJob(Job):
+    """Jobs may register cleanup jobs that injected after their immediate downstreams.
+    This encapsulates those
+
+    """
+
+    def __init__(self, parent_name, cleanup_function):
+        Job.__init__(self, ["CleanUp:" + parent_name], Resources.RunsHere)
+        self.cleanup_function = cleanup_function
+
+    def run(self, _was_invalidated):
+        self.cleanup_function()
+        return {self.outputs[0]: None}  # todo: optimize this awy?
+
+    def are_you_ready_to_run(self, _runner, invalidated):
+        return WillNeedToRun.CleanUp
+
+
 class FunctionInvariant(Job):
-    def __init__(self, function, name=None):
+    def __init__(
+        self, function, name=None
+    ):  # todo, must support the inverse calling with name, function
         self.function = function
-        name = "FI:" + name if name else FunctionInvariant.func_to_name(function)
+        name = (
+            "FunctionInvariant:" + name
+            if name
+            else FunctionInvariant.func_to_name(function)
+        )
         self.verify_arguments(name, function)
         Job.__init__(self, [name], Resources.RunsHere)
 
-    def must_make_outputs(self):
-        return True
+    def are_you_ready_to_run(self, _runner, invalidated):
+        return WillNeedToRun.Yes
 
     def run(self, was_invalidated):
         # todo: Don't recalc if file / source did not change.

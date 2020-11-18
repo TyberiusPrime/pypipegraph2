@@ -1,4 +1,5 @@
 from typing import Optional, Union, Dict
+import collections
 import os
 import textwrap
 import sys
@@ -11,6 +12,9 @@ from loguru import logger
 from . import exceptions
 from .runner import Runner, JobState
 from enum import Enum
+
+
+logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
 
 class ALL_CORES:
     pass
@@ -25,6 +29,7 @@ class RunMode(Enum):
 def default_run_mode():
     # TODO
     return RunMode.INTERACTIVE
+
 
 class PyPipeGraph:
     history_dir: Optional[Path]
@@ -53,16 +58,21 @@ class PyPipeGraph:
 
         self.jobs = {}
         self.job_dag = networkx.DiGraph()
+        self.job_inputs = collections.defaultdict(set)
         self.running = False
         self.outputs_to_job_ids = {}
 
-    def run(self, print_failures: bool = True, raise_on_job_error = True) -> Dict[str, JobState]:
+    def run(
+        self, print_failures: bool = True, raise_on_job_error=True
+    ) -> Dict[str, JobState]:
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
             raise exceptions.NotADag()
         if self.log_dir:
             self.log_dir.mkdir(exist_ok=True, parents=True)
-            logger.add(self.log_dir / f"ppg_run_{time.time():.0f}.log", level = self.log_level)
-        logger.trace(f"Run is go {id(self)} {os.getpid()})")
+            logger.add(
+                self.log_dir / f"ppg_run_{time.time():.0f}.log", level=self.log_level
+            )
+            logger.log('JobTrace', f"Run is go {id(self)} pid: {os.getpid()}")
         self.history_dir.mkdir(exist_ok=True, parents=True)
         try:
             if self.run_mode == RunMode.INTERACTIVE:
@@ -74,10 +84,11 @@ class PyPipeGraph:
             for job_id, job_state in result.items():
                 if job_state.state == JobState.Failed:
                     if print_failures:
-                        msg = textwrap.indent(str(job_state.error), '\t')
-                        logger.error(f"{job_id} failed.\n {msg}")
+                        msg = textwrap.indent(str(job_state.error), "\t")
+                        logger.error(f"{job_id} failed.\n {msg}".replace("<","\\<").replace("{","{{").replace("}","}}"))
                     if raise_on_job_error:
                         do_raise = True
+            self.last_run_result = result
             if do_raise:
                 raise exceptions.RunFailed()
             return result
@@ -89,7 +100,6 @@ class PyPipeGraph:
             if self.run_mode == RunMode.INTERACTIVE:
                 self._restore_signals()
             logger.trace("Run is done")
-
 
     def _get_history_fn(self):
         fn = Path(sys.argv[0]).name
@@ -164,4 +174,5 @@ class PyPipeGraph:
 
     def add_edge(self, upstream_job, downstream_job):
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)
-
+        if upstream_job.cleanup_job:
+            self.job_dag.add_edge(downstream_job.job_id, upstream_job.cleanup_job.job_id)
