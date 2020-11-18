@@ -188,3 +188,4 @@ class PyPipeGraph:
             self.job_dag.add_edge(
                 downstream_job.job_id, upstream_job.cleanup_job.job_id
             )
+            self.job_inputs[upstream_job.cleanup_job.job_id].add(downstream_job.job_id)

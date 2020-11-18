@@ -75,6 +75,7 @@ class Runner:
         needs_rerun = True
         loop_safety = 10
         while needs_rerun:  # are there jobs we could'n get at the first time around?
+            logger.log("JobTrace", "Loop enter")
             needs_rerun = False
             loop_safety -= 1
             if loop_safety == 0:
@@ -150,55 +151,70 @@ class Runner:
                         name: self.output_hashes[name]
                         for name in self.get_job_inputs(job)
                     }
-                    logger.info( f"Logging these inputs for {job_id} {escape_logging(job_status.updated_input)}")
-                    logger.info( f"Logging these outputs for {job_id} {escape_logging(job_status.updated_output)}")
+                    logger.trace( f"Logging these inputs for {job_id} {escape_logging(job_status.updated_input)}")
+                    logger.trace( f"Logging these outputs for {job_id} {escape_logging(job_status.updated_output)}")
         return self.job_stati
 
-    def update_job_state(self, job, job_status):
-        logger.log("JobTrace", f"decide_on_job_status: {job.job_id}")
-        if job_status.state.is_terminal():
-            logger.log("JobTrace", "update_job_status, terminal")
+
+    def update_invalidation_status(self,job, job_status):
+        if job_status.invalidation_state in (InvalidationState.Invalidated, InvalidationState.NotInvalidated):
             return
-        if job_status.invalidation_state is InvalidationState.Invalidated:
-            invalidated = True
-        elif job_status.invalidation_state is InvalidationState.NotInvalidated:
-            invalidated = False
-        else:  # calculate invalidation
-            invalidated = False
-            for input in self.get_job_inputs(job):
-                logger.log("JobTrace", f"\tLooking at {input}")
-                if not input in self.output_hashes:
-                    logger.log(
-                        "JobTrace", f"Waiting because {input} was not in output hashes"
-                    )
-                    job_status.state = JobState.Waiting
+        new_state = InvalidationState.NotInvalidated
+        for input in self.get_job_inputs(job):
+            if not input in self.output_hashes:
+                #logger.log("JobTrace", f"InvalidationState->Unknown because {input} was not in output_hashes yet")
+                #job_status.invalidation_state = InvalidationState.Unknown
+                #return
+                input_job_id = self.job_graph.outputs_to_job_ids[input]
+                if self.job_stati[input_job_id].invalidation_state is InvalidationState.Invalidated:
+                    logger.log("JobTrace", f"{job.job_id} invalidated because of {input} vi a {input_job_id}")
+                    job_status.invalidation_state = InvalidationState.Invalidated
                     return
+                else:
+                    continue
+            else:
                 old = job_status.historical_input.get(input, None)
                 new = self.output_hashes[input]
                 comp_result = self.compare_history(old, new)
                 if isinstance(comp_result, UnchangedButUpdate):
-                    self.output_hashes[input] = new
+                    #self.output_hashes[input] = new
+                    job_status.historical_input[name] = new
                     logger.log("JobTrace", f"UnchangedButUpdate {input}")
                     continue
                 elif comp_result is True:
                     logger.log("JobTrace", f"{input} no change")
                     continue
                 else:
-                    invalidated = True
-                    # break todo?
-                    logger.info(f"Invalidated {job.job_id} because of {input} change")
-            if invalidated:  # because input changed
-                job_status.invalidation_state = InvalidationState.Invalidated
-            else:
-                job_status.invalidation_state = InvalidationState.NotInvalidated
-        run_now = job.are_you_ready_to_run(self, invalidated)
-        logger.log("JobTrace", f"WillNeedToRun {job.job_id} {run_now}")
-        if run_now is WillNeedToRun.Yes or run_now is WillNeedToRun.CleanUp:
-            job_status.state = JobState.ReadyToRun
-        elif run_now is WillNeedToRun.DontBother:
-            job_status.state = JobState.Skipped
-        elif run_now is WillNeedToRun.CantDecide:
+                    logger.log("JobTrace", f"{input} invalidated because of {input}")
+                    job_status.invalidation_state = InvalidationState.Invalidated
+                    return
+        logger.log("JobTrace", f"{job.job_id} not invalidated")
+        job_status.invalidation_state = InvalidationState.NotInvalidated
+
+
+
+    def update_job_state(self, job, job_status):
+        logger.log("JobTrace", f"decide_on_job_status: {job.job_id}")
+        self.update_invalidation_status(job, job_status)
+        if job_status.state.is_terminal():
+            return
+        if job_status.invalidation_state is InvalidationState.Unknown:
             job_status.state = JobState.Waiting
+        else:
+            run_now = job.are_you_ready_to_run(self, job_status.invalidation_state)
+            logger.log("JobTrace", f"WillNeedToRun {job.job_id} {run_now}")
+            if run_now is WillNeedToRun.Yes or run_now is WillNeedToRun.CleanUp:
+                logger.log("JobTrace", f"{job.job_id} inputs: {escape_logging(self.get_job_inputs(job))}")
+                for input in self.get_job_inputs(job):
+                    logger.log("JobTrace", f"{input} in output_hashes: {input in self.output_hashes}")
+                    if not input in self.output_hashes:
+                        job_status.state = JobState.Waiting
+                        return
+                job_status.state = JobState.ReadyToRun
+            elif run_now is WillNeedToRun.DontBother:
+                job_status.state = JobState.Skipped
+            elif run_now is WillNeedToRun.CantDecide:
+                job_status.state = JobState.Waiting
 
     def get_job_inputs(self, job):
         return self.job_graph.job_inputs[job.job_id]
