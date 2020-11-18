@@ -16,7 +16,7 @@ def counter(filename):
 
 
 class TestPypipegraph2:
-    def test_very_simple(self, ppg_per_test):
+    def test_very_simple(self, ppg_per_test, job_trace_log):
         assert not Path("A").exists()
         job = ppg.FileGeneratingJob("A", lambda of: of.write_text("Done"))
         ppg.run()
@@ -64,7 +64,7 @@ class TestPypipegraph2:
         ppg.run()
         assert Path("B").read_text() == "BBB1"
 
-    def test_isolation(self, ppg_per_test):
+    def test_isolation(self, ppg_per_test, trace_log):
         assert not Path("B").exists()
         assert not Path("C").exists()
 

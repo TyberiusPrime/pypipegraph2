@@ -271,7 +271,6 @@ def job_trace_log():
     handler_id = logger.add(sys.stderr, format=fmt, level=6)
     yield
     logger.remove(handler_id)
-    logger.add(old)
 
 
 @pytest.fixture

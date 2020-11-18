@@ -5,6 +5,9 @@ Designgoals:
 	and that allows rerunning the job graph, and such an improved
 	interactive (notebook) experience.
 	
+	It will also allow jobs that were absent temporarily
+	to correctly discover whether their input changed.
+	
 	
 API:
 	The API will offer a pypipegraph compatibility layer,

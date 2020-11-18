@@ -12,9 +12,11 @@ from loguru import logger
 from . import exceptions
 from .runner import Runner, JobState
 from enum import Enum
+from .util import escape_logging
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
+
 
 class ALL_CORES:
     pass
@@ -72,12 +74,12 @@ class PyPipeGraph:
             logger.add(
                 self.log_dir / f"ppg_run_{time.time():.0f}.log", level=self.log_level
             )
-            logger.log('JobTrace', f"Run is go {id(self)} pid: {os.getpid()}")
+            logger.info(f"Run is go {id(self)} pid: {os.getpid()}")
         self.history_dir.mkdir(exist_ok=True, parents=True)
         try:
+            result = None
             if self.run_mode == RunMode.INTERACTIVE:
                 self._install_signals()
-            self._load_historical()
             self.running = True
             result = Runner(self).run()
             do_raise = False
@@ -85,7 +87,7 @@ class PyPipeGraph:
                 if job_state.state == JobState.Failed:
                     if print_failures:
                         msg = textwrap.indent(str(job_state.error), "\t")
-                        logger.error(f"{job_id} failed.\n {msg}".replace("<","\\<").replace("{","{{").replace("}","}}"))
+                        logger.error(f"{job_id} failed.\n {escape_logging(msg)}")
                     if raise_on_job_error:
                         do_raise = True
             self.last_run_result = result
@@ -93,7 +95,15 @@ class PyPipeGraph:
                 raise exceptions.RunFailed()
             return result
         finally:
-            self._save_historical()
+            if result is not None:
+                new_history = {
+                    job_id: (
+                        result[job_id].updated_input,
+                        result[job_id].updated_output,
+                    )
+                    for job_id in result
+                }
+                self.save_historical(new_history)
             self.running = False
             if print_failures:
                 self._print_failures()
@@ -105,7 +115,7 @@ class PyPipeGraph:
         fn = Path(sys.argv[0]).name
         return self.history_dir / f"ppg_status_{fn}"
 
-    def _load_historical(self):
+    def load_historical(self):
         logger.trace("load_historicals")
         if self.history_dir is None:
             return
@@ -116,22 +126,22 @@ class PyPipeGraph:
             with open(fn, "rb") as op:
                 try:
                     while True:
-                        key = pickle.load(op)
-                        value = pickle.load(op)
-                        history[key] = value
+                        job_id = pickle.load(op)
+                        inputs = pickle.load(op)
+                        history[job_id] = inputs
                 except EOFError:
                     pass
-        self.historical = history
+        return history
 
-    def _save_historical(self):
+    def save_historical(self, historical):
         logger.trace("save_historical")
         if self.history_dir is None:
             return
         fn = self._get_history_fn()
         with open(fn, "wb") as op:
-            for key, hash in self.historical.items():
-                pickle.dump(key, op, pickle.HIGHEST_PROTOCOL)
-                pickle.dump(hash, op, pickle.HIGHEST_PROTOCOL)
+            for job_id, input_hashes in historical.items():
+                pickle.dump(job_id, op, pickle.HIGHEST_PROTOCOL)
+                pickle.dump(input_hashes, op, pickle.HIGHEST_PROTOCOL)
 
     def _print_failures(self):
         logger.trace("print_failures")
@@ -175,4 +185,6 @@ class PyPipeGraph:
     def add_edge(self, upstream_job, downstream_job):
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)
         if upstream_job.cleanup_job:
-            self.job_dag.add_edge(downstream_job.job_id, upstream_job.cleanup_job.job_id)
+            self.job_dag.add_edge(
+                downstream_job.job_id, upstream_job.cleanup_job.job_id
+            )
