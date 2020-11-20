@@ -9,8 +9,9 @@ from loguru import logger
 from pathlib import Path
 from enum import Enum, auto
 from io import StringIO
+import networkx
 from . import hashers, exceptions
-from .runner import WillNeedToRun, InvalidationState
+from .runner import InvalidationState
 
 module_type = type(sys)
 
@@ -78,13 +79,15 @@ class Job:
                 self.depends_on(o)
         return self
 
-    def is_invalidatable(self, job_graph):
-        """Static (graph structure based) decision whether this job will be rerun
-        when it's inputs change.
-        True for output generating jobs, false for the invariants (they isolate by fiat),
-        and kicked downstream by Temp-jobs
-        """
+    def is_temp_job(self):
         return False
+
+    def output_needed(self):
+        False
+
+    def invalidated(self):
+        """Inputs changed - nuke outputs etc"""
+        pass
 
 
 class MultiFileGeneratingJob(Job):
@@ -112,16 +115,11 @@ class MultiFileGeneratingJob(Job):
         )
         return {of.name: hashers.hash_file(of) for of in self.files}
 
-    def is_invalidatable(self, job_graph):
-        return True
-
-    def are_you_ready_to_run(self, _runner, invalidation_status):
-        if invalidation_status is InvalidationState.Invalidated:
-            return WillNeedToRun.Yes
+    def output_needed(self):
         for fn in self.files:
             if not fn.exists():
-                return WillNeedToRun.Yes
-        return WillNeedToRun.DontBother
+                return True
+        return False
 
     def invalidated(self):
         for fn in self.files:
@@ -165,60 +163,29 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
 
         self.cleanup_job = _CleanupJob(self.job_id, do_unlink)
 
-    def is_invalidatable(self, job_graph):
-        downstreams = job_graph.job_dag.neighbors(self.job_id)
-        for d in downstreams:
-            if job_graph.jobs[d].is_invalidatable(job_graph):
+    def is_temp_job(self):
+        return True
+
+    def output_needed(self):
+        False
+
+    def run_needed(self, runner):
+        # invariants: true
+        # FileGeneratingJob: True/False, depending on whether the output existed
+        # TempJobs: True/False/CantTellYet.
+        downstream = list(runner.job_graph.job_dag.neighbors(self.job_id))
+        if not downstream:
+            return False
+        for downstream_job_id in downstream:
+            if (
+                runner.job_stati[downstream_job_id].invalidation_state
+                is InvalidationState.Invalidated
+            ):
+                return True
+            downstream_job = runner.job_graph.jobs[downstream_job_id]
+            if downstream_job.run_needed(runner):
                 return True
         return False
-
-    def are_you_ready_to_run(self, runner, invalidation_state):
-        # now this one is tricky.
-        # temp jobs must run: iff one of their direct downstream descendands must be run.
-        # but the first time we're asking these, the downstreams can't tell -
-        # they are possibly not yet invalidated, but will be by an upstream we'll be looking
-        # at *after* this TempFileGeneratingJob - or they might be being invalidated
-        # by the actual run of this TempFileGeneratingJob, but then that's cool.
-        logger.trace(
-            f"MultiTempFileGeneratingJob.are_you_ready_to_run {self.job_id}, {invalidation_state}"
-        )
-        if not self.is_invalidatable(runner.job_graph):  # I don't matter. leaf job.
-            logger.trace(f"{self.job_id} was leaf")
-            return WillNeedToRun.DontBother
-        elif invalidation_state is InvalidationState.Invalidated:
-            # I am invalidated & I have invalidatable downstreams.
-            logger.trace(f"{self.job_id} was invalidated and non leaf")
-            return WillNeedToRun.Yes
-        else:
-            # is there a downstream that needs the files generated here?
-            logger.trace(f"{self.job_id} looked at downstreams")
-            downstreams = runner.job_graph.job_dag.neighbors(self.job_id)
-            for job_id in downstreams:
-                state = runner.job_stati[job_id].invalidation_state
-                result = WillNeedToRun.DontBother
-                logger.trace(f"\t{self.job_id} looking at {job_id}, {state}")
-                if state is InvalidationState.Invalidated:
-                    logger.trace(f"{self.job_id} found invalidated downstream")
-                    return WillNeedToRun.Yes
-                elif (
-                    state is InvalidationState.NotInvalidated
-                    and runner.job_graph.jobs[job_id].are_you_ready_to_run(
-                        runner, state
-                    )
-                    is WillNeedToRun.Yes
-                ):
-                    logger.trace(
-                        f"{self.job_id} found a ready to run downstream {job_id}"
-                    )
-                    return WillNeedToRun.Yes
-                elif state is InvalidationState.Unknown:
-                    # can't tell yet, must wait for next examination round.
-                    logger.trace(f"{self.job_id} found unknown downstream")
-                    return WillNeedToRun.CantDecide
-                # else InvalidationState.NotInvalidated
-                # pass -> rutern WillNeedToRun.DontBother
-            logger.trace(f"{self.job_id} found no invalidated/unknown downstream")
-            return result
 
 
 class TempFileGeneratingJob(MultiTempFileGeneratingJob):
@@ -245,16 +212,14 @@ class _CleanupJob(Job):
 
     """
 
-    def __init__(self, parent_name, cleanup_function):
-        Job.__init__(self, ["CleanUp:" + parent_name], Resources.RunsHere)
+    def __init__(self, parent_job_id, cleanup_function):
+        Job.__init__(self, ["CleanUp:" + parent_job_id], Resources.RunsHere)
+        self.parent_job_id = parent_job_id
         self.cleanup_function = cleanup_function
 
     def run(self, _was_invalidated):
         self.cleanup_function()
         return {self.outputs[0]: None}  # todo: optimize this awy?
-
-    def are_you_ready_to_run(self, _runner, _invalidation_status):
-        return WillNeedToRun.CleanUp
 
 
 class FunctionInvariant(Job):
@@ -270,10 +235,10 @@ class FunctionInvariant(Job):
         self.verify_arguments(name, function)
         Job.__init__(self, [name], Resources.RunsHere)
 
-    def are_you_ready_to_run(self, _runner, _invalidation_status):
-        return WillNeedToRun.Yes
+    def output_needed(self):
+        return True
 
-    def run(self, was_invalidated):
+    def run(self, _was_invalidated):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
         source, is_python_func = self.get_source()
