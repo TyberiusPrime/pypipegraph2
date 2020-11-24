@@ -1,3 +1,4 @@
+# noqa: F841
 from pathlib import Path
 from loguru import logger
 import pytest
@@ -636,3 +637,98 @@ class TestPypipegraph2:
 
     def test_same_mtime_same_size_leads_to_false_negative(self):
         raise NotImplementedError()
+
+    def test_file_invariant(self, ppg_per_test, job_trace_log):
+        Path("A").write_text("A")
+        jobA = ppg.FileInvariant("A")
+        jobB = ppg.FileGeneratingJob(
+            "B", lambda of: counter("b") and of.write_text(Path("A").read_text())
+        )
+        jobB.depends_on(jobA)
+        ppg.run()
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        ppg.run()
+        assert Path("b").read_text() == "1"
+        Path("A").write_text("AA")
+        ppg.run()
+        assert Path("b").read_text() == "2"
+        assert Path("B").read_text() == "AA"
+
+    def test_adding_and_removing_variants(self, ppg_per_test, job_trace_log):
+        Path("A").write_text("A")
+        jobA = ppg.FileInvariant("A")
+        jobB = ppg.FileGeneratingJob(
+            "B", lambda of: counter("b") and of.write_text(Path("A").read_text())
+        )
+        jobB.depends_on(jobA)
+        ppg.run()
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        ppg.run()
+        assert Path("b").read_text() == "1"
+        Path("C").write_text("C")
+        jobC = ppg.FileInvariant("C")
+        jobB.depends_on(jobC)
+        ppg.run()
+        assert Path("b").read_text() == "2"
+        ppg.new()
+        jobA.readd()
+        jobB.readd()
+        jobC.readd()
+        jobB.depends_on(jobA, jobC)
+        ppg.run()
+        assert Path("b").read_text() == "2"
+        ppg.new()
+        jobA.readd()
+        jobB.readd()
+        jobC.readd()
+        jobB.depends_on(jobA)
+        ppg.run()
+        assert Path("b").read_text() == "3"  # hey, we lost one!
+
+    def test_function_invariant_binding_parameter(self, ppg_per_test):
+        params = ["a"]
+        jobB = ppg.FileGeneratingJob(
+            "B", lambda of: counter("b") and of.write_text(params[0])
+        )
+        ppg.run()
+        assert Path("B").read_text() == "a"
+        assert Path("b").read_text() == "1"
+        ppg.run()
+        assert Path("B").read_text() == "a"
+        assert Path("b").read_text() == "1"
+
+        params[0] = "b"
+        ppg.run()
+        assert Path("B").read_text() == "b"
+        assert Path("b").read_text() == "2"
+        ppg.run()
+        assert Path("B").read_text() == "b"
+        assert Path("b").read_text() == "2"
+
+    def test_parameter_invariant(self, ppg_per_test, job_trace_log):
+        params = ["a"]
+        jobA = ppg.ParameterInvariant('A', params)
+        def shu(): # so the functionInvariant does not bind params itself!
+            return params[0]
+        jobB = ppg.FileGeneratingJob(
+            "B", lambda of: counter("b") and of.write_text(shu())
+        )
+        jobB.depends_on(jobA)
+        ppg.run()
+
+        assert Path("B").read_text() == "a"
+        assert Path("b").read_text() == "1"
+        ppg.run()
+        assert Path("B").read_text() == "a"
+        assert Path("b").read_text() == "1"
+
+        params[0] = "b"
+        jobA = ppg.ParameterInvariant('A', params) # the parameters get frozen when teh job is defined!
+        ppg.run()
+        assert Path("B").read_text() == "b"
+        assert Path("b").read_text() == "2"
+        ppg.run()
+        assert Path("B").read_text() == "b"
+        assert Path("b").read_text() == "2"

@@ -5,10 +5,9 @@ import sys
 import inspect
 import types
 from typing import Union, List, Dict, Optional, Tuple, Callable
-from loguru import logger
+from loguru import logger  # noqa:F401
 from pathlib import Path
 from io import StringIO
-import networkx
 from . import hashers, exceptions
 from .enums import JobKind, Resources
 
@@ -25,10 +24,7 @@ class Job:
         resources: Resources = Resources.SingleCore,
     ):
 
-        try:
-            from . import global_pipegraph
-        except ImportError:
-            global_pipegraph = None
+        from . import global_pipegraph
 
         self.resources = resources
         if isinstance(outputs, str):
@@ -45,12 +41,16 @@ class Job:
         self.outputs = sorted([str(x) for x in self.outputs])
         self.job_id = ":::".join(self.outputs)
         self.cleanup_job = None
-        if (
-            global_pipegraph is not None
-            #and (not isinstance(self, (InitialJob, _DownstreamNeedsMeChecker)))
-            and (not global_pipegraph.running)
-        ):
+        self.readd()
 
+    def readd(self):
+        """Readd this job to the current global pipegraph
+        (possibly the *new* global pipegraph).
+        Without any dependencies!
+        """
+        from . import global_pipegraph
+
+        if not global_pipegraph.running:
             global_pipegraph.add(self)
 
     def depends_on(
@@ -89,6 +89,10 @@ class Job:
         """Inputs changed - nuke outputs etc"""
         pass
 
+    @classmethod
+    def compare_hashes(cls, old_hash, new_hash):
+        return old_hash == new_hash
+
 
 class InitialJob(Job):
     job_kind = JobKind.Invariant
@@ -96,7 +100,7 @@ class InitialJob(Job):
     def __init__(self):
         Job.__init__(self, "%%%initial%%%")
 
-    def run(self, _ignored_runner):
+    def run(self, _ignored_runner, _historical_output):
         return {self.job_id: "I"}
 
 
@@ -110,7 +114,7 @@ class _DownstreamNeedsMeChecker(Job):
     def output_needed(self, _ignored_runner):
         return True
 
-    def run(self, runner):
+    def run(self, runner, _historical_output):
         if self.job_to_check.output_needed(runner):
             return {self.job_id: "ExplodePlease"}
         else:
@@ -129,14 +133,18 @@ class MultiFileGeneratingJob(Job):
         depend_on_function: bool = True,
     ):
 
+        self.generating_function = generating_function
+        self.depend_on_function = depend_on_function
         Job.__init__(self, files, resources)
         self.files = [Path(x) for x in self.outputs]
-        self.generating_function = generating_function
-        if depend_on_function:
+
+    def readd(self):
+        if self.depend_on_function:
             func_invariant = FunctionInvariant(self.generating_function, self.job_id)
             self.depends_on(func_invariant)
+        super().readd()
 
-    def run(self, _ignored_runner):
+    def run(self, _ignored_runner, _historical_output):
         for fn in self.files:  # we rebuild anyway!
             if fn.exists():
                 fn.unlink()
@@ -168,7 +176,7 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
             self, [output_filename], generating_function, resources, depend_on_function
         )
 
-    def run(self, _ignored_runner):
+    def run(self, _ignored_runner, _historical_output):
         """Call the generating function with just the one filename"""
         self.generating_function(self.files[0])
         return {str(of): hashers.hash_file(of) for of in self.files}
@@ -221,7 +229,7 @@ class TempFileGeneratingJob(MultiTempFileGeneratingJob):
             self, [output_filename], generating_function, resources, depend_on_function
         )
 
-    def run(self, _ignored_runner):
+    def run(self, _ignored_runner, _historical_output):
         """Call the generating function with just the one filename"""
         self.generating_function(self.files[0])
         return {str(of): hashers.hash_file(of) for of in self.files}
@@ -239,7 +247,7 @@ class _FileCleanupJob(Job):
         Job.__init__(self, ["CleanUp:" + parent_job.job_id], Resources.RunsHere)
         self.parent_job = parent_job
 
-    def run(self, _ignored_runner):
+    def run(self, _ignored_runner, _historical_output):
         for fn in self.parent_job.files:
             if fn.exists():
                 fn.unlink()
@@ -265,7 +273,7 @@ class FunctionInvariant(Job):
     def output_needed(self, _ignored_runner):
         return True
 
-    def run(self, _ignored_runner):
+    def run(self, _ignored_runner, _historical_output):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
         source, is_python_func = self.get_source()
@@ -382,28 +390,6 @@ class FunctionInvariant(Job):
             return cls.get_cython_source(function.__func__)
         else:
             raise ValueError("Can't handle this object %s" % function)
-
-    @classmethod
-    def _get_func_hash(cls, key, function):
-        if not util.global_pipegraph or key not in util.global_pipegraph.func_hashes:
-            source = inspect.getsource(function).strip()
-            # cut off function definition / name, but keep parameters
-            if source.startswith("def"):
-                source = source[source.find("(") :]
-            # filter doc string
-            if function.__doc__:
-                for prefix in ['"""', "'''", '"', "'"]:
-                    if prefix + function.__doc__ + prefix in source:
-                        source = source.replace(
-                            prefix + function.__doc__ + prefix,
-                            "",
-                        )
-            value = (source,)
-            if not util.global_pipegraph:
-                return value
-            util.global_pipegraph.func_hashes[key] = value
-
-        return util.global_pipegraph.func_hashes[key]
 
     @classmethod
     def _hash_function(cls, function):
@@ -684,3 +670,82 @@ class FunctionInvariant(Job):
                 "Could not automatically generate a function name for a lambda, pass a name please"
             )
         return name
+
+
+class FileInvariant(Job):
+    job_kind = JobKind.Invariant
+
+    def __init__(self, file):
+        self.file = Path(file)
+        super().__init__(str(self.file))
+
+    def output_needed(self, _ignored_runner):
+        return True
+
+    def run(self, _runner, historical_output):
+        if not self.file.exists():
+            raise FileNotFoundError(f"{self.path} did not exist")
+        stat = self.file.stat()
+        if not historical_output:
+            return self.calculate(stat)
+        else:
+            if int(stat.st_mtime) == historical_output.get(
+                "mtime", -1
+            ) and stat.st_size == historical_output.get("size", -1):
+                return historical_output
+            else:
+                return self.calculate(stat)
+
+    def calculate(self, stat):
+        return {
+            self.outputs[0]: {
+                "mtime": int(stat.st_mtime),
+                "size": stat.st_size,
+                "hash": hashers.hash_file(self.file),
+            }
+        }
+
+    @classmethod
+    def compare_hashes(cls, old_hash, new_hash):
+        if new_hash["hash"] == old_hash.get("hash", ""):
+            return True
+
+
+class ParameterInvariant(Job):
+    job_kind = JobKind.Invariant
+
+    def __init__(self, job_id, parameters):
+        self.parameters = self.freeze(parameters)
+        super().__init__(job_id)
+
+    def output_needed(self, _ignored_runner):
+        return True
+
+    def run(self, _runner, _historical_output):
+        return {self.outputs[0]: str(self.parameters)}
+
+    @staticmethod
+    def freeze(obj):
+        """Turn dicts into tuples of (key,value),
+        lists into tuples, and sets
+        into frozensets, recursively - usefull
+        to get a hash value..
+        """
+
+        try:
+            hash(obj)
+            return obj
+        except TypeError:
+            pass
+
+        if isinstance(obj, dict):
+            frz = tuple(sorted([(k, ParameterInvariant.freeze(obj[k])) for k in obj]))
+            return frz
+        elif isinstance(obj, (list, tuple)):
+            return tuple([ParameterInvariant.freeze(x) for x in obj])
+
+        elif isinstance(obj, set):
+            return frozenset(obj)
+        else:
+            msg = "Unsupported type: %r" % type(obj).__name__
+            raise TypeError(msg)

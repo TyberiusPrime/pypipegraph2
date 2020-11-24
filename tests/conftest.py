@@ -9,7 +9,6 @@
 
 # import pytest
 import pytest
-import pytest
 from pathlib import Path
 import shutil
 import os
@@ -18,7 +17,7 @@ import sys
 
 # support code to remove test created files
 # only if the test suceeded
-#ppg.util._running_inside_test = True
+# ppg.util._running_inside_test = True
 if "pytest" not in sys.modules:
     raise ValueError("fixtures can only be used together with pytest")
 
@@ -64,7 +63,7 @@ def ppg_per_test(request):
                 os.chdir(target_path)
                 first[0] = True
 
-            #rc = ppg.resource_coordinators.LocalSystem(1)
+            # rc = ppg.resource_coordinators.LocalSystem(1)
             g = ppg.new(cores=1, log_level=5)
             g.new = np
             return g
@@ -77,7 +76,7 @@ def ppg_per_test(request):
                     or request.node.rep_call.outcome == "skipped"
                 ):
                     try:
-                        #if not hasattr(ppg.util.global_pipegraph, "test_keep_output"):
+                        # if not hasattr(ppg.util.global_pipegraph, "test_keep_output"):
                         if "--profile" not in sys.argv:
                             shutil.rmtree(target_path)
                     except OSError:  # pragma: no cover
@@ -256,17 +255,19 @@ from _pytest.logging import caplog as _caplog
 import logging
 from loguru import logger
 
+
 @pytest.fixture
 def job_trace_log():
     def fmt(record):
-        lvl = str(record['level'].name).ljust(8)
-        m = record['module'] + ':'
+        lvl = str(record["level"].name).ljust(8)
+        m = record["module"] + ":"
         func = f"{m:12}{record['line']:4}"
-        func = func.ljust(12+4)
+        func = func.ljust(12 + 4)
         out = f"{record['level'].icon} {lvl} | {func} | {record['message']}\n"
-        if record['level'].name == 'ERROR':
-            out = f'<blue>{out}</blue>'
+        if record["level"].name == "ERROR":
+            out = f"<blue>{out}</blue>"
         return out
+
     old = logger.remove()
     handler_id = logger.add(sys.stderr, format=fmt, level=6)
     yield
@@ -274,20 +275,19 @@ def job_trace_log():
 
 
 @pytest.fixture
-def trace_log(): # could not find out how to abstract pytest fixtures
+def trace_log():  # could not find out how to abstract pytest fixtures
     def fmt(record):
-        lvl = str(record['level'].name).ljust(8)
-        m = record['module'] + ':'
+        lvl = str(record["level"].name).ljust(8)
+        m = record["module"] + ":"
         func = f"{m:12}{record['line']:4}"
-        func = func.ljust(12+4)
+        func = func.ljust(12 + 4)
         out = f"{record['level'].icon} {lvl} | {func} | {record['message']}\n"
-        if record['level'].name == 'ERROR':
-            out = f'<blue>{out}</blue>'
+        if record["level"].name == "ERROR":
+            out = f"<blue>{out}</blue>"
         return out
-    logger.remove() # no coming back after this :(
+
+    logger.remove()  # no coming back after this :(
     handler_id = logger.add(sys.stderr, format=fmt, level=5)
     yield
     logger.remove(handler_id)
-    #logger.add(old)
-
-
+    # logger.add(old)

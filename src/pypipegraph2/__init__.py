@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 __version__ = "0.1"
 
-import networkx
 from pathlib import Path
-import loguru
 import logging
 from loguru import logger
 from .graph import PyPipeGraph, ALL_CORES
 from .jobs import *  # TODO
-from .exceptions import * # TODO
+from .exceptions import *  # TODO
 
 
 def new(
@@ -29,3 +27,11 @@ global_pipegraph = new()
 
 def run():
     global_pipegraph.run()
+
+
+def job_trace(msg):
+    """log at the JobTrace level"""
+    logger.opt(depth=1).log("JobTrace", msg)
+
+
+logger.job_trace = job_trace

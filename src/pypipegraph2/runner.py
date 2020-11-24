@@ -32,7 +32,7 @@ class JobStatus:
 
 class Runner:
     def __init__(self, job_graph):
-        logger.log("JobTrace", "Runner.__init__")
+        logger.job_trace("Runner.__init__")
         self.jobs = job_graph.jobs.copy()
         self.job_inputs = job_graph.job_inputs.copy()
         self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
@@ -110,14 +110,9 @@ class Runner:
                 for downstream_job_id in dag.neighbors(job_id):
                     dag.add_edge(downstream_job_id, cleanup_job.job_id)
                     self.job_inputs[cleanup_job.job_id].add(downstream_job_id)
+        return dag
 
         # now add an initial job, so we can cut off the evaluation properly
-        self.initial_job = InitialJob()
-        for job_id in self.jobs:
-            dag.add_edge(self.initial_job.job_id, job_id)
-            self.job_inputs[job_id].add(self.initial_job.job_id)
-        self.jobs[self.initial_job.job_id] = self.initial_job
-        return dag
 
     def iter_job_non_temp_upstream_hull(self, job_id, dag):
         result = []
@@ -132,33 +127,29 @@ class Runner:
         return result
 
     def run(self):
-        logger.log("JobTrace", "Runner.__run__")
+        logger.job_trace("Runner.__run__")
 
         self.output_hashes = {}
         self.new_history = {}  # what are the job outputs this time.
 
-        # self.job_states = self.init_job_states() # done in init for now
-
         job_ids_topological = list(networkx.algorithms.dag.topological_sort(self.dag))
-        # we have an issue here with temp jobs:
-        # if they have no dependency, they get added in here
-        # and run even if they must not.
+
         def is_initial(job_id):
             return (
-                not self.job_graph.job_inputs[job_id]
-                and not self.job_graph.jobs[job_id].is_temp_job()
+                not self.job_inputs[job_id]
+                and not self.jobs[job_id].is_temp_job()
+                and self.jobs[job_id].output_needed(self)
             )
 
-        initial_job_ids = [job_ids_topological[0]]
-        self.open_job_ids = job_ids_topological[1:]
-        self.job_states[initial_job_ids[0]].state = JobState.Executed
+        initial_job_ids = [x for x in job_ids_topological if is_initial(x)]
+        self.open_job_ids = [x for x in job_ids_topological if not is_initial(x)]
         self.events = collections.deque()
-        self.push_event(
-            "JobSuccess", (initial_job_ids[0], self.jobs[initial_job_ids[0]].run(self))
-        )
+        for job_id in initial_job_ids:
+            self.job_states[job_id].state = JobState.ReadyToRun
+            self.push_event("JobReady", (job_id,))
         while self.events:
             ev = self.events.popleft()
-            logger.log("JobTrace", f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
+            logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
             if ev[0] == "JobSuccess":
                 self.handle_job_success(*ev[1])
             elif ev[0] == "JobSkipped":
@@ -169,14 +160,14 @@ class Runner:
                 self.handle_job_failed(*ev[1])
             else:
                 raise NotImplementedError(ev[0])
+        logger.job_trace("Left runner.run()")
         return self.job_states
 
     def handle_job_success(self, job_id, job_outputs):
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
         # record our success
-        # TODO: handle explosion here:
-        logger.log("JobTrace", f"\t{escape_logging(str(job_outputs)[:50])}...")
+        logger.job_trace(f"\t{escape_logging(str(job_outputs)[:50])}...")
         for name, hash in job_outputs.items():
             if name not in job.outputs:
                 job_state.error = exceptions.JobContractError(
@@ -186,7 +177,7 @@ class Runner:
                 self.fail_downstream(job.outputs, job_id)
                 job_state.status = JobStatus.Failed
                 break
-            logger.log("JobTrace", f"\tCapturing hash for {name}")
+            logger.job_trace(f"\tCapturing hash for {name}")
             self.output_hashes[name] = hash
             job_state.updated_output[name] = hash
             # when the job is done, it's the time time to record the inputs
@@ -199,30 +190,32 @@ class Runner:
         self.inform_downstreams_of_outputs(job_id, job_outputs)
 
     def inform_downstreams_of_outputs(self, job_id, job_outputs):
+        job = self.jobs[job_id]
 
         for downstream_id in self.dag.successors(job_id):
-            logger.log("JobTrace", f"\t\tDownstream {downstream_id}")
+            logger.job_trace(f"\t\tDownstream {downstream_id}")
             downstream_state = self.job_states[downstream_id]
             downstream_job = self.jobs[downstream_id]
             for name, hash in job_outputs.items():
                 if name in self.job_inputs[downstream_id]:
-                    logger.log("JobTrace", f"\t\t\tHad {name}")
+                    logger.job_trace(f"\t\t\tHad {name}")
                     old = downstream_state.historical_input.get(name, None)
                     new = hash
                     if new != "IgnorePlease" and (
-                        new == "ExplodePlease" or not self.compare_history(old, new)
+                        new == "ExplodePlease"
+                        or not self.compare_history(old, new, job.__class__)
                     ):
-                        logger.log("JobTrace", "\t\t\tinput changed -> invalidate")
+                        logger.job_trace("\t\t\tinput changed -> invalidate")
                         downstream_state.validation_state = ValidationState.Invalidated
-                    downstream_state.updated_input[name] = hash
+                    downstream_state.updated_input[name] = hash  # update any way.
                 else:
-                    logger.log("JobTrace", f"\t\t\tNot an input {name}")
+                    logger.job_trace(f"\t\t\tNot an input {name}")
             if self.all_inputs_finished(downstream_id):
                 if (
                     downstream_job.job_kind is JobKind.Temp
                     and downstream_state.validation_state is ValidationState.Invalidated
                 ):
-                    logger.log("JobTrace", f"{downstream_id} was Temp")
+                    logger.job_trace(f"{downstream_id} was Temp")
                     if self.job_has_non_temp_somewhere_downstream(downstream_id):
                         self.push_event("JobReady", (downstream_id,), 3)
                     else:
@@ -233,8 +226,16 @@ class Runner:
                 ):
                     self.push_event("JobReady", (downstream_id,), 3)
                 else:
-                    downstream_state.validation_state = ValidationState.Validated
-                    self.push_event("JobSkipped", (downstream_id,), 3)
+                    if len(downstream_state.updated_input) < len(
+                        downstream_state.historical_input
+                    ):
+                        logger.job_trace(f"\t\t\thistorical_input {downstream_state.historical_input.keys()}")
+                        logger.job_trace("\t\t\tinput disappeared -> invalidate")
+                        downstream_state.validation_state = ValidationState.Invalidated
+                        self.push_event("JobReady", (downstream_id,), 3)
+                    else:
+                        downstream_state.validation_state = ValidationState.Validated
+                        self.push_event("JobSkipped", (downstream_id,), 3)
 
     def handle_job_skipped(self, job_id):
         job_state = self.job_states[job_id]
@@ -249,8 +250,10 @@ class Runner:
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
         try:
-            logger.log("JobTrace", f"\tExecuting {job_id}")
-            outputs = job.run(self)
+            logger.job_trace(f"\tExecuting {job_id}")
+            job.start_time = time.time()
+            outputs = job.run(self, job_state.historical_output)
+            job.run_time = time.time() - job.start_time
             self.push_event("JobSuccess", (job_id, outputs))
         except Exception as e:
             job_state.error = str(e) + "\n" + traceback.format_exc()
@@ -267,6 +270,11 @@ class Runner:
         job_state = self.job_states[job_id]
         if job_state.state in (JobState.Failed, JobState.UpstreamFailed):
             return False
+        logger.job_trace(f"\t\t\tjob_inputs: {escape_logging(self.job_inputs[job_id])}")
+        logger.job_trace(
+            f"\t\t\tupdated_input: {escape_logging(self.job_states[job_id].updated_input.keys())}"
+        )
+
         return len(self.job_states[job_id].updated_input) == len(
             self.job_inputs[job_id]
         )
@@ -276,7 +284,7 @@ class Runner:
         self.events.append((event, args))
 
     def fail_downstream(self, outputs, source):
-        logger.log("JobTrace", f"failed_downstream {outputs} {source}")
+        logger.job_trace(f"failed_downstream {outputs} {source}")
         for output in outputs:
             # can't I run this with the job_id? todo: optimization
             job_id = self.outputs_to_job_ids[
@@ -286,8 +294,19 @@ class Runner:
                 self.job_states[node].state = JobState.UpstreamFailed
                 self.job_states[node].error = f"Upstream {source} failed"
 
-    def compare_history(self, old_hash, new_hash):
+    def compare_history(self, old_hash, new_hash, job_class):
+        if old_hash is None:
+            return False
+        return job_class.compare_hashes(old_hash, new_hash)
+
         if old_hash == new_hash:
+            return True
+        # FileInvariant - ignore
+        if (
+            "hash" in new_hash
+            and "hash" in old_hash
+            and new_hash["hash"] == old_hash["hash"]
+        ):
             return True
         # logger.trace(
         # f"Comparing {old_hash} and {new_hash}".replace("{", "{{").replace("}", "}}")
