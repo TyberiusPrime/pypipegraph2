@@ -62,7 +62,9 @@ class PyPipeGraph:
             set
         )  # necessary inputs (ie. outputs of other jobs)
         self.running = False
-        self.outputs_to_job_ids = {}  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
+        self.outputs_to_job_ids = (
+            {}
+        )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
         self.initial_job = InitialJob()
         self.add(self.initial_job)
 
@@ -195,8 +197,3 @@ class PyPipeGraph:
 
     def add_edge(self, upstream_job, downstream_job):
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)
-        if upstream_job.cleanup_job:
-            self.job_dag.add_edge(
-                downstream_job.job_id, upstream_job.cleanup_job.job_id
-            )
-            self.job_inputs[upstream_job.cleanup_job.job_id].add(downstream_job.job_id)

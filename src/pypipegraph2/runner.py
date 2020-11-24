@@ -75,7 +75,7 @@ class Runner:
                 for downstream_job_id in dag.successors(job_id):
                     # part one: add the 'does the downstream need me to calculate' check?
                     downstream_job = self.jobs[downstream_job_id]
-                    if not downstream_job.job_kind is JobKind.Cleanup:
+                    if downstream_job.job_kind is not JobKind.Cleanup:
                         downstream_needs_me_checker = _DownstreamNeedsMeChecker(
                             downstream_job
                         )
@@ -87,7 +87,7 @@ class Runner:
                         self.job_inputs[job_id].add(downstream_needs_me_checker.job_id)
                         self.outputs_to_job_ids[
                             downstream_needs_me_checker.job_id
-                        ] = downstream_needs_me_checker.job_id
+                        ] = downstream_needs_me_checker.outputs[0]
 
                         dag.add_edge(downstream_needs_me_checker.job_id, job_id)
                         dag.add_edge(
@@ -106,6 +106,14 @@ class Runner:
                                 self.job_inputs[job_id].update(
                                     downstream_upstream_job.outputs
                                 )
+            if hasattr(job, "cleanup_job_class"):
+                cleanup_job = job.cleanup_job_class(job)
+                self.jobs[cleanup_job.job_id] = cleanup_job
+                self.outputs_to_job_ids[cleanup_job.outputs[0]] = cleanup_job.job_id
+                for downstream_job_id in dag.neighbors(job_id):
+                    dag.add_edge(downstream_job_id, cleanup_job.job_id)
+                    self.job_inputs[cleanup_job.job_id].add(downstream_job_id)
+
         return dag
 
     def iter_job_non_temp_upstream_hull(self, job_id, dag):
@@ -198,15 +206,19 @@ class Runner:
                     logger.log("JobTrace", f"\t\t\tHad {name}")
                     old = downstream_state.historical_input.get(name, None)
                     new = hash
-                    if new != 'IgnorePlease' and (new == "ExplodePlease" or not self.compare_history(old, new)):
+                    if new != "IgnorePlease" and (
+                        new == "ExplodePlease" or not self.compare_history(old, new)
+                    ):
                         logger.log("JobTrace", "\t\t\tinput changed -> invalidate")
                         downstream_state.validation_state = ValidationState.Invalidated
                     downstream_state.updated_input[name] = hash
                 else:
                     logger.log("JobTrace", f"\t\t\tNot an input {name}")
             if self.all_inputs_finished(downstream_id):
-                if (downstream_job.job_kind is JobKind.Temp and 
-                        downstream_state.validation_state is ValidationState.Invalidated):
+                if (
+                    downstream_job.job_kind is JobKind.Temp
+                    and downstream_state.validation_state is ValidationState.Invalidated
+                ):
                     logger.log("JobTrace", f"{downstream_id} was Temp")
                     if self.job_has_non_temp_somewhere_downstream(downstream_id):
                         self.push_event("JobReady", (downstream_id,), 3)

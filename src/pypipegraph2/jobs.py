@@ -25,6 +25,11 @@ class Job:
         resources: Resources = Resources.SingleCore,
     ):
 
+        try:
+            from . import global_pipegraph
+        except ImportError:
+            global_pipegraph = None
+
         self.resources = resources
         if isinstance(outputs, str):
             self.outputs = [outputs]
@@ -40,8 +45,11 @@ class Job:
         self.outputs = sorted([str(x) for x in self.outputs])
         self.job_id = ":::".join(self.outputs)
         self.cleanup_job = None
-        if not isinstance(self, (InitialJob, _DownstreamNeedsMeChecker)):
-            from . import global_pipegraph
+        if (
+            global_pipegraph is not None
+            and (not isinstance(self, (InitialJob, _DownstreamNeedsMeChecker)))
+            and (not global_pipegraph.running)
+        ):
 
             global_pipegraph.add(self)
 
@@ -178,17 +186,14 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
             self, files, generating_function, resources, depend_on_function
         )
 
-        def do_unlink():
-            for fn in self.files:
-                if fn.exists():
-                    fn.unlink()
-
-        self.cleanup_job = _CleanupJob(self.job_id, do_unlink)
+        self.cleanup_job_class = _FileCleanupJob
 
     def is_temp_job(self):
         return True
 
-    def output_needed(self, runner):# yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
+    def output_needed(
+        self, runner
+    ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
         for downstream_id in runner.dag.neighbors(self.job_id):
             job = runner.jobs[downstream_id]
             if job.output_needed(runner):
@@ -222,7 +227,7 @@ class TempFileGeneratingJob(MultiTempFileGeneratingJob):
         return {str(of): hashers.hash_file(of) for of in self.files}
 
 
-class _CleanupJob(Job):
+class _FileCleanupJob(Job):
     """Jobs may register cleanup jobs that injected after their immediate downstreams.
     This encapsulates those
 
@@ -230,13 +235,15 @@ class _CleanupJob(Job):
 
     job_kind = JobKind.Cleanup
 
-    def __init__(self, parent_job_id, cleanup_function):
-        Job.__init__(self, ["CleanUp:" + parent_job_id], Resources.RunsHere)
-        self.parent_job_id = parent_job_id
-        self.cleanup_function = cleanup_function
+    def __init__(self, parent_job):
+        Job.__init__(self, ["CleanUp:" + parent_job.job_id], Resources.RunsHere)
+        self.parent_job = parent_job
 
     def run(self, _ignored_runner):
-        self.cleanup_function()
+        for fn in self.parent_job.files:
+            if fn.exists():
+                fn.unlink()
+
         return {self.outputs[0]: None}  # todo: optimize this awy?
 
 
