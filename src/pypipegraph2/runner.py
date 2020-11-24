@@ -6,6 +6,7 @@ import traceback
 import networkx
 from .util import escape_logging
 from .enums import JobKind, ValidationState, JobState
+from .jobs import InitialJob
 
 
 class JobStatus:
@@ -90,10 +91,6 @@ class Runner:
                         ] = downstream_needs_me_checker.outputs[0]
 
                         dag.add_edge(downstream_needs_me_checker.job_id, job_id)
-                        dag.add_edge(
-                            job_graph.initial_job.job_id,
-                            downstream_needs_me_checker.job_id,
-                        )
                         # part two - clone downstreams inputs:
                         # with special attention to temp jobs
                         # to avoid crosslinking
@@ -114,6 +111,12 @@ class Runner:
                     dag.add_edge(downstream_job_id, cleanup_job.job_id)
                     self.job_inputs[cleanup_job.job_id].add(downstream_job_id)
 
+        # now add an initial job, so we can cut off the evaluation properly
+        self.initial_job = InitialJob()
+        for job_id in self.jobs:
+            dag.add_edge(self.initial_job.job_id, job_id)
+            self.job_inputs[job_id].add(self.initial_job.job_id)
+        self.jobs[self.initial_job.job_id] = self.initial_job
         return dag
 
     def iter_job_non_temp_upstream_hull(self, job_id, dag):

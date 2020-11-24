@@ -42,7 +42,6 @@ class PyPipeGraph:
         paths: Optional[Dict[str, Union[Path, str]]] = None,
         run_mode: RunMode = default_run_mode(),
     ):
-        from .jobs import InitialJob
 
         self.cores = cores
         if log_dir:
@@ -65,8 +64,6 @@ class PyPipeGraph:
         self.outputs_to_job_ids = (
             {}
         )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
-        self.initial_job = InitialJob()
-        self.add(self.initial_job)
 
     def run(
         self, print_failures: bool = True, raise_on_job_error=True
@@ -173,7 +170,6 @@ class PyPipeGraph:
             signal.signal(signal.SIGHUP, self._old_signal_up)
 
     def add(self, job):
-        from .jobs import InitialJob
 
         for output in job.outputs:
             if output in self.outputs_to_job_ids:
@@ -191,9 +187,6 @@ class PyPipeGraph:
             ] = job.job_id  # todo: seperate this into two dicts?
         self.jobs[job.job_id] = job
         self.job_dag.add_node(job.job_id)
-        if not isinstance(job, InitialJob):
-            self.add_edge(self.initial_job, job)
-            self.job_inputs[job.job_id].add(self.initial_job.job_id)
 
     def add_edge(self, upstream_job, downstream_job):
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)

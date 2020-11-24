@@ -47,7 +47,7 @@ class Job:
         self.cleanup_job = None
         if (
             global_pipegraph is not None
-            and (not isinstance(self, (InitialJob, _DownstreamNeedsMeChecker)))
+            #and (not isinstance(self, (InitialJob, _DownstreamNeedsMeChecker)))
             and (not global_pipegraph.running)
         ):
 
