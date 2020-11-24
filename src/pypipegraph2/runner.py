@@ -72,7 +72,7 @@ class Runner:
         known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
         for job_id in reversed(known_job_ids):
             job = self.jobs[job_id]
-            if job.job_kind is JobKind.Temp:
+            if job.job_kind in (JobKind.Temp, JobKind.Loading):
                 for downstream_job_id in dag.successors(job_id):
                     # part one: add the 'does the downstream need me to calculate' check?
                     downstream_job = self.jobs[downstream_job_id]
@@ -118,7 +118,7 @@ class Runner:
         result = []
         for upstream_job_id in dag.predecessors(job_id):
             upstream_job = self.jobs[upstream_job_id]
-            if upstream_job.job_kind is JobKind.Temp:
+            if upstream_job.job_kind in (JobKind.Temp, JobKind.Loading):
                 result.extend(
                     self.iter_job_non_temp_upstream_hull(upstream_job_id, dag)
                 )

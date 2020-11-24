@@ -40,7 +40,6 @@ class Job:
             raise ValueError("Invalid output definition")
         self.outputs = sorted([str(x) for x in self.outputs])
         self.job_id = ":::".join(self.outputs)
-        self.cleanup_job = None
         self.readd()
 
     def readd(self):
@@ -749,3 +748,96 @@ class ParameterInvariant(Job):
         else:
             msg = "Unsupported type: %r" % type(obj).__name__
             raise TypeError(msg)
+
+
+class DataLoadingJob(Job):
+    job_kind = JobKind.Loading
+
+    def __init__(self, job_id, data_callback, depend_on_function=True):
+        self.depend_on_function = depend_on_function
+        self.callback = data_callback
+        super().__init__(job_id)
+
+    def readd(self):
+        if self.depend_on_function:
+            func_invariant = FunctionInvariant(self.callback, self.job_id)
+            self.depends_on(func_invariant)
+        super().readd()
+
+    def run(self, _runner, historical_output):
+        self.callback()
+        return {
+            self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
+        } # so the downstream get's invalidated
+
+        # todo: there is a judgment call here
+        # we could also invalidate on a hash based on the return of callback.
+        # (which is more naturally available in an AttributeLoadingJob
+        # that would be more inline with the 'only-recalc-if-the-input-actually-changed'
+        # philosopy.
+        # but it will cause false positives if you return things that have an instable str
+        # and it will cause false negatives if the callback is just for the side effects...
+        # option a) seperate into calculate and store, so that we always have the actual value?
+        # that's of course an API change compared to the pypipegraph. Hm.
+
+    def _output_needed(
+        self, runner
+    ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
+        for downstream_id in runner.dag.neighbors(self.job_id):
+            job = runner.jobs[downstream_id]
+            if job.output_needed(runner):
+                return True
+        False
+
+
+class AttributeLoadingJob(Job): # Todo: refactor with DataLoadingJob
+    job_kind = JobKind.Loading
+
+    def __init__(
+        self, job_id, object, attribute_name, data_callback, depend_on_function=True
+    ):
+        self.depend_on_function = depend_on_function
+        self.object = object
+        self.attribute_name = attribute_name
+        self.callback = data_callback
+        super().__init__(job_id)
+        self.cleanup_job_class = _AttributeCleanupJob
+
+    def readd(self): # Todo: refactor
+        if self.depend_on_function:
+            func_invariant = FunctionInvariant(self.callback, self.job_id)
+            self.depends_on(func_invariant)
+        super().readd()
+
+    def run(self, _runner, historical_output):
+        setattr(self.object, self.attribute_name, self.callback())
+        return {
+            self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
+        } # so the downstream get's invalidated 
+
+    def _output_needed(
+        self, runner
+    ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
+        for downstream_id in runner.dag.neighbors(self.job_id):
+            job = runner.jobs[downstream_id]
+            if job.output_needed(runner):
+                return True
+        False
+
+
+class _AttributeCleanupJob(Job):
+    """Jobs may register cleanup jobs that injected after their immediate downstreams.
+    This encapsulates those
+
+    """
+
+    job_kind = JobKind.Cleanup
+
+    def __init__(self, parent_job):
+        Job.__init__(self, ["CleanUp:" + parent_job.job_id], Resources.RunsHere)
+        self.parent_job = parent_job
+
+    def run(self, _ignored_runner, _historical_output):
+        delattr(self.parent_job.object, self.parent_job.attribute_name)
+
+        return {self.outputs[0]: None}  # todo: optimize this awy?

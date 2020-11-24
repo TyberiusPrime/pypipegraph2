@@ -93,6 +93,7 @@ class PyPipeGraph:
                     if print_failures:
                         msg = textwrap.indent(str(job_state.error), "\t")
                         logger.error(f"{job_id} failed.\n {escape_logging(msg)}")
+                        print(f"{job_id} failed.\n {escape_logging(msg)}")
                     if raise_on_job_error:
                         do_raise = True
             self.last_run_result = result

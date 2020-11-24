@@ -709,9 +709,11 @@ class TestPypipegraph2:
 
     def test_parameter_invariant(self, ppg_per_test, job_trace_log):
         params = ["a"]
-        jobA = ppg.ParameterInvariant('A', params)
-        def shu(): # so the functionInvariant does not bind params itself!
+        jobA = ppg.ParameterInvariant("A", params)
+
+        def shu():  # so the functionInvariant does not bind params itself!
             return params[0]
+
         jobB = ppg.FileGeneratingJob(
             "B", lambda of: counter("b") and of.write_text(shu())
         )
@@ -725,10 +727,77 @@ class TestPypipegraph2:
         assert Path("b").read_text() == "1"
 
         params[0] = "b"
-        jobA = ppg.ParameterInvariant('A', params) # the parameters get frozen when teh job is defined!
+        jobA = ppg.ParameterInvariant(
+            "A", params
+        )  # the parameters get frozen when teh job is defined!
         ppg.run()
         assert Path("B").read_text() == "b"
         assert Path("b").read_text() == "2"
         ppg.run()
         assert Path("B").read_text() == "b"
         assert Path("b").read_text() == "2"
+
+    def test_data_loading_job(self, ppg_per_test, job_trace_log):
+        self.store = []  # use attribute to avoid cuosure binding
+        try:
+            jobA = ppg.DataLoadingJob("A", lambda: self.store.append("A"))
+            jobB = ppg.FileGeneratingJob(
+                "B", lambda of: counter("b") and of.write_text(self.store[0])
+            )
+            jobB.depends_on(jobA)
+            assert len(self.store) == 0
+            ppg.run()
+            assert len(self.store) == 1
+            assert Path("B").read_text() == "A"
+            assert Path("b").read_text() == "1"
+            ppg.run()
+            assert len(self.store) == 1
+            assert Path("b").read_text() == "1"
+            jobB.depends_on(ppg.ParameterInvariant("C", "C"))
+            self.store.clear()  # so we can be sure the DataLoadingJob ran agin.
+            ppg.run()
+            assert len(self.store) == 1
+            assert Path("b").read_text() == "2"
+            assert Path("B").read_text() == "A"
+            ppg.run()
+
+            assert len(self.store) == 1
+            assert Path("b").read_text() == "2"
+            assert Path("B").read_text() == "A"
+            self.store.clear()
+            jobA = ppg.DataLoadingJob("A", lambda: self.store.append("B"))
+            ppg.run()
+            assert len(self.store) == 1
+            assert Path("b").read_text() == "3"
+            assert Path("B").read_text() == "B"
+
+        finally:
+            del self.store
+
+    def test_attribute_loading_job(self, ppg_per_test, job_trace_log):
+        class TestRecv:
+            def __init__(self):
+                self.job = ppg.AttributeLoadingJob(
+                    "A", self, "a_", lambda: counter("a") and "A"
+                )
+
+        a = TestRecv()
+        jobB = ppg.FileGeneratingJob("B", lambda of: counter("b") and of.write_text(a.a_))
+        jobB.depends_on(a.job)
+        ppg.run()
+        assert not hasattr(a, 'a_')
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        assert Path("a").read_text() == "1"
+        ppg.run()
+        assert not hasattr(a, 'a_')
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        assert Path("a").read_text() == "1"
+
+        a.job = ppg.AttributeLoadingJob("A", a, "a_", lambda: counter("a") and "B")
+        ppg.run()
+        assert Path("B").read_text() == "B"
+        assert Path("b").read_text() == "2"
+        assert Path("a").read_text() == "2"
+        assert not hasattr(a, 'a_')
