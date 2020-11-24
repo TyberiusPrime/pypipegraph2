@@ -79,22 +79,26 @@ class TestPypipegraph2:
         )
         jobC.depends_on(jobB)
         Path("counter").write_text("0")
+        logger.error("Run 1")
         ppg.run()
         assert Path("B").read_text() == "BBB"
         assert Path("C").read_text() == "CCC0"
         assert Path("outcount").read_text() == "0"
+        logger.error("Run 2 no rerun")
         ppg.run()
         assert Path("B").read_text() == "BBB"
         assert Path("C").read_text() == "CCC0"
         assert Path("outcount").read_text() == "0"
 
         Path("counter").write_text("1")
+        logger.error("Run 3 - no rerun")
         ppg.run()  # since the counter is *not* a dependency...
         assert Path("B").read_text() == "BBB"
         assert Path("C").read_text() == "CCC0"
         assert Path("outcount").read_text() == "0"
 
         Path("B").unlink()  # will make it rerun.
+        logger.error("Run 4 - return B but not C")
         ppg.run()
         assert Path("outcount").read_text() == "1"
         # but C was not rerun, since the B output did not change.
@@ -220,16 +224,27 @@ class TestPypipegraph2:
         assert Path("C").read_text() == "C0"
         assert Path("D").read_text() == "D0"
 
+        logger.error("2nd no op run")
+        ppg.run()
+        assert Path("A1").read_text() == "A1"
+        assert Path("A2").read_text() == "A2"
+        assert Path("B").read_text() == "B0"
+        assert Path("C").read_text() == "C0"
+        assert Path("D").read_text() == "D0"
+
         def a(files):
             files[0].write_text("A1a")
             files[1].write_text("A2")
 
         jobA = ppg.MultiFileGeneratingJob(["A1", "A2"], a)
+        logger.error("3rd run - run a, run c")
         ppg.run()
         assert Path("A1").read_text() == "A1a"
         assert Path("A2").read_text() == "A2"
-        assert Path("B").read_text() == "B0"  # does not get rewritten. It depends on A
-        assert Path("C").read_text() == "C1"  # c get's rewritte
+        assert Path("B").read_text() == "B0"  # does not get rewritten. It depends on A2
+        assert (
+            Path("C").read_text() == "C1"
+        )  # c get's rewritten, it depended on all of A
         assert Path("D").read_text() == "D0"
 
     def test_tempfile(self, ppg_per_test, trace_log):
@@ -248,13 +263,54 @@ class TestPypipegraph2:
         assert not Path("TA").exists()
         assert Path("B").exists()
         assert Path("B").read_text() == "B0A0"
-        logger.error("Second run")
+        logger.error("Second run - no rerun")
         ppg.run()
         assert not Path("TA").exists()
         assert Path("B").exists()
         assert Path("B").read_text() == "B0A0"
 
-    def test_tempfile_chained(self, ppg_per_test, trace_log):
+        Path("B").unlink()
+        logger.error("Third run - B output missing")
+        ppg.run()
+        assert not Path("TA").exists()
+        assert Path("B").exists()
+        assert Path("B").read_text() == "B1A1"
+
+    def test_tempfile_chained_invalidate_leaf(self, ppg_per_test, trace_log):
+        jobA = ppg.TempFileGeneratingJob(
+            "TA", lambda of: of.write_text("A" + counter("a")), depend_on_function=False
+        )
+        jobB = ppg.TempFileGeneratingJob(
+            "TB",
+            lambda of: of.write_text("B" + counter("b") + Path("TA").read_text()),
+            depend_on_function=False,
+        )
+        jobC = ppg.FileGeneratingJob(
+            "C",
+            lambda of: of.write_text("C" + counter("c") + Path("TB").read_text()),
+            depend_on_function=False,
+        )
+        jobC.depends_on(jobB)
+        jobB.depends_on(jobA)
+        logger.error("First run")
+        ppg.run()
+        assert not Path("TA").exists()
+        assert not Path("TB").exists()
+        assert Path("C").read_text() == "C0B0A0"
+        logger.error("Second No op run.")
+        ppg.run()
+        assert Path("C").read_text() == "C0B0A0"
+        assert not Path("TA").exists()
+        assert not Path("TB").exists()
+
+        jobC.depends_on(ppg.FunctionInvariant(lambda: 53, "lambda_52"))
+        logger.error("Third run - rerun because of FI")
+        ppg.run()
+        assert Path("C").read_text() == "C1B1A1"
+        assert not Path("TA").exists()
+        assert not Path("TB").exists()
+
+    def test_tempfile_chained_invalidate_intermediate(self, ppg_per_test, trace_log):
         jobA = ppg.TempFileGeneratingJob(
             "TA", lambda of: of.write_text("A" + counter("a")), depend_on_function=False
         )
@@ -282,13 +338,13 @@ class TestPypipegraph2:
         assert not Path("TB").exists()
 
         jobB.depends_on(ppg.FunctionInvariant(lambda: 53, "lambda_52"))
-        logger.error("Third run")
+        logger.error("Third run - rerun because of FI")
         ppg.run()
         assert Path("C").read_text() == "C1B1A1"
         assert not Path("TA").exists()
         assert not Path("TB").exists()
 
-    def test_just_tempfiles(self, ppg_per_test, trace_log):
+    def test_just_a_tempfile(self, ppg_per_test, trace_log):
         jobA = ppg.TempFileGeneratingJob(
             "TA", lambda of: of.write_text("A" + counter("a"))
         )
@@ -404,7 +460,7 @@ class TestPypipegraph2:
         assert Path("C").read_text() == "C0B"
         assert Path("a").read_text() == "2"
 
-    def test_depending_on_two_temp_jobs_but_only_one_invalidated(self):
+    def test_depending_on_two_temp_jobs_but_only_one_invalidated(self, ppg_per_test):
         jobA = ppg.TempFileGeneratingJob(
             "A",
             lambda of: of.write_text("A" + counter("a")),
@@ -432,13 +488,23 @@ class TestPypipegraph2:
             "B",
             lambda of: counter("b") and of.write_text("BB"),
             depend_on_function=False,
-        )
+        )  # not changing the function does not trigger a change
 
         ppg.run()
+        assert Path("C").read_text() == "C0BA0"
+        assert Path("a").read_text() == "1"
+
+        jobB = ppg.TempFileGeneratingJob(
+            "B",
+            lambda of: counter("b") and of.write_text("BB"),
+            depend_on_function=True,
+        )  # but if you have a function invariant!
+        ppg.run()
+
         assert Path("C").read_text() == "C1BBA1"
         assert Path("a").read_text() == "2"
 
-    def test_tempjob_serving_two(self):
+    def test_tempjob_serving_two(self, ppg_per_test):
         jobA = ppg.TempFileGeneratingJob(
             "TA",
             lambda of: of.write_text("TA" + counter("a")),
@@ -471,7 +537,7 @@ class TestPypipegraph2:
         assert Path("a").read_text() == "2"
         ppg.run()
         assert Path("B").read_text() == "BTA1"
-        assert Path("C").read_text() == "C0TA1"
+        assert Path("C").read_text() == "C1TA1"
         assert Path("a").read_text() == "2"
         Path("B").unlink()
         Path("C").unlink()
@@ -479,6 +545,77 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "BTA2"
         assert Path("C").read_text() == "C2TA2"
         assert Path("a").read_text() == "3"
+
+    def test_two_temp_jobs(self, ppg_per_test, trace_log):
+        """test_two_temp_jobs
+        This tests one of the 'unnecessary' temp job reruns.
+        We have these jobs
+        Fi:TA -> TA -> C
+                       ^
+        Fi:TB -> TB    ->  D
+
+        which means, after the graph rewriting,
+        TA and TB depend on each other's FunctionInvariants
+        (TempJobs steal the invariants from their downstreams,
+        so that whenever the downstream is triggered,
+        they are as well, and before hand.)
+
+        If now Fi:TB triggers, we must recalculate TB,
+        and we also recalculate TA.
+        But if TB does not not lead to C and D's invalidation,
+        we have recalculated TA unnecessarily.
+
+        But I can't figure out a better way to do it.
+        Handling TempJobs by anything other than graph rewriting has
+        proven to be an absolute mess of a conditional event loop that
+        I'm not capable of cutting through.
+
+        The graph rewriting is elegant and makes the do-the-jobs event loop
+        almost trivial. It fails on this particular task though.
+        Not that it is given that a back-and-forth graph walking approach
+        (ie. when C is triggered, go back and (re)do TA) would be able to
+        actually avoid the issue.
+        """
+
+        jobA = ppg.TempFileGeneratingJob(
+            "TA", lambda of: counter("a") and of.write_text("A")
+        )
+        jobB = ppg.TempFileGeneratingJob(
+            "TB", lambda of: counter("b") and of.write_text("B")
+        )
+        jobC = ppg.FileGeneratingJob(
+            "C",
+            lambda of: counter("c")
+            and of.write_text("C" + Path("TA").read_text() + Path("TB").read_text()),
+        )
+        jobD = ppg.FileGeneratingJob(
+            "D", lambda of: counter("d") and of.write_text("D" + Path("TB").read_text())
+        )
+        jobC.depends_on(jobA, jobB)
+        jobD.depends_on(jobB)
+        ppg.run()
+        assert Path("D").read_text() == "DB"
+        assert Path("C").read_text() == "CAB"
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        ppg.run()
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        assert Path("c").read_text() == "1"
+        assert Path("d").read_text() == "1"
+
+        # now trigger TB invalidation, but not C (or D) invalidation
+        logger.info("now change FunctionInvariant:TB")
+        jobB = ppg.TempFileGeneratingJob(
+            "TB", lambda of: counter("b") and True and of.write_text("B")
+        )
+        ppg.run()
+        assert Path("b").read_text() == "2"  # we trigger that one
+        assert (
+            Path("a").read_text() == "2"
+        )  # the FunctionInvariant:TB was pulled into TA's upstream by the rewrite
+        assert Path("c").read_text() == "1"  # but this one was isolated
+        assert Path("d").read_text() == "1"  # as was this one was isolated
 
     def test_cycles(self):
         jobA = ppg.FileGeneratingJob("A", lambda of: of.write_text("Done"))

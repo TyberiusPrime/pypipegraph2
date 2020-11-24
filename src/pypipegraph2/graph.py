@@ -11,8 +11,8 @@ from pathlib import Path
 from loguru import logger
 from . import exceptions
 from .runner import Runner, JobState
-from enum import Enum
 from .util import escape_logging
+from .enums import RunMode
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
@@ -20,12 +20,6 @@ logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
 
 class ALL_CORES:
     pass
-
-
-class RunMode(Enum):
-    INTERACTIVE = 1  # certain redefinitions: FatalGraphException, interactive console, ctrl-c does not work
-    NOTEBOOK = 2  # certain redefinitions: warning, no interactive console (todo: gui), control-c,/abort works TODO
-    NONINTERACTIVE = 3  # such as testing, redefinitions like interactive, but no gui, ctrl-c works TODO
 
 
 def default_run_mode():
@@ -48,6 +42,8 @@ class PyPipeGraph:
         paths: Optional[Dict[str, Union[Path, str]]] = None,
         run_mode: RunMode = default_run_mode(),
     ):
+        from .jobs import InitialJob
+
         self.cores = cores
         if log_dir:
             self.log_dir = Path(log_dir)
@@ -58,17 +54,27 @@ class PyPipeGraph:
         self.paths = {k: Path(v) for (k, v) in paths} if paths else None
         self.run_mode = run_mode
 
-        self.jobs = {}
-        self.job_dag = networkx.DiGraph()
-        self.job_inputs = collections.defaultdict(set)
+        self.jobs = {}  # the job objects, by id
+        self.job_dag = (
+            networkx.DiGraph()
+        )  # a graph. Nodes: job_ids, edges -> must be done before
+        self.job_inputs = collections.defaultdict(
+            set
+        )  # necessary inputs (ie. outputs of other jobs)
         self.running = False
-        self.outputs_to_job_ids = {}
+        self.outputs_to_job_ids = {}  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
+        self.initial_job = InitialJob()
+        self.add(self.initial_job)
 
     def run(
         self, print_failures: bool = True, raise_on_job_error=True
     ) -> Dict[str, JobState]:
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
+            print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
             raise exceptions.NotADag()
+        else:
+            # print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
+            pass
         if self.log_dir:
             self.log_dir.mkdir(exist_ok=True, parents=True)
             logger.add(
@@ -165,6 +171,8 @@ class PyPipeGraph:
             signal.signal(signal.SIGHUP, self._old_signal_up)
 
     def add(self, job):
+        from .jobs import InitialJob
+
         for output in job.outputs:
             if output in self.outputs_to_job_ids:
                 # already being done somewhere else
@@ -181,6 +189,9 @@ class PyPipeGraph:
             ] = job.job_id  # todo: seperate this into two dicts?
         self.jobs[job.job_id] = job
         self.job_dag.add_node(job.job_id)
+        if not isinstance(job, InitialJob):
+            self.add_edge(self.initial_job, job)
+            self.job_inputs[job.job_id].add(self.initial_job.job_id)
 
     def add_edge(self, upstream_job, downstream_job):
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)

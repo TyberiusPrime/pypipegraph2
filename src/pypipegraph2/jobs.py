@@ -7,22 +7,12 @@ import types
 from typing import Union, List, Dict, Optional, Tuple, Callable
 from loguru import logger
 from pathlib import Path
-from enum import Enum, auto
 from io import StringIO
 import networkx
 from . import hashers, exceptions
-from .runner import InvalidationState
+from .enums import JobKind, Resources
 
 module_type = type(sys)
-
-
-class Resources(Enum):
-    SingleCore = "SingleCore"
-    AllCores = "AllCores"
-    MemoryHog = "MemoryHog"
-    Exclusive = "Exclusive"
-    RateLimited = "RateLimited"  # todo
-    RunsHere = "RunsHere"  # in this process
 
 
 class Job:
@@ -34,7 +24,6 @@ class Job:
         outputs: Union[str, List[str], Dict[str, str]],
         resources: Resources = Resources.SingleCore,
     ):
-        from . import global_pipegraph
 
         self.resources = resources
         if isinstance(outputs, str):
@@ -51,7 +40,10 @@ class Job:
         self.outputs = sorted([str(x) for x in self.outputs])
         self.job_id = ":::".join(self.outputs)
         self.cleanup_job = None
-        global_pipegraph.add(self)
+        if not isinstance(self, (InitialJob, _DownstreamNeedsMeChecker)):
+            from . import global_pipegraph
+
+            global_pipegraph.add(self)
 
     def depends_on(
         self,
@@ -82,7 +74,7 @@ class Job:
     def is_temp_job(self):
         return False
 
-    def output_needed(self):
+    def output_needed(self, _ignored_runner):
         False
 
     def invalidated(self):
@@ -90,7 +82,37 @@ class Job:
         pass
 
 
+class InitialJob(Job):
+    job_kind = JobKind.Invariant
+
+    def __init__(self):
+        Job.__init__(self, "%%%initial%%%")
+
+    def run(self, _ignored_runner):
+        return {self.job_id: "I"}
+
+
+class _DownstreamNeedsMeChecker(Job):
+    job_kind = JobKind.Invariant
+
+    def __init__(self, job_to_check):
+        self.job_to_check = job_to_check
+        Job.__init__(self, f"_DownstreamNeedsMeChecker_{job_to_check.job_id}")
+
+    def output_needed(self, _ignored_runner):
+        return True
+
+    def run(self, runner):
+        if self.job_to_check.output_needed(runner):
+            return {self.job_id: "ExplodePlease"}
+        else:
+            return {self.job_id: "IgnorePlease"}
+            return {}
+
+
 class MultiFileGeneratingJob(Job):
+    job_kind = JobKind.Output
+
     def __init__(
         self,
         files: List[Path],  # todo: extend type attribute to allow mapping
@@ -106,7 +128,7 @@ class MultiFileGeneratingJob(Job):
             func_invariant = FunctionInvariant(self.generating_function, self.job_id)
             self.depends_on(func_invariant)
 
-    def run(self, _was_invalidated):
+    def run(self, _ignored_runner):
         for fn in self.files:  # we rebuild anyway!
             if fn.exists():
                 fn.unlink()
@@ -115,7 +137,7 @@ class MultiFileGeneratingJob(Job):
         )
         return {of.name: hashers.hash_file(of) for of in self.files}
 
-    def output_needed(self):
+    def output_needed(self, _ignored_runner):
         for fn in self.files:
             if not fn.exists():
                 return True
@@ -138,7 +160,7 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
             self, [output_filename], generating_function, resources, depend_on_function
         )
 
-    def run(self, _was_invalidated):
+    def run(self, _ignored_runner):
         """Call the generating function with just the one filename"""
         self.generating_function(self.files[0])
         return {str(of): hashers.hash_file(of) for of in self.files}
@@ -166,29 +188,23 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
     def is_temp_job(self):
         return True
 
-    def output_needed(self):
+    def output_needed(self, runner):# yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
+        for downstream_id in runner.dag.neighbors(self.job_id):
+            job = runner.jobs[downstream_id]
+            if job.output_needed(runner):
+                return True
         False
 
-    def run_needed(self, runner):
-        # invariants: true
-        # FileGeneratingJob: True/False, depending on whether the output existed
-        # TempJobs: True/False/CantTellYet.
-        downstream = list(runner.job_graph.job_dag.neighbors(self.job_id))
-        if not downstream:
-            return False
-        for downstream_job_id in downstream:
-            if (
-                runner.job_stati[downstream_job_id].invalidation_state
-                is InvalidationState.Invalidated
-            ):
-                return True
-            downstream_job = runner.job_graph.jobs[downstream_job_id]
-            if downstream_job.run_needed(runner):
-                return True
-        return False
+    def output_exists(self):
+        for fn in self.files:
+            if not fn.exists():
+                return False
+        return True
 
 
 class TempFileGeneratingJob(MultiTempFileGeneratingJob):
+    job_kind = JobKind.Temp
+
     def __init__(
         self,
         output_filename: Union[Path, str],
@@ -200,7 +216,7 @@ class TempFileGeneratingJob(MultiTempFileGeneratingJob):
             self, [output_filename], generating_function, resources, depend_on_function
         )
 
-    def run(self, _was_invalidated):
+    def run(self, _ignored_runner):
         """Call the generating function with just the one filename"""
         self.generating_function(self.files[0])
         return {str(of): hashers.hash_file(of) for of in self.files}
@@ -212,17 +228,21 @@ class _CleanupJob(Job):
 
     """
 
+    job_kind = JobKind.Cleanup
+
     def __init__(self, parent_job_id, cleanup_function):
         Job.__init__(self, ["CleanUp:" + parent_job_id], Resources.RunsHere)
         self.parent_job_id = parent_job_id
         self.cleanup_function = cleanup_function
 
-    def run(self, _was_invalidated):
+    def run(self, _ignored_runner):
         self.cleanup_function()
         return {self.outputs[0]: None}  # todo: optimize this awy?
 
 
 class FunctionInvariant(Job):
+    job_kind = JobKind.Invariant
+
     def __init__(
         self, function, name=None
     ):  # todo, must support the inverse calling with name, function
@@ -235,10 +255,10 @@ class FunctionInvariant(Job):
         self.verify_arguments(name, function)
         Job.__init__(self, [name], Resources.RunsHere)
 
-    def output_needed(self):
+    def output_needed(self, _ignored_runner):
         return True
 
-    def run(self, _was_invalidated):
+    def run(self, _ignored_runner):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
         source, is_python_func = self.get_source()
