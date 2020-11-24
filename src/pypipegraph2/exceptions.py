@@ -22,3 +22,7 @@ class JobContractError(PPGException):
 
 class RunFailed(PPGException):
     pass
+
+
+class _RunAgain(PPGException):
+    pass

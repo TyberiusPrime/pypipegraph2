@@ -13,6 +13,7 @@ from . import exceptions
 from .runner import Runner, JobState
 from .util import escape_logging
 from .enums import RunMode
+from .exceptions import _RunAgain
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
@@ -60,7 +61,6 @@ class PyPipeGraph:
         self.job_inputs = collections.defaultdict(
             set
         )  # necessary inputs (ie. outputs of other jobs)
-        self.running = False
         self.outputs_to_job_ids = (
             {}
         )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
@@ -85,8 +85,19 @@ class PyPipeGraph:
             result = None
             if self.run_mode == RunMode.INTERACTIVE:
                 self._install_signals()
-            self.running = True
-            result = Runner(self).run()
+            history = self.load_historical()
+            max_runs = 5
+            while True:
+                max_runs -=1 
+                if max_runs == 0:
+                    raise ValueError("endless loop")
+                try:
+                    result = Runner(self, history).run()
+                    self.update_history(result, history)
+                    break
+                except _RunAgain as e:
+                    self.update_history(e.args[0], history)
+                    pass
             do_raise = False
             for job_id, job_state in result.items():
                 if job_state.state == JobState.Failed:
@@ -101,21 +112,26 @@ class PyPipeGraph:
                 raise exceptions.RunFailed()
             return result
         finally:
-            if result is not None:
-                new_history = {
-                    job_id: (
-                        result[job_id].updated_input,
-                        result[job_id].updated_output,
-                    )
-                    for job_id in result
-                }
-                self.save_historical(new_history)
-            self.running = False
             if print_failures:
                 self._print_failures()
             if self.run_mode == RunMode.INTERACTIVE:
                 self._restore_signals()
             logger.trace("Run is done")
+
+    def update_history(self, job_results, history):
+        # we must keep the history of jobs unseen in this run.
+        # firstly to allow partial runs
+        # and second: to allow JobGeneratingJob to not always run,
+        # but only if their input changed
+        new_history = history# .copy() don't copy. we reuse this in the subsequent runs 
+        new_history.update({
+            job_id: (
+                job_results[job_id].updated_input,
+                job_results[job_id].updated_output,
+            )
+            for job_id in job_results
+        })
+        self.save_historical(new_history)
 
     def _get_history_fn(self):
         fn = Path(sys.argv[0]).name

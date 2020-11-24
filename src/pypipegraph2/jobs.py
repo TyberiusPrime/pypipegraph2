@@ -49,8 +49,7 @@ class Job:
         """
         from . import global_pipegraph
 
-        if not global_pipegraph.running:
-            global_pipegraph.add(self)
+        global_pipegraph.add(self)
 
     def depends_on(
         self,
@@ -768,7 +767,7 @@ class DataLoadingJob(Job):
         self.callback()
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
-        } # so the downstream get's invalidated
+        }  # so the downstream get's invalidated
 
         # todo: there is a judgment call here
         # we could also invalidate on a hash based on the return of callback.
@@ -790,7 +789,7 @@ class DataLoadingJob(Job):
         False
 
 
-class AttributeLoadingJob(Job): # Todo: refactor with DataLoadingJob
+class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
     job_kind = JobKind.Loading
 
     def __init__(
@@ -803,7 +802,7 @@ class AttributeLoadingJob(Job): # Todo: refactor with DataLoadingJob
         super().__init__(job_id)
         self.cleanup_job_class = _AttributeCleanupJob
 
-    def readd(self): # Todo: refactor
+    def readd(self):  # Todo: refactor
         if self.depend_on_function:
             func_invariant = FunctionInvariant(self.callback, self.job_id)
             self.depends_on(func_invariant)
@@ -813,16 +812,7 @@ class AttributeLoadingJob(Job): # Todo: refactor with DataLoadingJob
         setattr(self.object, self.attribute_name, self.callback())
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
-        } # so the downstream get's invalidated 
-
-    def _output_needed(
-        self, runner
-    ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
-        for downstream_id in runner.dag.neighbors(self.job_id):
-            job = runner.jobs[downstream_id]
-            if job.output_needed(runner):
-                return True
-        False
+        }  # so the downstream get's invalidated
 
 
 class _AttributeCleanupJob(Job):
@@ -841,3 +831,27 @@ class _AttributeCleanupJob(Job):
         delattr(self.parent_job.object, self.parent_job.attribute_name)
 
         return {self.outputs[0]: None}  # todo: optimize this awy?
+
+
+class JobGeneratingJob(Job):
+    job_kind = JobKind.JobGenerating
+
+    def __init__(self, job_id, callback, depend_on_function=True):
+        self.depend_on_function = depend_on_function
+        self.callback = callback
+        super().__init__(job_id)
+
+    def readd(self):  # Todo: refactor
+        if self.depend_on_function:
+            func_invariant = FunctionInvariant(self.callback, self.job_id)
+            self.depends_on(func_invariant)
+        super().readd()
+
+    def output_needed(self, _ignored_runner):
+        return False
+
+    def run(self, _runner, historical_output):
+        self.callback()
+        return {
+            self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
+        }  # so the downstream get's invalidated

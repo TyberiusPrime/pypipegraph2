@@ -37,6 +37,7 @@ class JobKind(Enum):
     Temp = auto()
     Cleanup = auto()
     Loading = auto()
+    JobGenerating = auto()
 
 
 class RunMode(Enum):

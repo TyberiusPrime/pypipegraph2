@@ -3,8 +3,6 @@ Open stuff
 	- Invariant drift (ie. replacing with new invariant, but not triggering invalidation)
 	- using invariantDrift instead of 'ExplodePlease'
 	- mu-mu-mu-mu-multicore
-	- data loading jobs
-	- attribute loading jobs
 	- JobGeneratingJob
 	- DependencyInjectionJob (do we really need these still?)
 	- FinalJobs (do we support these still)
@@ -12,13 +10,14 @@ Open stuff
 	- CachedDataLoadingJobs
 	- CachedAttributeLoadingJobs
 	- MemMappedJobs (did we ever use these?
-	- TempFilePlus jobs??
+	- TempFilePlus jobs?? don't think we're using them *anywhere*
 	- The call() syntax
 	- magic turn-notebook-cell-into-job-thing
-	- licence
 	- CombinedPlotJob?
 	- notebook jobs?
 	- porting my million test cases
 	- robustness when the 
 	- job renaming support
-	- generall api polishing
+	- general api polishing
+	- tests depending on partial MultiTempfile output 
+	- licence - mit again.

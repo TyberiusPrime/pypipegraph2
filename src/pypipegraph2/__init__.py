@@ -4,6 +4,7 @@ __version__ = "0.1"
 from pathlib import Path
 import logging
 from loguru import logger
+import contextlib
 from .graph import PyPipeGraph, ALL_CORES
 from .jobs import *  # TODO
 from .exceptions import *  # TODO
@@ -35,3 +36,14 @@ def job_trace(msg):
 
 
 logger.job_trace = job_trace
+
+@contextlib.contextmanager
+def _with_changed_global_pipegraph(new):
+    global global_pipegraph
+    old = global_pipegraph
+    try:
+        global_pipegraph = new
+        yield new
+    finally:
+        global_pipegraph = old
+

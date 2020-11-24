@@ -7,6 +7,7 @@ import networkx
 from .util import escape_logging
 from .enums import JobKind, ValidationState, JobState
 from .jobs import InitialJob
+from .exceptions import _RunAgain
 
 
 class JobStatus:
@@ -31,39 +32,40 @@ class JobStatus:
 
 
 class Runner:
-    def __init__(self, job_graph):
+    def __init__(self, job_graph, history):
+        from . import _with_changed_global_pipegraph
         logger.job_trace("Runner.__init__")
-        self.jobs = job_graph.jobs.copy()
-        self.job_inputs = job_graph.job_inputs.copy()
-        self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
+        with _with_changed_global_pipegraph(JobCollector()):
+            self.jobs = job_graph.jobs.copy()
+            self.job_inputs = job_graph.job_inputs.copy()
+            self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
 
-        flat_before = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
-        self.dag = self.extend_dag(job_graph)
-        flat_after = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
-        import json
+            flat_before = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
+            self.dag = self.extend_dag(job_graph)
+            flat_after = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
+            import json
 
-        assert flat_before == flat_after
-        print(
-            "dag ",
-            json.dumps(
-                networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
-            ),
-        )
-
-        if not networkx.algorithms.is_directed_acyclic_graph(self.dag):
-            raise exceptions.NotADag("Extend_dag error")
-        self.job_states = {}
-
-        history = job_graph.load_historical()
-        for job_id in self.jobs:
-            s = JobStatus()
-            s.historical_input, s.historical_output = history.get(
-                job_id, ({}, {})
-            )  # todo: support renaming jobs.
-            logger.trace(
-                f"Loaded history for {job_id} {len(s.historical_input)}, {len(s.historical_output)}"
+            assert flat_before == flat_after
+            print(
+                "dag ",
+                json.dumps(
+                    networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
+                ),
             )
-            self.job_states[job_id] = s
+
+            if not networkx.algorithms.is_directed_acyclic_graph(self.dag):
+                raise exceptions.NotADag("Extend_dag error")
+            self.job_states = {}
+
+            for job_id in self.jobs:
+                s = JobStatus()
+                s.historical_input, s.historical_output = history.get(
+                    job_id, ({}, {})
+                )  # todo: support renaming jobs.
+                logger.trace(
+                    f"Loaded history for {job_id} {len(s.historical_input)}, {len(s.historical_output)}"
+                )
+                self.job_states[job_id] = s
 
     def extend_dag(self, job_graph):
         from .jobs import _DownstreamNeedsMeChecker
@@ -127,12 +129,17 @@ class Runner:
         return result
 
     def run(self):
+        from . import _with_changed_global_pipegraph, global_pipegraph
+        job_count = len(global_pipegraph.jobs) # track if new jobs are being created
+
         logger.job_trace("Runner.__run__")
 
         self.output_hashes = {}
         self.new_history = {}  # what are the job outputs this time.
 
-        job_ids_topological = list(networkx.algorithms.dag.topological_sort(self.dag))
+        job_ids_topological = list(
+            networkx.algorithms.dag.topological_sort(self.dag)
+        )
 
         def is_initial(job_id):
             return (
@@ -160,6 +167,12 @@ class Runner:
                 self.handle_job_failed(*ev[1])
             else:
                 raise NotImplementedError(ev[0])
+        if len(global_pipegraph.jobs) != job_count:
+            logger.job_trace(f"created new jobs. _RunAgain issued {len(global_pipegraph.jobs)} != {job_count}")
+            for job_id in global_pipegraph.jobs:
+                if not job_id in self.jobs:
+                    logger.job_trace(f"new job {job_id}")
+            raise _RunAgain(self.job_states)
         logger.job_trace("Left runner.run()")
         return self.job_states
 
@@ -167,7 +180,7 @@ class Runner:
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
         # record our success
-        logger.job_trace(f"\t{escape_logging(str(job_outputs)[:50])}...")
+        logger.job_trace(f"\t{escape_logging(str(job_outputs)[:500])}...")
         for name, hash in job_outputs.items():
             if name not in job.outputs:
                 job_state.error = exceptions.JobContractError(
@@ -229,7 +242,9 @@ class Runner:
                     if len(downstream_state.updated_input) < len(
                         downstream_state.historical_input
                     ):
-                        logger.job_trace(f"\t\t\thistorical_input {downstream_state.historical_input.keys()}")
+                        logger.job_trace(
+                            f"\t\t\thistorical_input {downstream_state.historical_input.keys()}"
+                        )
                         logger.job_trace("\t\t\tinput disappeared -> invalidate")
                         downstream_state.validation_state = ValidationState.Invalidated
                         self.push_event("JobReady", (downstream_id,), 3)
@@ -328,3 +343,18 @@ class Runner:
                 if self.job_has_non_temp_somewhere_downstream(downstream_id):
                     return True
         return False
+
+
+class JobCollector:
+    def __init__(self):
+        self.clear()
+
+    def add(self, job):
+        self.jobs[job] = job
+
+    def add_edge(self, upstream_id, downstream_id):
+        self.edges.add((upstream_id, downstream_id))
+
+    def clear(self):
+        self.jobs = {}
+        self.edges = set()

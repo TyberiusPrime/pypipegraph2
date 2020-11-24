@@ -1,0 +1,1 @@
+{'FunctionInvariant:B': {'source': ('ppg.FileGeneratingJob("B", lambda of: counter("b") and of.write_text("B"))', True), (3, 8, 6, 'final', 0): (("0\tLOAD_GLOBAL\t0\t(counter)\nLOAD_CONST\t1\t('b')\nCALL_FUNCTION\t1\nJUMP_IF_FALSE_OR_POP\t16\nLOAD_FAST\t0\t(of)\nLOAD_METHOD\t1\t(write_text)\nLOAD_CONST\t2\t('B')\nCALL_METHOD\t1\n16\tRETURN_VALUE\n",), '')}

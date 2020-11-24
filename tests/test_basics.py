@@ -782,15 +782,17 @@ class TestPypipegraph2:
                 )
 
         a = TestRecv()
-        jobB = ppg.FileGeneratingJob("B", lambda of: counter("b") and of.write_text(a.a_))
+        jobB = ppg.FileGeneratingJob(
+            "B", lambda of: counter("b") and of.write_text(a.a_)
+        )
         jobB.depends_on(a.job)
         ppg.run()
-        assert not hasattr(a, 'a_')
+        assert not hasattr(a, "a_")
         assert Path("B").read_text() == "A"
         assert Path("b").read_text() == "1"
         assert Path("a").read_text() == "1"
         ppg.run()
-        assert not hasattr(a, 'a_')
+        assert not hasattr(a, "a_")
         assert Path("B").read_text() == "A"
         assert Path("b").read_text() == "1"
         assert Path("a").read_text() == "1"
@@ -800,4 +802,54 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "B"
         assert Path("b").read_text() == "2"
         assert Path("a").read_text() == "2"
-        assert not hasattr(a, 'a_')
+        assert not hasattr(a, "a_")
+
+    def test_job_generating(self, ppg_per_test, job_trace_log):
+        def inner(): # don't keep it inside, or the FunctionInvariant will trigger each time.
+            counter("a")
+            ppg.FileGeneratingJob("B", lambda of: counter("b") and of.write_text("B"))
+
+
+        def gen():
+            return ppg.JobGeneratingJob("A", inner)
+
+        gen()
+        ppg.run()
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        assert Path("B").read_text() == "B"
+
+        # no rerun
+        ppg.new()
+        gen()
+        ppg.run()
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        assert Path("B").read_text() == "B"
+        ppg.new()
+        jobA = gen()
+        jobA.depends_on(ppg.ParameterInvariant("PA", "a"))
+        ppg.run()
+        assert Path("a").read_text() == "2"
+        assert Path("b").read_text() == "1"  # this does not mean that B get's rerun.
+        assert Path("B").read_text() == "B"
+
+        ppg.new()
+        Path("B").unlink()
+        gen()
+        jobA.depends_on(ppg.ParameterInvariant("PA", "a"))
+        ppg.run()
+        assert (
+            Path("a").read_text() == "2"
+        )  # still no rerun - input to A didn't change!
+        assert Path("b").read_text() == "1"  # this does not mean that B get's rerun.
+        assert not Path("B").exists()
+
+        ppg.new()
+        gen()
+        ppg.run()  # missing ParameterInvariant triggers A to run
+        assert (
+            Path("a").read_text() == "3"
+        )  # still no rerun - input to A didn't change!
+        assert Path("b").read_text() == "2"  # this does not mean that B get's rerun.
+        assert Path("B").read_text() == "B"
