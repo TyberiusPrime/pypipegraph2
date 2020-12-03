@@ -626,8 +626,17 @@ class TestPypipegraph2:
         with pytest.raises(ppg.exceptions.NotADag):
             ppg.run()
 
-    def test_jobs_run_in_different_pids(self):
-        raise NotImplementedError()
+    def test_jobs_run_in_different_pids(self, ppg_per_test):
+        import os
+
+        pid_here = os.getpid()
+        a = ppg.FileGeneratingJob("A", lambda of: of.write_text(str(os.getpid())))
+        b = ppg.FileGeneratingJob("B", lambda of: of.write_text(str(os.getpid())))
+        ppg.run()
+        pid_a = Path("A").read_text()
+        pid_b = Path("B").read_text()
+        assert pid_a != pid_b
+        assert pid_a != pid_here
 
     def test_job_redefinition(self):
         raise NotImplementedError()

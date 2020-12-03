@@ -11,7 +11,7 @@ from pathlib import Path
 from loguru import logger
 from . import exceptions
 from .runner import Runner, JobState
-from .util import escape_logging
+from .util import escape_logging, CPUs
 from .enums import RunMode
 from .exceptions import _RunAgain
 
@@ -44,7 +44,10 @@ class PyPipeGraph:
         run_mode: RunMode = default_run_mode(),
     ):
 
-        self.cores = cores
+        if cores is ALL_CORES:
+            self.cores = CPUs()
+        else:
+            self.cores = cores
         if log_dir:
             self.log_dir = Path(log_dir)
         else:

@@ -9,6 +9,7 @@ from .util import escape_logging
 from .enums import JobKind, ValidationState, JobState
 from .jobs import InitialJob
 from .exceptions import _RunAgain
+from .parallel import CoreLock
 import threading
 
 
@@ -46,6 +47,7 @@ class Runner:
             self.jobs = job_graph.jobs.copy()
             self.job_inputs = job_graph.job_inputs.copy()
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
+            self.core_lock = CoreLock(job_graph.cores)
 
             flat_before = networkx.readwrite.json_graph.node_link_data(
                 job_graph.job_dag

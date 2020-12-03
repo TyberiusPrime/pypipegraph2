@@ -1,4 +1,6 @@
 from __future__ import annotations
+import multiprocessing
+import os
 import dis
 import re
 import sys
@@ -135,6 +137,7 @@ class MultiFileGeneratingJob(Job):
         self.depend_on_function = depend_on_function
         Job.__init__(self, files, resources)
         self.files = [Path(x) for x in self.outputs]
+        self._single_file = False
 
     def readd(self):
         if self.depend_on_function:
@@ -142,14 +145,49 @@ class MultiFileGeneratingJob(Job):
             self.depends_on(func_invariant)
         super().readd()
 
-    def run(self, _ignored_runner, _historical_output):
+    def run(self, runner, _historical_output):
         for fn in self.files:  # we rebuild anyway!
             if fn.exists():
                 fn.unlink()
-        self.generating_function(
-            self.mapped_outputs if self.mapped_outputs else self.files
-        )
-        return {of.name: hashers.hash_file(of) for of in self.files}
+        if self.resources in (
+            Resources.SingleCore,
+            Resources.AllCores,
+            Resources.Exclusive,
+        ):
+            c = self.resources.to_number(runner.core_lock.max_cores)
+            logger.info(f'cores: {c}, max: {runner.core_lock.max_cores}')
+            with runner.core_lock.using(
+                c
+            ):
+                que = multiprocessing.Queue()
+                logger.job_trace(f"Forking for {self.job_id}")
+                p = multiprocessing.Process(target=self._inner_run, args=(que,))
+                p.start()
+                p.join()
+                res = que.get()
+                if isinstance(res, Exception):
+                    raise res
+                else:
+                    return res
+        else:
+            return self.generating_function(self.get_input())
+
+    def _inner_run(self, que):
+        try:
+            self.generating_function(self.get_input())
+            que.put(
+                {of.name: hashers.hash_file(of) for of in self.files}
+            )  # should multicore this, right?
+        except Exception as e:
+            que.put(e)
+
+    def get_input(self):
+        if self._single_file:
+            return self.files[0]
+        elif self.mapped_outputs:
+            return self.mapped_outputs
+        else:
+            return self.files
 
     def output_needed(self, _ignored_runner):
         for fn in self.files:
@@ -173,11 +211,7 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
         MultiFileGeneratingJob.__init__(
             self, [output_filename], generating_function, resources, depend_on_function
         )
-
-    def run(self, _ignored_runner, _historical_output):
-        """Call the generating function with just the one filename"""
-        self.generating_function(self.files[0])
-        return {str(of): hashers.hash_file(of) for of in self.files}
+        self._single_file = True
 
 
 class MultiTempFileGeneratingJob(MultiFileGeneratingJob):

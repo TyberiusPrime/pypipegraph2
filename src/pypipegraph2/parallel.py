@@ -2,11 +2,11 @@ from threading import Lock, Condition
 import threading
 import _thread
 import time
+
 # from loguru import logger
 
 
 class _CoreLockContextManager:
-
     def __init__(self, core_lock, cores):
         self.core_lock = core_lock
         self.cores = cores
@@ -17,14 +17,19 @@ class _CoreLockContextManager:
     def __exit__(self, exc_type, exc_value, traceback):
         self.core_lock._release(self.cores)
 
+
 class CoreLock:
     """Allow threads to request n 'cores',
     if they're available, let it proceed.
     If they're not available, block.
-    If they exceed the maxmimum number available: raise"""
+    If they exceed the maxmimum number available: raise.
+
+    Essentially, this is a Semaphore with multi-resource-one-step-acquisition.
+
+    """
 
     def __init__(self, max_cores):
-        self.max_cores = max_cores
+        self.max_cores = int(max_cores)
         self.remaining = max_cores
         self.lock = Lock()
         self.condition = Condition()
@@ -35,7 +40,7 @@ class CoreLock:
     def _acquire(self, count):
         # logger.info(f" {_thread.get_ident()} - acquire({count}) called")
         if count > self.max_cores:
-            raise ValueError("Count > max_cores")
+            raise ValueError(f"Count {count} > max_cores {self.max_cores}")
         if count == 0:
             raise ValueError("Count == 0")
         while True:
@@ -74,6 +79,7 @@ if __name__ == "__main__":
     mylock = CoreLock(1)
     counter = []
     threads = []
+
     def inner(c):
         with mylock.using(1):
             counter.append(c)
@@ -85,6 +91,4 @@ if __name__ == "__main__":
     for t in threads:
         t.join()
     assert len(counter) == 5
-    assert set(counter) == set([0,1,2,3,4])
-
-
+    assert set(counter) == set([0, 1, 2, 3, 4])
