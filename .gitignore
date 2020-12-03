@@ -50,3 +50,4 @@ MANIFEST
 .venv*/
 ppg_status*
 tests/run
+.vim_session

@@ -1,4 +1,5 @@
 from . import exceptions
+import queue
 import collections
 from loguru import logger
 import time
@@ -8,6 +9,7 @@ from .util import escape_logging
 from .enums import JobKind, ValidationState, JobState
 from .jobs import InitialJob
 from .exceptions import _RunAgain
+import threading
 
 
 class JobStatus:
@@ -31,25 +33,34 @@ class JobStatus:
         return f"{self.state}, {self.invalidation_state}, 'run_non_invalidated': {self.run_non_invalidated}"
 
 
+class ExitNow:
+    pass
+
+
 class Runner:
     def __init__(self, job_graph, history):
         from . import _with_changed_global_pipegraph
+
         logger.job_trace("Runner.__init__")
         with _with_changed_global_pipegraph(JobCollector()):
             self.jobs = job_graph.jobs.copy()
             self.job_inputs = job_graph.job_inputs.copy()
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
 
-            flat_before = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
+            flat_before = networkx.readwrite.json_graph.node_link_data(
+                job_graph.job_dag
+            )
             self.dag = self.extend_dag(job_graph)
             flat_after = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
             import json
 
             assert flat_before == flat_after
-            print(
-                "dag ",
-                json.dumps(
-                    networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
+            logger.info(
+                "dag "
+                + escape_logging(
+                    json.dumps(
+                        networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
+                    )
                 ),
             )
 
@@ -66,6 +77,9 @@ class Runner:
                     f"Loaded history for {job_id} {len(s.historical_input)}, {len(s.historical_output)}"
                 )
                 self.job_states[job_id] = s
+            self.event_lock = threading.Lock()
+            self.jobs_to_run_que = queue.Queue()
+            self.threads = self.start_job_executing_threads()
 
     def extend_dag(self, job_graph):
         from .jobs import _DownstreamNeedsMeChecker
@@ -109,7 +123,13 @@ class Runner:
                 cleanup_job = job.cleanup_job_class(job)
                 self.jobs[cleanup_job.job_id] = cleanup_job
                 self.outputs_to_job_ids[cleanup_job.outputs[0]] = cleanup_job.job_id
-                for downstream_job_id in dag.neighbors(job_id):
+                dag.add_node(cleanup_job.job_id)
+                downstreams = dag.neighbors(job_id)
+                if not downstreams:
+                    downstreams = [
+                        job_id
+                    ]  # nobody below you? your cleanup will run right after you
+                for downstream_job_id in downstreams:
                     dag.add_edge(downstream_job_id, cleanup_job.job_id)
                     self.job_inputs[cleanup_job.job_id].add(downstream_job_id)
         return dag
@@ -130,16 +150,15 @@ class Runner:
 
     def run(self):
         from . import _with_changed_global_pipegraph, global_pipegraph
-        job_count = len(global_pipegraph.jobs) # track if new jobs are being created
+
+        job_count = len(global_pipegraph.jobs)  # track if new jobs are being created
 
         logger.job_trace("Runner.__run__")
 
         self.output_hashes = {}
         self.new_history = {}  # what are the job outputs this time.
 
-        job_ids_topological = list(
-            networkx.algorithms.dag.topological_sort(self.dag)
-        )
+        job_ids_topological = list(networkx.algorithms.dag.topological_sort(self.dag))
 
         def is_initial(job_id):
             return (
@@ -148,27 +167,58 @@ class Runner:
                 and self.jobs[job_id].output_needed(self)
             )
 
+        def is_skipped(job_id):
+            return (
+                not self.job_inputs[job_id]
+                and not self.jobs[job_id].is_temp_job()
+                and not self.jobs[job_id].output_needed(self)
+            )
+
         initial_job_ids = [x for x in job_ids_topological if is_initial(x)]
-        self.open_job_ids = [x for x in job_ids_topological if not is_initial(x)]
-        self.events = collections.deque()
+        skipped_jobs = [x for x in job_ids_topological if is_skipped(x)]
+        self.events = queue.Queue()
         for job_id in initial_job_ids:
             self.job_states[job_id].state = JobState.ReadyToRun
             self.push_event("JobReady", (job_id,))
-        while self.events:
-            ev = self.events.popleft()
-            logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
+        for job_id in skipped_jobs:
+            self.push_event("JobSkipped", (job_id,))
+        for t in self.threads:
+            t.start()
+        todo = len(self.jobs)
+        logger.info(f"jobs: {self.jobs.keys()}")
+        logger.info(f"skipped jobs: {skipped_jobs}")
+        while todo:
+            ev = self.events.get(timeout=5)
+            logger.job_trace(
+                f"<-handle {ev[0]} {escape_logging(ev[1][0])}, todo: {todo}"
+            )
             if ev[0] == "JobSuccess":
                 self.handle_job_success(*ev[1])
+                todo -= 1
             elif ev[0] == "JobSkipped":
                 self.handle_job_skipped(*ev[1])
+                todo -= 1
             elif ev[0] == "JobReady":
                 self.handle_job_ready(*ev[1])
             elif ev[0] == "JobFailed":
                 self.handle_job_failed(*ev[1])
+                todo -= 1
+            elif ev[0] == "JobUpstreamFailed":
+                todo -= 1
             else:
                 raise NotImplementedError(ev[0])
+            logger.job_trace(f"<-done - todo: {todo}")
+
+        for t in self.threads:
+            self.jobs_to_run_que.put(ExitNow)
+        logger.job_trace("Joining threads")
+        for t in self.threads:
+            t.join()
+
         if len(global_pipegraph.jobs) != job_count:
-            logger.job_trace(f"created new jobs. _RunAgain issued {len(global_pipegraph.jobs)} != {job_count}")
+            logger.job_trace(
+                f"created new jobs. _RunAgain issued {len(global_pipegraph.jobs)} != {job_count}"
+            )
             for job_id in global_pipegraph.jobs:
                 if not job_id in self.jobs:
                     logger.job_trace(f"new job {job_id}")
@@ -262,18 +312,7 @@ class Runner:
         )  # todo: leave off for optimization - should not trigger anyway.
 
     def handle_job_ready(self, job_id):
-        job = self.jobs[job_id]
-        job_state = self.job_states[job_id]
-        try:
-            logger.job_trace(f"\tExecuting {job_id}")
-            job.start_time = time.time()
-            outputs = job.run(self, job_state.historical_output)
-            job.run_time = time.time() - job.start_time
-            self.push_event("JobSuccess", (job_id, outputs))
-        except Exception as e:
-            job_state.error = str(e) + "\n" + traceback.format_exc()
-            logger.warning(f"Execute {job_id} failed: {escape_logging(e)}")
-            self.push_event("JobFailed", (job_id, job_id))
+        self.jobs_to_run_que.put(job_id)
 
     def handle_job_failed(self, job_id, source):
         job = self.jobs[job_id]
@@ -284,6 +323,7 @@ class Runner:
     def all_inputs_finished(self, job_id):
         job_state = self.job_states[job_id]
         if job_state.state in (JobState.Failed, JobState.UpstreamFailed):
+            logger.job_trace("\t\t\tall_inputs_finished = false because failed")
             return False
         logger.job_trace(f"\t\t\tjob_inputs: {escape_logging(self.job_inputs[job_id])}")
         logger.job_trace(
@@ -295,8 +335,11 @@ class Runner:
         )
 
     def push_event(self, event, args, indent=0):
-        logger.opt(depth=1).log("JobTrace", "\t" * indent + f"->push {event} {args[0]}")
-        self.events.append((event, args))
+        with self.event_lock:
+            logger.opt(depth=1).log(
+                "JobTrace", "\t" * indent + f"->push {event} {args[0]}"
+            )
+            self.events.put((event, args))
 
     def fail_downstream(self, outputs, source):
         logger.job_trace(f"failed_downstream {outputs} {source}")
@@ -308,6 +351,7 @@ class Runner:
             for node in self.dag.successors(job_id):
                 self.job_states[node].state = JobState.UpstreamFailed
                 self.job_states[node].error = f"Upstream {source} failed"
+                self.push_event("JobUpstreamFailed", (node,))
 
     def compare_history(self, old_hash, new_hash, job_class):
         if old_hash is None:
@@ -343,6 +387,32 @@ class Runner:
                 if self.job_has_non_temp_somewhere_downstream(downstream_id):
                     return True
         return False
+
+    def start_job_executing_threads(self):
+        count = 1
+        result = []
+        for ii in range(count):
+            result.append(threading.Thread(target=self.executing_thread))
+        return result
+
+    def executing_thread(self):
+        while True:
+            job_id = self.jobs_to_run_que.get()
+            logger.job_trace(f"Executing thread, got {job_id}")
+            if job_id is ExitNow:
+                break
+            job = self.jobs[job_id]
+            job_state = self.job_states[job_id]
+            try:
+                logger.job_trace(f"\tExecuting {job_id}")
+                job.start_time = time.time()
+                outputs = job.run(self, job_state.historical_output)
+                job.run_time = time.time() - job.start_time
+                self.push_event("JobSuccess", (job_id, outputs))
+            except Exception as e:
+                job_state.error = str(e) + "\n" + traceback.format_exc()
+                logger.warning(f"Execute {job_id} failed: {escape_logging(e)}")
+                self.push_event("JobFailed", (job_id, job_id))
 
 
 class JobCollector:

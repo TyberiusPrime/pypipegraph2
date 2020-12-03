@@ -804,11 +804,47 @@ class TestPypipegraph2:
         assert Path("a").read_text() == "2"
         assert not hasattr(a, "a_")
 
+    def test_cached_attribute_loading_job(self, ppg_per_test, job_trace_log):
+        class TestRecv:
+            def __init__(self):
+                self.job = ppg.CachedAttributeLoadingJob(
+                    "A", self, "a_", lambda: counter("a") and "A"
+                )
+
+        a = TestRecv()
+        jobB = ppg.FileGeneratingJob(
+            "B", lambda of: counter("b") and of.write_text(a.a_)
+        )
+        jobB.depends_on(a.job)
+        assert not Path("A").exists()
+        ppg.run()
+        assert not hasattr(a, "a_")
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        assert Path("a").read_text() == "1"
+        assert Path("A").exists()
+        ppg.run()
+        assert not hasattr(a, "a_")
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        assert Path("a").read_text() == "1"
+        assert Path("A").exists()
+
+        a.job = ppg.CachedAttributeLoadingJob(
+            "A", a, "a_", lambda: counter("a") and "B"
+        )
+        logger.info("Run leads to recalc of A, B")
+        ppg.run()
+        assert Path("B").read_text() == "B"
+        assert Path("b").read_text() == "2"
+        assert Path("a").read_text() == "2"
+        assert not hasattr(a, "a_")
+        assert Path("A").exists()
+
     def test_job_generating(self, ppg_per_test, job_trace_log):
-        def inner(): # don't keep it inside, or the FunctionInvariant will trigger each time.
+        def inner():  # don't keep it inside, or the FunctionInvariant will trigger each time.
             counter("a")
             ppg.FileGeneratingJob("B", lambda of: counter("b") and of.write_text("B"))
-
 
         def gen():
             return ppg.JobGeneratingJob("A", inner)

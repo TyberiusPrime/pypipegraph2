@@ -833,6 +833,38 @@ class _AttributeCleanupJob(Job):
         return {self.outputs[0]: None}  # todo: optimize this awy?
 
 
+def CachedAttributeLoadingJob(
+    cache_file, object, attribute_name, data_callback, depend_on_function=True
+):
+    def store(output_filename):
+        import pickle
+
+        out = data_callback()
+        with open(output_filename, "wb") as op:
+            pickle.dump(out, op, pickle.HIGHEST_PROTOCOL)
+
+    calc_job = FileGeneratingJob(cache_file, store, depend_on_function=False)
+
+    def load():
+        import pickle
+
+        with open(cache_file, "rb") as op:
+            return pickle.load(op)
+
+    load_job = AttributeLoadingJob(
+        "AttributeLoad:" + str(cache_file),
+        object,
+        attribute_name,
+        load,
+        depend_on_function=False,
+    )
+    load_job.depends_on(calc_job)
+    if depend_on_function:
+        calc_job.depends_on(FunctionInvariant(data_callback, cache_file))
+    load_job.lfg = calc_job
+    return load_job
+
+
 class JobGeneratingJob(Job):
     job_kind = JobKind.JobGenerating
 
