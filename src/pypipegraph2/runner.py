@@ -266,10 +266,7 @@ class Runner:
                     logger.job_trace(f"\t\t\tHad {name}")
                     old = downstream_state.historical_input.get(name, None)
                     new = hash
-                    if new != "IgnorePlease" and (
-                        new == "ExplodePlease"
-                        or not self.compare_history(old, new, job.__class__)
-                    ):
+                    if not self.compare_history(old, new, job.__class__):
                         logger.job_trace("\t\t\tinput changed -> invalidate")
                         downstream_state.validation_state = ValidationState.Invalidated
                     downstream_state.updated_input[name] = hash  # update any way.

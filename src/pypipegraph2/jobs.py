@@ -123,7 +123,14 @@ class _DownstreamNeedsMeChecker(Job):
             return {self.job_id: "ExplodePlease"}
         else:
             return {self.job_id: "IgnorePlease"}
-            return {}
+
+    @classmethod
+    def compare_hashes(cls, old_hash, new_hash):
+        if new_hash == "ExplodePlease":
+            return False
+        if new_hash == "IgnorePlease":
+            return True
+        raise NotImplementedError("Should not be reached")
 
 
 class MultiFileGeneratingJob(Job):
@@ -399,7 +406,7 @@ class FunctionInvariant(Job, _FileInvariantMixin):
         if python_version in new_hash and python_version in old_hash:
             return new_hash[python_version] == old_hash[python_version]
         else:  # missing one python version, did the source change?
-            # should we compare Closures here as well?
+            # should we compare Closures here as well? todo
             return new_hash["source"] == old_hash["source"]
 
     def get_source_file(self):

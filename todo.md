@@ -1,8 +1,5 @@
 Open stuff
-	
-	- Invariant drift (ie. replacing with new invariant, but not triggering invalidation)
-	- using invariantDrift instead of 'ExplodePlease'
-	- mu-mu-mu-mu-multicore
+	- mu-mu-mu-mu-multicore for file invariant calculations (or just out-of-gil calculation)
 	- 
 	- DependencyInjectionJob (do we really need these still?)
 	- 
