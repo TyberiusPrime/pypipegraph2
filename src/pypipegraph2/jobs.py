@@ -225,6 +225,7 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
         MultiFileGeneratingJob.__init__(
             self, files, generating_function, resources, depend_on_function
         )
+        self._single_file = False
 
         self.cleanup_job_class = _FileCleanupJob
 
@@ -260,13 +261,9 @@ class TempFileGeneratingJob(MultiTempFileGeneratingJob):
         MultiTempFileGeneratingJob.__init__(
             self, [output_filename], generating_function, resources, depend_on_function
         )
+        self._single_file = True
 
-    def run(self, _ignored_runner, _historical_output):
-        """Call the generating function with just the one filename"""
-        self.generating_function(self.files[0])
-        return {str(of): hashers.hash_file(of) for of in self.files}
-
-
+    
 class _FileCleanupJob(Job):
     """Jobs may register cleanup jobs that injected after their immediate downstreams.
     This encapsulates those

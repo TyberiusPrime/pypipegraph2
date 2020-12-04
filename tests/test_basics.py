@@ -638,6 +638,21 @@ class TestPypipegraph2:
         assert pid_a != pid_b
         assert pid_a != pid_here
 
+    def test_temp_jobs_run_in_different_pids(self, ppg_per_test, job_trace_log):
+        import os
+
+        pid_here = os.getpid()
+        a = ppg.TempFileGeneratingJob("A", lambda of: counter("A") and Path('a').write_text(str(os.getpid())))
+        b = ppg.TempFileGeneratingJob("B", lambda of: counter("a") and Path('b').write_text(str(os.getpid()))) # yes, it's planned that it doesn't write B, this exposed a bug
+        c = ppg.FileGeneratingJob('C', lambda of: counter('C'))
+        c.depends_on(a, b)
+        ppg.run()
+        pid_a = Path("a").read_text()
+        pid_b = Path("b").read_text()
+        assert pid_a != pid_b
+        assert pid_a != pid_here
+
+
     def test_job_redefinition(self):
         raise NotImplementedError()
 

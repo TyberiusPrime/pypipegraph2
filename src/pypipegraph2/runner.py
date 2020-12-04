@@ -239,7 +239,7 @@ class Runner:
                     f"\t{job_id} returned undeclared output {name}"
                 )
                 logger.warning(job_state.error)
-                self.fail_downstream(job.outputs, job_id)
+                self.fail_downstream_by_outputs(job.outputs, job_id)
                 job_state.status = JobStatus.Failed
                 break
             logger.job_trace(f"\tCapturing hash for {name}")
@@ -320,7 +320,7 @@ class Runner:
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
         job_state.state = JobState.Failed
-        self.fail_downstream(job.outputs, job_id)
+        self.fail_downstream_by_outputs(job.outputs, job_id)
 
     def all_inputs_finished(self, job_id):
         job_state = self.job_states[job_id]
@@ -343,17 +343,23 @@ class Runner:
             )
             self.events.put((event, args))
 
-    def fail_downstream(self, outputs, source):
-        logger.job_trace(f"failed_downstream {outputs} {source}")
+    def fail_downstream_by_outputs(self, outputs, source):
         for output in outputs:
             # can't I run this with the job_id? todo: optimization
             job_id = self.outputs_to_job_ids[
                 output
             ]  # todo: don't continue if the state is already failed...
-            for node in self.dag.successors(job_id):
-                self.job_states[node].state = JobState.UpstreamFailed
-                self.job_states[node].error = f"Upstream {source} failed"
-                self.push_event("JobUpstreamFailed", (node,))
+            self.fail_downstream(job_id, source)
+
+    def fail_downstream(self, job_id, source):
+        logger.job_trace(f"failed_downstream {job_id} {source}")
+        job_state = self.job_states[job_id]
+        if job_state.state is not JobState.Failed: # we also call this on the failed job
+            job_state.state = JobState.UpstreamFailed
+            job_state.error = f"Upstream {source} failed"
+        self.push_event("JobUpstreamFailed", (job_id,))
+        for node in self.dag.successors(job_id):
+            self.fail_downstream(node, source)
 
     def compare_history(self, old_hash, new_hash, job_class):
         if old_hash is None:
