@@ -57,7 +57,7 @@ class Runner:
             import json
 
             assert flat_before == flat_after
-            logger.info(
+            logger.job_trace(
                 "dag "
                 + escape_logging(
                     json.dumps(
@@ -187,8 +187,8 @@ class Runner:
         for t in self.threads:
             t.start()
         todo = len(self.jobs)
-        logger.info(f"jobs: {self.jobs.keys()}")
-        logger.info(f"skipped jobs: {skipped_jobs}")
+        logger.job_trace(f"jobs: {self.jobs.keys()}")
+        logger.job_trace(f"skipped jobs: {skipped_jobs}")
         while todo:
             ev = self.events.get(timeout=5)
             logger.job_trace(
@@ -240,7 +240,7 @@ class Runner:
                 )
                 logger.warning(job_state.error)
                 self.fail_downstream_by_outputs(job.outputs, job_id)
-                job_state.status = JobStatus.Failed
+                job_state.status = JobState.Failed
                 break
             logger.job_trace(f"\tCapturing hash for {name}")
             self.output_hashes[name] = hash

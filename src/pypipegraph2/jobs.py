@@ -12,8 +12,12 @@ from pathlib import Path
 from io import StringIO
 from . import hashers, exceptions
 from .enums import JobKind, Resources
+from .util import escape_logging
 
 module_type = type(sys)
+
+non_chdired_path = Path(".").absolute()
+python_version = tuple(sys.version_info)
 
 
 class Job:
@@ -155,31 +159,50 @@ class MultiFileGeneratingJob(Job):
             Resources.Exclusive,
         ):
             c = self.resources.to_number(runner.core_lock.max_cores)
-            logger.info(f'cores: {c}, max: {runner.core_lock.max_cores}')
-            with runner.core_lock.using(
-                c
-            ):
-                que = multiprocessing.Queue()
+            # logger.info(f'cores: {c}, max: {runner.core_lock.max_cores}')
+            with runner.core_lock.using(c):
+                # que = multiprocessing.Queue() # replace by pipe
                 logger.job_trace(f"Forking for {self.job_id}")
-                p = multiprocessing.Process(target=self._inner_run, args=(que,))
-                p.start()
-                p.join()
-                res = que.get()
-                if isinstance(res, Exception):
-                    raise res
+                recv, sender = multiprocessing.Pipe(duplex=False)
+                pid = os.fork()
+                if pid == 0:
+                    try:
+                        self.generating_function(self.get_input())
+                        os._exit(0)  # go down hard
+                    except Exception as e:
+                        sender.send(e)
+                        os._exit(1)
                 else:
-                    return res
-        else:
-            return self.generating_function(self.get_input())
+                    _, waitstatus = os.waitpid(pid, 0)
+                    if os.WIFEXITED(waitstatus):
+                        # normal termination.
+                        exitcode = os.WEXITSTATUS(waitstatus)
+                        if exitcode != 0:
+                            exception = recv.recv()
+                            raise exception
+                    else:
+                        raise ValueError("Process died. Todo: extend tihs")
 
-    def _inner_run(self, que):
+                # p = multiprocessing.Process(target=self._inner_run, args=())
+                # p.start()
+                # p.join()
+                # res = que.get()
+                # if isinstance(res, Exception):
+                # raise res
+        else:
+            self.generating_function(self.get_input())
+        res = {
+            of.name: hashers.hash_file(of, runner.core_lock, None) for of in self.files
+        }
+        return res
+
+    def _inner_run(self):
         try:
             self.generating_function(self.get_input())
-            que.put(
-                {of.name: hashers.hash_file(of) for of in self.files}
-            )  # should multicore this, right?
+            # que.put(None)
         except Exception as e:
-            que.put(e)
+            # que.put(e)
+            pass
 
     def get_input(self):
         if self._single_file:
@@ -263,7 +286,7 @@ class TempFileGeneratingJob(MultiTempFileGeneratingJob):
         )
         self._single_file = True
 
-    
+
 class _FileCleanupJob(Job):
     """Jobs may register cleanup jobs that injected after their immediate downstreams.
     This encapsulates those
@@ -284,7 +307,16 @@ class _FileCleanupJob(Job):
         return {self.outputs[0]: None}  # todo: optimize this awy?
 
 
-class FunctionInvariant(Job):
+class _FileInvariantMixin:
+    def calculate(self, file, stat, core_lock):
+        return {
+            "mtime": int(stat.st_mtime),
+            "size": stat.st_size,
+            "hash": hashers.hash_file(file, core_lock, stat.st_size),
+        }
+
+
+class FunctionInvariant(Job, _FileInvariantMixin):
     job_kind = JobKind.Invariant
 
     def __init__(
@@ -297,40 +329,116 @@ class FunctionInvariant(Job):
             else FunctionInvariant.func_to_name(function)
         )
         self.verify_arguments(name, function)
+        self.source_file = self.get_source_file()
         Job.__init__(self, [name], Resources.RunsHere)
 
     def output_needed(self, _ignored_runner):
         return True
 
-    def run(self, _ignored_runner, _historical_output):
+    def run(self, runner, historical_output):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
-        source, is_python_func = self.get_source()
-        res = {"source": self.get_source()}
-        if is_python_func:
-            python_version = tuple(sys.version_info)
-            res[python_version] = (
-                self.get_dis(self.function),
-                self.extract_closure(self.function),
-            )
+        res = {}
+        sf = self.source_file
+        if historical_output:
+            historical_output = historical_output[self.job_id]
+        else:
+            historical_output = {}
+        file_unchanged = False
+        new_file_hash = None
+        if sf:  # we only have a source file for python functions.
+            sf = Path(sf)
+            stat = sf.stat()
+            if historical_output:
+                if "source_file" in historical_output:
+                    if int(stat.st_mtime) == historical_output["source_file"].get(
+                        "mtime", -1
+                    ) and stat.st_size == historical_output["source_file"].get(
+                        "size", -1
+                    ):
+                        # the file did not change at all
+                        file_unchanged = True
+                        new_file_hash = historical_output["source_file"]
+                else:
+                    new_file_hash = self.calculate(sf, stat, runner.core_lock)
+                    if (
+                        new_file_hash["hash"]
+                        == historical_output["source_file"]["hash"]
+                    ):
+                        file_unchanged = True
+                        new_file_hash = historical_output["source_file"]
+            if not new_file_hash:
+                new_file_hash = self.calculate(sf, stat, runner.core_lock)
+
+        line_no = self.function.__code__.co_firstlineno
+        line_unchanged = line_no == historical_output.get("source_line_no", False)
+        logger.job_trace(
+            f"{self.job_id}, {file_unchanged}, {line_unchanged}, {escape_logging(new_file_hash)}, {escape_logging(historical_output)}"
+        )
+
+        if file_unchanged and line_unchanged and python_version in historical_output:
+            dis = historical_output[python_version][0]
+            source = historical_output["source"]
+        else:
+            dis = (self.get_dis(self.function),)
+            source, is_python_func = self.get_source()
+
+        res = {"source": source, "source_line_no": line_no}
+        res[python_version] = (
+            dis,
+            self.extract_closure(self.function),
+        )
+        if new_file_hash:
+            res["source_file"] = new_file_hash
 
         return {self.job_id: res}
+
+    @classmethod
+    def compare_hashes(cls, old_hash, new_hash):
+        python_version = tuple(sys.version_info)
+        if python_version in new_hash and python_version in old_hash:
+            return new_hash[python_version] == old_hash[python_version]
+        else:  # missing one python version, did the source change?
+            # should we compare Closures here as well?
+            return new_hash["source"] == old_hash["source"]
+
+    def get_source_file(self):
+        if self.is_python_function(self.function):
+            try:
+                sf = inspect.getsourcefile(self.function)
+                if (
+                    sf == sys.argv[0]
+                ):  # at least python 3.8 does not have this absolute.
+                    # might change with 3.9? https://bugs.python.org/issue20443
+                    return non_chdired_path / sf
+                else:
+                    return Path(sf)
+            except TypeError:
+                pass
+        return None
+
+    @staticmethod
+    def is_python_function(function):
+        if (not hasattr(function, "__code__")) or (
+            "cython_function_or_method" in str(type(function))
+            or (
+                isinstance(function, types.MethodType)
+                and "cython_function_or_method" in str(type(function.__func__))
+            )
+        ):
+            return False
+        else:
+            return True
 
     def get_source(self):
         """Return the 'source' and whether this was a python function"""
         if self.function is None:
             # since the 'default invariant' is False, this will still read 'invalidated the first time it's being used'
             return None
-        if (not hasattr(self.function, "__code__")) or (
-            "cython_function_or_method" in str(type(self.function))
-            or (
-                isinstance(self.function, types.MethodType)
-                and "cython_function_or_method" in str(type(self.function.__func__))
-            )
-        ):
-            return self._get_source_from_non_python_function(self.function), False
-        else:
+        if self.is_python_function(self.function):
             return self._get_python_source(self.function), True
+        else:
+            return self._get_source_from_non_python_function(self.function), False
 
     @staticmethod
     def _get_python_source(function):
@@ -701,7 +809,7 @@ class FunctionInvariant(Job):
         return name
 
 
-class FileInvariant(Job):
+class FileInvariant(Job, _FileInvariantMixin):
     job_kind = JobKind.Invariant
 
     def __init__(self, file):
@@ -711,33 +819,25 @@ class FileInvariant(Job):
     def output_needed(self, _ignored_runner):
         return True
 
-    def run(self, _runner, historical_output):
+    def run(self, runner, historical_output):
         if not self.file.exists():
             raise FileNotFoundError(f"{self.path} did not exist")
         stat = self.file.stat()
         if not historical_output:
-            return self.calculate(stat)
+            return {self.outputs[0]: self.calculate(self.file, stat, runner.core_lock)}
         else:
             if int(stat.st_mtime) == historical_output.get(
                 "mtime", -1
             ) and stat.st_size == historical_output.get("size", -1):
                 return historical_output
             else:
-                return self.calculate(stat)
-
-    def calculate(self, stat):
-        return {
-            self.outputs[0]: {
-                "mtime": int(stat.st_mtime),
-                "size": stat.st_size,
-                "hash": hashers.hash_file(self.file),
-            }
-        }
+                return {
+                    self.outputs[0]: self.calculate(self.file, stat, runner.core_lock)
+                }
 
     @classmethod
     def compare_hashes(cls, old_hash, new_hash):
-        if new_hash["hash"] == old_hash.get("hash", ""):
-            return True
+        return new_hash["hash"] == old_hash.get("hash", "")
 
 
 class ParameterInvariant(Job):

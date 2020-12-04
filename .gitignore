@@ -51,3 +51,5 @@ MANIFEST
 ppg_status*
 tests/run
 .vim_session
+benchmarks/run
+benchmarks/flames.svg

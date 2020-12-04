@@ -643,7 +643,7 @@ class TestPypipegraph2:
 
         pid_here = os.getpid()
         a = ppg.TempFileGeneratingJob("A", lambda of: counter("A") and Path('a').write_text(str(os.getpid())))
-        b = ppg.TempFileGeneratingJob("B", lambda of: counter("a") and Path('b').write_text(str(os.getpid()))) # yes, it's planned that it doesn't write B, this exposed a bug
+        b = ppg.TempFileGeneratingJob("B", lambda of: counter("B") and Path('b').write_text(str(os.getpid()))) 
         c = ppg.FileGeneratingJob('C', lambda of: counter('C'))
         c.depends_on(a, b)
         ppg.run()
@@ -651,6 +651,23 @@ class TestPypipegraph2:
         pid_b = Path("b").read_text()
         assert pid_a != pid_b
         assert pid_a != pid_here
+
+    def test_temp_job_not_writing_its_file(self, ppg_per_test, job_trace_log):
+        import os
+
+        pid_here = os.getpid()
+        a = ppg.TempFileGeneratingJob("A", lambda of: counter("A") and Path('a').write_text(str(os.getpid())))
+        b = ppg.TempFileGeneratingJob("B", lambda of: counter("b") and Path('b').write_text(str(os.getpid()))) # yes, it's planned that it doesn't write B, this exposed a bug
+        c = ppg.FileGeneratingJob('C', lambda of: counter('C'))
+        c.depends_on(a, b)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        last = ppg.global_pipegraph.last_run_result
+        assert last["A"].state == JobState.Executed
+        assert last["B"].state == JobState.Failed
+        assert last["C"].state == JobState.UpstreamFailed
+        assert 'FileNotFoundError' in last['B'].error
+
 
 
     def test_job_redefinition(self):

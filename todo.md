@@ -31,3 +31,7 @@ Open stuff
 	- licence - mit again.
 	- interactive stuff
 	- notebook interaction
+	- data loading invalidation triggers
+	-	attribute loading only triggers if the contents changed
+	-   - deprecate dataloading, I suppose
+	- non ptyhon functioninvariants

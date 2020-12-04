@@ -95,7 +95,8 @@ class PyPipeGraph:
                 if max_runs == 0:
                     raise ValueError("endless loop")
                 try:
-                    result = Runner(self, history).run()
+                    runner = Runner(self, history)
+                    result = runner.run()
                     self.update_history(result, history)
                     break
                 except _RunAgain as e:
