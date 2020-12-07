@@ -17,7 +17,7 @@ from .util import escape_logging
 module_type = type(sys)
 
 non_chdired_path = Path(".").absolute()
-python_version = tuple(sys.version_info)
+python_version = tuple(sys.version_info)[:2]  # we only care about major.minor
 
 
 class Job:
@@ -198,9 +198,7 @@ class MultiFileGeneratingJob(Job):
                 # raise res
         else:
             self.generating_function(self.get_input())
-        res = {
-            of.name: hashers.hash_file(of, runner.core_lock, None) for of in self.files
-        }
+        res = {of.name: hashers.hash_file(of) for of in self.files}
         return res
 
     def _inner_run(self):
@@ -315,11 +313,11 @@ class _FileCleanupJob(Job):
 
 
 class _FileInvariantMixin:
-    def calculate(self, file, stat, core_lock):
+    def calculate(self, file, stat):
         return {
             "mtime": int(stat.st_mtime),
             "size": stat.st_size,
-            "hash": hashers.hash_file(file, core_lock, stat.st_size),
+            "hash": hashers.hash_file(file),
         }
 
 
@@ -328,7 +326,9 @@ class FunctionInvariant(Job, _FileInvariantMixin):
 
     def __init__(
         self, function, name=None
-    ):  # todo, must support the inverse calling with name, function
+    ):  # must support the inverse calling with name, function, for compability to pypipegraph
+        if isinstance(function, str):
+            name, function = function, name
         self.function = function
         name = (
             "FunctionInvariant:" + name
@@ -342,7 +342,7 @@ class FunctionInvariant(Job, _FileInvariantMixin):
     def output_needed(self, _ignored_runner):
         return True
 
-    def run(self, runner, historical_output):
+    def run(self, _runner, historical_output):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
         res = {}
@@ -367,7 +367,7 @@ class FunctionInvariant(Job, _FileInvariantMixin):
                         file_unchanged = True
                         new_file_hash = historical_output["source_file"]
                 else:
-                    new_file_hash = self.calculate(sf, stat, runner.core_lock)
+                    new_file_hash = self.calculate(sf, stat)
                     if (
                         new_file_hash["hash"]
                         == historical_output["source_file"]["hash"]
@@ -375,9 +375,12 @@ class FunctionInvariant(Job, _FileInvariantMixin):
                         file_unchanged = True
                         new_file_hash = historical_output["source_file"]
             if not new_file_hash:
-                new_file_hash = self.calculate(sf, stat, runner.core_lock)
+                new_file_hash = self.calculate(sf, stat)
 
-        line_no = self.function.__code__.co_firstlineno
+        if not hasattr(self.function, "__code__"):  # build ins
+            line_no = -1
+        else:
+            line_no = self.function.__code__.co_firstlineno
         line_unchanged = line_no == historical_output.get("source_line_no", False)
         logger.job_trace(
             f"{self.job_id}, {file_unchanged}, {line_unchanged}, {escape_logging(new_file_hash)}, {escape_logging(historical_output)}"
@@ -386,23 +389,32 @@ class FunctionInvariant(Job, _FileInvariantMixin):
         if file_unchanged and line_unchanged and python_version in historical_output:
             dis = historical_output[python_version][0]
             source = historical_output["source"]
+            is_python_func = self.is_python_function(self.function)
         else:
-            dis = (self.get_dis(self.function),)
             source, is_python_func = self.get_source()
+            if is_python_func:
+                dis = (
+                    self.get_dis(self.function),
+                )  # returns (('',),) for cython functions? better to handel it ourselves
+            else:
+                dis = ""
+
+        if is_python_func:
+            closure = self.extract_closure(
+                self.function
+            )  # returns an empty string for cython functions
+        else:
+            closure = ""
 
         res = {"source": source, "source_line_no": line_no}
-        res[python_version] = (
-            dis,
-            self.extract_closure(self.function),
-        )
+        res[python_version] = (dis, closure)
         if new_file_hash:
             res["source_file"] = new_file_hash
 
         return {self.job_id: res}
 
     @classmethod
-    def compare_hashes(cls, old_hash, new_hash):
-        python_version = tuple(sys.version_info)
+    def compare_hashes(cls, old_hash, new_hash, python_version=python_version):
         if python_version in new_hash and python_version in old_hash:
             return new_hash[python_version] == old_hash[python_version]
         else:  # missing one python version, did the source change?
@@ -826,21 +838,19 @@ class FileInvariant(Job, _FileInvariantMixin):
     def output_needed(self, _ignored_runner):
         return True
 
-    def run(self, runner, historical_output):
+    def run(self, _runner, historical_output):
         if not self.file.exists():
             raise FileNotFoundError(f"{self.path} did not exist")
         stat = self.file.stat()
         if not historical_output:
-            return {self.outputs[0]: self.calculate(self.file, stat, runner.core_lock)}
+            return {self.outputs[0]: self.calculate(self.file, stat)}
         else:
             if int(stat.st_mtime) == historical_output.get(
                 "mtime", -1
             ) and stat.st_size == historical_output.get("size", -1):
                 return historical_output
             else:
-                return {
-                    self.outputs[0]: self.calculate(self.file, stat, runner.core_lock)
-                }
+                return {self.outputs[0]: self.calculate(self.file, stat)}
 
     @classmethod
     def compare_hashes(cls, old_hash, new_hash):

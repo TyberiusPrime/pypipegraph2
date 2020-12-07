@@ -1,35 +1,35 @@
 Open stuff
-	- 
 	- DependencyInjectionJob (do we really need these still?)
-	- 
 	- FinalJobs (do we support these still)
 	- PlotJobs
-	- 
 	- CachedDataLoadingJobs
 	- CachedAttributeLoadingJobs
-	- 
-	- MemMappedJobs (did we ever use these?
 	- TempFilePlus jobs?? don't think we're using them *anywhere*
+	- CombinedPlotJob?
+	- notebook jobs?
+	- MemMappedJobs (did we ever use these?
+	 
 	- 
 	- The call() syntax
-	- 
 	- magic turn-notebook-cell-into-job-thing
-	- CombinedPlotJob?
+	- notebook interaction vs early exploding
 	- 
-	- notebook jobs?
 	- porting my million test cases
-	- 
 	- robust history storing when the graph dies / is aborted during it's run?
-	 
-	- job renaming support
+	
 	- general api polishing
+	 
 	- tests depending on partial MultiTempfile output 
-	- licence - MIT again.
+	
 	- interactive stuff
-	- notebook interaction
+	-
+	- job renaming support (ie. rename a job, but refind it by it's inputs?)
+ 
 	- 
 	- data loading invalidation triggers
+	- currently doesn't - running a dataloading job *always* triggers it's downstream 
+	  to recalc
 	-	attribute loading only triggers if the contents changed
 	-   - deprecate dataloading, I suppose
 	 
-	- non ptyhon functioninvariants
+	- pretty and usable and appending runtime logging.

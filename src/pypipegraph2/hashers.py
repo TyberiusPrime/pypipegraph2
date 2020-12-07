@@ -4,7 +4,7 @@ from .parallel import CoreLock
 from xxhash import xxh3_128
 
 
-def hash_file(path: Path, core_lock: CoreLock, known_st_size: None):
+def hash_file(path: Path):
     # I profiled a bunch of hash functions
     # and xx3 and spooky were the fastest 128bit hashers
     # (we want 128 bit to prevent collisions).
