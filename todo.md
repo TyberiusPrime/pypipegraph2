@@ -1,5 +1,4 @@
 Open stuff
-	- mu-mu-mu-mu-multicore for file invariant calculations (or just out-of-gil calculation)
 	- 
 	- DependencyInjectionJob (do we really need these still?)
 	- 
@@ -25,10 +24,12 @@ Open stuff
 	- job renaming support
 	- general api polishing
 	- tests depending on partial MultiTempfile output 
-	- licence - mit again.
+	- licence - MIT again.
 	- interactive stuff
 	- notebook interaction
+	- 
 	- data loading invalidation triggers
 	-	attribute loading only triggers if the contents changed
 	-   - deprecate dataloading, I suppose
+	 
 	- non ptyhon functioninvariants
