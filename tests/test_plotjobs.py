@@ -1,0 +1,457 @@
+"""
+The MIT License (MIT)
+
+Copyright (c) 2012, Florian Finkernagel <finkernagel@imt.uni-marburg.de>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
+import pytest
+import os
+from pathlib import Path
+from .shared import read, write, append, Dummy
+import pickle
+
+try:
+    import dppd
+    import dppd_plotnine  # noqa: F401
+
+    dp, X = dppd.dppd()
+    has_pyggplot = True
+except ImportError:
+    has_pyggplot = False
+    pass
+
+
+if has_pyggplot:  # noqa C901
+    import pandas as pd
+    import pypipegraph2 as ppg
+    import subprocess
+
+    def magic(filename):
+        """See what linux 'file' commando says about that file"""
+        if not os.path.exists(filename):
+            raise OSError("Does not exists %s" % filename)
+        p = subprocess.Popen(["file", filename], stdout=subprocess.PIPE)
+        stdout, stderr = p.communicate()
+        return stdout
+
+    @pytest.mark.usefixtures("ppg_per_test")
+    class TestPlotJob:
+        def test_basic(self, job_trace_log):
+            def calc():
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                return dp(df).p9().add_point("X", "Y")
+
+            def plot2(df):
+                p = dp(df).p9().add_point("Y", "X")
+                p.width = 5
+                p.height = 2
+                return p
+
+            of = "out/test.png"
+            p, c, t = ppg.PlotJob(of, calc, plot)
+            # p.add_fiddle(lambda p: dp(p).scale_x_continuous(trans="log10").pd)
+            p.add_another_plot("out/test2.png", plot2)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert os.path.exists(of + ".tsv")
+            assert os.path.exists("cache/out/test.png")
+            assert os.path.exists("out/test2.png")
+            assert not os.path.exists("cache/out/test2.png")
+            assert not os.path.exists("cache/out/test2.png.tsv")
+
+        def test_basic_skip_table(self):
+            def calc():
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.png"
+            ppg.PlotJob(of, calc, plot, create_table=False)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert not os.path.exists(of + ".tsv")
+            assert os.path.exists("cache/out/test.png")
+
+        def test_basic_return_dict(self):
+            def calc():
+                return {
+                    "A": pd.DataFrame(
+                        {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                    )
+                }
+
+            def plot(df):
+                p = dp(df["A"]).p9().add_point("X", "Y")
+                p.width = 5
+                p.height = 1
+                return p
+
+            of = "out/test.png"
+            ppg.PlotJob(of, calc, plot)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert read(of + ".tsv").find("#A\n") != -1
+
+        def test_basic_return_dict_non_df_raises(self):
+            def calc():
+                return {
+                    "A": pd.DataFrame(
+                        {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                    ),
+                    "B": "not_a_df",
+                }
+
+            def plot(df):
+                return dp(df["A"]).p9().add_point("X", "Y")
+
+            of = "out/test.png"
+            p, c, t = ppg.PlotJob(of, calc, plot)
+            p.height = 1200
+            p.width = 800
+            with pytest.raises(ppg.RunFailed):
+                ppg.run()
+            assert "did not return a DataFrame" in str(
+                ppg.global_pipegraph.last_run_result[c[1].job_id].error
+            )
+
+        def test_skip_caching(self):
+            def calc():
+                if not os.path.exists("A"):
+                    raise ValueError()
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                return dp(df).p9().add_point("X", "Y")
+
+            def prep_job(output_filename):
+                write("A", "A")
+
+            p = ppg.FileGeneratingJob("A", prep_job)
+            # this tests the correct dependency setting on skip_caching
+            Path("out").mkdir()
+            of = "out/test.png"
+            p2, c2, t2 = ppg.PlotJob(of, calc, plot, cache_calc=False)
+            p2.depends_on(p)
+            t2.depends_on(
+                p
+            )  # if you don't cache, you have to take care of this yourself
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert not os.path.exists("cache/out/test.png")
+
+        @pytest.mark.xfail()  # different behaivour depending on interacitvity
+        def test_redefiniton_and_skip_changes_raises(self):
+            def calc():
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.png"
+            ppg.PlotJob(of, calc, plot)
+            with pytest.raises(ValueError):
+                ppg.PlotJob(of, calc, plot, cache_calc=False)
+            with pytest.raises(ValueError):
+                ppg.PlotJob(of, calc, plot, create_table=False)
+            with pytest.raises(ValueError):
+                ppg.PlotJob(of, calc, plot, render_args={"something": 55})
+
+        def test_pdf(self):
+            def calc():
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.pdf"
+            ppg.PlotJob(of, calc, plot)
+            ppg.run()
+            assert magic(of).find(b"PDF document") != -1
+
+        def test_raises_on_invalid_filename(self):
+            def calc():
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.shu"
+
+            def inner():
+                ppg.PlotJob(of, calc, plot)
+
+            with pytest.raises(ValueError):
+                inner()
+
+        def test_reruns_just_plot_if_plot_changed(self, ppg_per_test, job_trace_log):
+            def calc():
+                append("out/calc", "A")
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                append("out/plot", "B")
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.png"
+            ppg.PlotJob(of, calc, plot)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert read("out/calc") == "A"
+            assert read("out/plot") == "B"
+
+            ppg.new()
+
+            def plot2(df):
+                append("out/plot", "B")
+                return dp(df).p9().add_point("Y", "X")
+
+            ppg.PlotJob(of, calc, plot2)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert read("out/calc") == "A"
+            assert read("out/plot") == "BB"
+
+        def test_no_rerun_if_ignore_code_changes_and_plot_changes(self, ppg_per_test, job_trace_log):
+            def calc():
+                append("out/calc", "A")
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                append("out/plot", "B")
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.png"
+            # note that you already need to ignore the function here
+            # otherwise, the fact that the function is now *missing*
+            # would trigger downstream
+            job = ppg.PlotJob(of, calc, plot, depend_on_function=False)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert read("out/calc") == "A"
+            assert read("out/plot") == "B"
+
+            ppg.new()
+
+            def plot2(df):
+                append("out/plot", "B")
+                return dp(df).p9().add_point("Y", "X")
+
+            job = ppg.PlotJob(of, calc, plot2, depend_on_function=False)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert read("out/calc") == "A"
+            assert read("out/plot") == "B"
+
+        def test_reruns_both_if_calc_changed(self, ppg_per_test):
+            def calc():
+                append("out/calc", "A")
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                append("out/plot", "B")
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.png"
+            ppg.PlotJob(of, calc, plot)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert read("out/calc") == "A"
+            assert read("out/plot") == "B"
+
+            ppg.new()
+
+            def calc2():
+                append("out/calc", "A")
+                x = 5  # noqa: E157,F841
+                return pd.DataFrame(
+                    {"X": list(range(1, 101)), "Y": list(range(50, 150))} # output must really change
+                )
+
+            ppg.PlotJob(of, calc2, plot)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert read("out/calc") == "AA"
+            assert read("out/plot") == "BB"
+
+        def test_no_rerun_if_calc_change_but_ignore_codechanges(self, ppg_per_test):
+            def calc():
+                append("out/calc", "A")
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                append("out/plot", "B")
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.png"
+            job = ppg.PlotJob(of, calc, plot, depend_on_function=False)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert read("out/calc") == "A"
+            assert read("out/plot") == "B"
+
+            ppg.new()
+
+            def calc2():
+                append("out/calc", "A")
+                x = 5  # noqa: E157,F841
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            job = ppg.PlotJob(of, calc2, plot, depend_on_function=False)
+            ppg.run()
+            assert magic(of).find(b"PNG image") != -1
+            assert read("out/calc") == "A"
+            assert read("out/plot") == "B"
+
+        def test_raises_if_calc_returns_non_df(self):
+            def calc():
+                return None
+
+            def plot(df):
+                append("out/plot", "B")
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.png"
+            job, cache_job, table_job = ppg.PlotJob(of, calc, plot)
+            with pytest.raises(ppg.RunFailed):
+                ppg.run(print_failures=False)
+            print(ppg.global_pipegraph.last_run_result[cache_job[1].job_id].error)
+            assert isinstance(
+                ppg.global_pipegraph.last_run_result[cache_job[1].job_id].error, ppg.JobError
+            )
+
+        def test_raises_if_plot_returns_non_plot(self):
+            # import pyggplot
+            def calc():
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                return None
+
+            of = "out/test.png"
+            job = ppg.PlotJob(of, calc, plot)
+            try:
+                ppg.run()
+                raise ValueError("should not be reached")
+            except ppg.RunFailed:
+                pass
+            print(type(ppg.global_pipegraph.last_run_result[of].error))
+            print(repr(ppg.global_pipegraph.last_run_result[of].error))
+            assert isinstance(
+                ppg.global_pipegraph.last_run_result[of].error, ppg.JobError
+            )
+
+        def test_passing_non_function_for_calc(self):
+            def inner():
+                ppg.PlotJob("out/a", "shu", lambda df: 1)
+
+            with pytest.raises(ValueError):
+                inner()
+
+        def test_passing_non_function_for_plot(self):
+            def inner():
+                ppg.PlotJob("out/a", lambda: 55, "shu")
+
+            with pytest.raises(ValueError):
+                inner()
+
+        def test_passing_non_string_as_jobid(self):
+            def inner():
+                ppg.PlotJob(5, lambda: 1, lambda df: 34)
+
+            with pytest.raises(TypeError):
+                inner()
+
+        def test_unpickling_error(self, ppg_per_test):
+            def calc():
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                return dp(df).p9().add_point("X", "Y")
+
+            of = "out/test.png"
+            p = ppg.PlotJob(of, calc, plot)
+            ppg.run()
+            ppg.new()
+            p = ppg.PlotJob(of, calc, plot)
+            with open("cache/out/test.png", "w") as op:
+                op.write("no unpickling")
+            os.unlink("out/test.png")  # so it reruns
+            with pytest.raises(ppg.RunFailed):
+                ppg.run()
+            assert not os.path.exists("out/test.png")
+            assert isinstance(
+                ppg.global_pipegraph.last_run_result[p[1][0].job_id].error.args[0],
+                pickle.UnpicklingError,
+            )
+            assert "Unpickling error in file" in str(
+                ppg.global_pipegraph.last_run_result[p[1][0].job_id].error.args[0]
+            )
+
+        def test_add_another_not_returning_plot(self):
+            def calc():
+                return pd.DataFrame(
+                    {"X": list(range(0, 100)), "Y": list(range(50, 150))}
+                )
+
+            def plot(df):
+                return dp(df).p9().add_point("X", "Y")
+
+            def plot2(df):
+                return
+
+            of = "out/test.png"
+            p, c, t = ppg.PlotJob(of, calc, plot)
+            # p.add_fiddle(lambda p: p.scale_x_log10())
+            p2 = p.add_another_plot("out/test2.png", plot2)
+            with pytest.raises(ppg.RunFailed):
+                ppg.run()
+            assert isinstance(
+                ppg.global_pipegraph.last_run_result[p2.job_id].error, ppg.JobError
+            )

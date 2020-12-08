@@ -15,7 +15,7 @@ import threading
 
 class JobStatus:
     def __init__(self):
-        self.state = JobState.Waiting
+        self._state = JobState.Waiting
         self.validation_state = ValidationState.Unknown
         self.input_done_counter = 0
         self.upstreams_completed = False
@@ -30,8 +30,23 @@ class JobStatus:
 
         self.error = None
 
+    @property
+    def state(self):
+        return self._state
+
+    @state.setter
+    def state(self, value):
+        if self._state is JobState.Failed and value != JobState.Failed:
+            raise ValueError("Can't undo a Failed tag")
+        self._state = value
+
     def __str__(self):
-        return f"{self.state}, {self.invalidation_state}, 'run_non_invalidated': {self.run_non_invalidated}"
+        return repr(self)
+
+    def __repr__(self):
+        if self.state is JobState.UpstreamFailed:
+            return f"JobStatus({self.state} - {self.error})"
+        return f"JobStatus({self.state})"
 
 
 class ExitNow:
@@ -233,26 +248,31 @@ class Runner:
         job_state = self.job_states[job_id]
         # record our success
         logger.job_trace(f"\t{escape_logging(str(job_outputs)[:500])}...")
-        for name, hash in job_outputs.items():
-            if name not in job.outputs:
-                job_state.error = exceptions.JobContractError(
-                    f"\t{job_id} returned undeclared output {name}"
-                )
-                logger.warning(job_state.error)
-                self.fail_downstream_by_outputs(job.outputs, job_id)
-                job_state.status = JobState.Failed
-                break
-            logger.job_trace(f"\tCapturing hash for {name}")
-            self.output_hashes[name] = hash
-            job_state.updated_output[name] = hash
-            # when the job is done, it's the time time to record the inputs
-            # job_state.updated_input = {
-            # name: self.output_hashes[name]
-            # for name in self.get_job_inputs(job.job_id)
-            # }
-            job_state.state = JobState.Executed
+        if set(job_outputs.keys()) != set(job.outputs):
+            logger.job_trace(
+                f"\t{job_id} returned the wrong set of outputs. "
+                f"Should be {escape_logging(str(set(job.outputs)))}, was {escape_logging(str(set(job_outputs.keys())))}"
+            )
 
-        self.inform_downstreams_of_outputs(job_id, job_outputs)
+            job_state.state = JobState.Failed
+            self.fail_downstream_by_outputs(job.outputs, job_id)
+            job_state.error = exceptions.JobContractError(
+                f"\t{job_id} returned the wrong set of outputs. "
+                f"Should be {escape_logging(str(set(job.outputs)))}, was {escape_logging(str(set(job_outputs.keys())))}"
+            )
+        else:
+            for name, hash in job_outputs.items():
+                logger.job_trace(f"\tCapturing hash for {name}")
+                self.output_hashes[name] = hash
+                job_state.updated_output[name] = hash
+                # when the job is done, it's the time time to record the inputs
+                # job_state.updated_input = {
+                # name: self.output_hashes[name]
+                # for name in self.get_job_inputs(job.job_id)
+                # }
+            job_state.state = JobState.Executed
+            self.inform_downstreams_of_outputs(job_id, job_outputs)
+        logger.job_trace(f"after handle_job_success {job_id}.state == {self.job_states[job_id]}")
 
     def inform_downstreams_of_outputs(self, job_id, job_outputs):
         job = self.jobs[job_id]
@@ -351,7 +371,9 @@ class Runner:
     def fail_downstream(self, job_id, source):
         logger.job_trace(f"failed_downstream {job_id} {source}")
         job_state = self.job_states[job_id]
-        if job_state.state is not JobState.Failed: # we also call this on the failed job
+        if (
+            job_state.state is not JobState.Failed
+        ):  # we also call this on the failed job
             job_state.state = JobState.UpstreamFailed
             job_state.error = f"Upstream {source} failed"
         self.push_event("JobUpstreamFailed", (job_id,))
@@ -415,7 +437,10 @@ class Runner:
                 job.run_time = time.time() - job.start_time
                 self.push_event("JobSuccess", (job_id, outputs))
             except Exception as e:
-                job_state.error = str(e) + "\n" + traceback.format_exc()
+                if isinstance(e, exceptions.JobError):
+                    job_state.error = e
+                else:
+                    job_state.error = exceptions.JobError(e, traceback.format_exc())
                 logger.warning(f"Execute {job_id} failed: {escape_logging(e)}")
                 self.push_event("JobFailed", (job_id, job_id))
 

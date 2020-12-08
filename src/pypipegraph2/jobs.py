@@ -1,4 +1,6 @@
 from __future__ import annotations
+import traceback
+import pickle
 import multiprocessing
 import os
 import dis
@@ -177,7 +179,12 @@ class MultiFileGeneratingJob(Job):
                         self.generating_function(self.get_input())
                         os._exit(0)  # go down hard
                     except Exception as e:
-                        sender.send(e)
+                        try:
+                            tb = traceback.format_exc()
+                            sender.send((e, tb))
+                        except Exception as e: 
+                            print(f"FileGeneratingJob done, but send failed: {e}")
+                            pass
                         os._exit(1)
                 else:
                     _, waitstatus = os.waitpid(pid, 0)
@@ -185,8 +192,13 @@ class MultiFileGeneratingJob(Job):
                         # normal termination.
                         exitcode = os.WEXITSTATUS(waitstatus)
                         if exitcode != 0:
-                            exception = recv.recv()
-                            raise exception
+                            if recv.poll(1):
+                                exception, tb_str = recv.recv()
+                                raise exceptions.JobError(exception, tb_str)
+                            else:
+                                raise exceptions.JobContractError(
+                                    f"Job {self.job_id} died but did not return an exception object"
+                                )
                     else:
                         raise ValueError("Process died. Todo: extend tihs")
 
@@ -198,7 +210,7 @@ class MultiFileGeneratingJob(Job):
                 # raise res
         else:
             self.generating_function(self.get_input())
-        res = {of.name: hashers.hash_file(of) for of in self.files}
+        res = {str(of): hashers.hash_file(of) for of in self.files}
         return res
 
     def _inner_run(self):
@@ -327,8 +339,10 @@ class FunctionInvariant(Job, _FileInvariantMixin):
     def __init__(
         self, function, name=None
     ):  # must support the inverse calling with name, function, for compability to pypipegraph
-        if isinstance(function, str):
+        if isinstance(function, (str, Path)):
             name, function = function, name
+        name = str(name)
+
         self.function = function
         name = (
             "FunctionInvariant:" + name
@@ -943,6 +957,8 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
     def __init__(
         self, job_id, object, attribute_name, data_callback, depend_on_function=True
     ):
+        if not isinstance(attribute_name, str):
+            raise ValueError("attribute_name was not a string")
         self.depend_on_function = depend_on_function
         self.object = object
         self.attribute_name = attribute_name
@@ -963,6 +979,44 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
         }  # so the downstream get's invalidated
 
 
+def CachedAttributeLoadingJob(
+    cache_filename,
+    object,
+    attribute_name,
+    data_callback,
+    depend_on_function=True,
+    resources: Resources = Resources.SingleCore,
+):
+    cache_filename = Path(cache_filename)
+
+    def do_cache(output_filename):
+        with open(output_filename, "wb") as op:
+            pickle.dump(data_callback(), op, pickle.HIGHEST_PROTOCOL)
+
+    cache_job = FileGeneratingJob(
+        cache_filename, do_cache, depend_on_function=False, resources=resources
+    )
+    if depend_on_function:
+        cache_job.depends_on(FunctionInvariant(cache_filename, data_callback))
+
+    def load():
+        try:
+            with open(cache_filename, "rb") as op:
+                return pickle.load(op)
+        except pickle.UnpicklingError as e:
+            raise pickle.UnpicklingError(f"Unpickling error in file {cache_filename}", e)
+
+    load_job = AttributeLoadingJob(
+        "load" + str(cache_filename),
+        object,
+        attribute_name,
+        load,
+        depend_on_function=False,
+    )
+    load_job.depends_on(cache_job)
+    return (load_job, cache_job)
+
+
 class _AttributeCleanupJob(Job):
     """Jobs may register cleanup jobs that injected after their immediate downstreams.
     This encapsulates those
@@ -979,38 +1033,6 @@ class _AttributeCleanupJob(Job):
         delattr(self.parent_job.object, self.parent_job.attribute_name)
 
         return {self.outputs[0]: None}  # todo: optimize this awy?
-
-
-def CachedAttributeLoadingJob(
-    cache_file, object, attribute_name, data_callback, depend_on_function=True
-):
-    def store(output_filename):
-        import pickle
-
-        out = data_callback()
-        with open(output_filename, "wb") as op:
-            pickle.dump(out, op, pickle.HIGHEST_PROTOCOL)
-
-    calc_job = FileGeneratingJob(cache_file, store, depend_on_function=False)
-
-    def load():
-        import pickle
-
-        with open(cache_file, "rb") as op:
-            return pickle.load(op)
-
-    load_job = AttributeLoadingJob(
-        "AttributeLoad:" + str(cache_file),
-        object,
-        attribute_name,
-        load,
-        depend_on_function=False,
-    )
-    load_job.depends_on(calc_job)
-    if depend_on_function:
-        calc_job.depends_on(FunctionInvariant(data_callback, cache_file))
-    load_job.lfg = calc_job
-    return load_job
 
 
 class JobGeneratingJob(Job):
@@ -1035,3 +1057,146 @@ class JobGeneratingJob(Job):
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
         }  # so the downstream get's invalidated
+
+
+def _save_plot(plot, output_filename, plot_render_args):
+    if not hasattr(plot, "render") and not hasattr(plot, "save"):
+        raise exceptions.JobContractError(
+            "%s.plot_function did not return a plot object (needs to have as render or save function"
+            % (output_filename)
+        )
+    if hasattr(plot, "pd"):  # dppd special..
+        plot = plot.pd
+    render_args = {}
+    if "width" not in render_args and hasattr(plot, "width"):
+        render_args["width"] = plot.width
+    if "height" not in render_args and hasattr(plot, "height"):
+        render_args["height"] = plot.height
+    render_args.update(getattr(plot, "render_args", {}))
+    render_args.update(plot_render_args)
+    if hasattr(plot, "render"):
+        plot.render(output_filename, **render_args)
+    elif hasattr(plot, "save"):
+        plot.save(output_filename, **render_args)
+    else:
+        raise NotImplementedError("Don't know how to handle this plotjob")
+
+
+def PlotJob(
+    output_filename,
+    calc_function,
+    plot_function,
+    render_args=None,
+    cache_dir="cache",
+    depend_on_function=True,
+    cache_calc=True,
+    create_table=True,
+):
+    """Return a tuple of 3 jobs, the last two entries might be none.
+
+    The first one is always a FileGeneratingJob
+        around a wrapped plot_function, creating the output filename.
+
+    If cache_calc is set, the second one is a CachedAttributeLoadingJob
+    (wich again is a tuple, load_job, calc_job),
+    loading a .data_ member on the first job returned.
+
+    If create_table is set, the third one is a FileGeneratingJob
+    writing (output_filename + '.tsv').
+    """
+    if render_args is None:
+        render_args = {}
+    output_filename = Path(output_filename)
+    allowed_suffixes = (".png",".pdf",".svg")
+    if not (
+            output_filename.suffix in allowed_suffixes         ):
+            raise ValueError(
+                f"Don't know how to create a {output_filename.suffix} file, must end on one of {allowed_suffixes}."
+            )
+
+       
+    def do_plot(output_filename):
+        if not hasattr(plot_job, "data_"):
+            plot_job.data_ = calc_function()
+        plot = plot_function(plot_job.data_)
+        _save_plot(plot, output_filename, render_args)
+
+    plot_job = FileGeneratingJob(output_filename, do_plot, depend_on_function=False)
+    if depend_on_function:
+        plot_job.depends_on(FunctionInvariant( str(output_filename), plot_function))
+
+    if cache_calc:
+
+        def do_cache():
+            import pandas as pd
+
+            Path(output_filename.parent).mkdir(exist_ok=True, parents=True)
+            df = calc_function()
+            if not isinstance(df, pd.DataFrame):
+                do_raise = True
+                if isinstance(df, dict):  # might be a list dfs...
+                    do_raise = False
+                    for x in df.values():
+                        if not isinstance(x, pd.DataFrame):
+                            do_raise = True
+                            break
+                if do_raise:
+                    raise exceptions.JobContractError(
+                        "%s.calc_function did not return a DataFrame (or dict of such), was %s "
+                        % (output_filename, str(df.__class__))
+                    )
+            return df
+
+        cache_filename = Path(cache_dir) / output_filename
+        cache_filename.parent.mkdir(exist_ok=True, parents=True)
+        attribute_load_job, attribute_cache_job = CachedAttributeLoadingJob(
+            cache_filename, plot_job, "data_", do_cache, depend_on_function=False
+        )
+        if depend_on_function:
+            attribute_cache_job.depends_on(FunctionInvariant(cache_filename, calc_function))
+        plot_job.depends_on(attribute_load_job)
+        cache_job = [attribute_load_job, attribute_cache_job]
+    else:
+        cache_job = None
+
+    if create_table:
+
+        def dump_table(output_filename):
+            import pandas as pd
+
+            if not hasattr(plot_job, "data_"):
+                plot_job.data_ = calc_function()
+
+            if isinstance(plot_job.data_, pd.DataFrame):
+                plot_job.data_.to_csv(output_filename, sep="\t")
+            else:
+                with open(output_filename, "w") as op:
+                    for key, dataframe in plot_job.data_.items():
+                        op.write("#%s\n" % key)
+                        dataframe.to_csv(op, sep="\t")
+
+        table_job = FileGeneratingJob(
+            output_filename.with_suffix(output_filename.suffix + ".tsv"), dump_table
+        )
+        if cache_calc:
+            table_job.depends_on(cache_job)
+    else:
+        table_job = None
+
+    def add_another_plot(output_filename, plot_function, render_args={}):
+        if render_args is None:
+            render_args = {}
+        def do_plot_another_plot(output_filename):
+            if not hasattr(plot_job, "data_"):
+                plot_job.data_ = calc_function()
+            plot = plot_function(plot_job.data_)
+            _save_plot(plot, output_filename, render_args)
+
+        j = FileGeneratingJob(output_filename, do_plot_another_plot)
+        if cache_calc:
+            j.depends_on(cache_job)
+        return j
+
+    plot_job.add_another_plot = add_another_plot
+
+    return (plot_job, cache_job, table_job)

@@ -1,13 +1,7 @@
 Open stuff
-	- DependencyInjectionJob (do we really need these still?)
 	- FinalJobs (do we support these still)
-	- PlotJobs
 	- CachedDataLoadingJobs
 	- CachedAttributeLoadingJobs
-	- TempFilePlus jobs?? don't think we're using them *anywhere*
-	- CombinedPlotJob?
-	- notebook jobs?
-	- MemMappedJobs (did we ever use these?
 	 
 	- 
 	- The call() syntax
@@ -31,5 +25,6 @@ Open stuff
 	  to recalc
 	-	attribute loading only triggers if the contents changed
 	-   - deprecate dataloading, I suppose
-	 
+	
 	- pretty and usable and appending runtime logging.
+	- pruning

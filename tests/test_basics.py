@@ -670,12 +670,15 @@ class TestPypipegraph2:
 
 
 
+    @pytest.mark.xfail
     def test_job_redefinition(self):
         raise NotImplementedError()
 
+    @pytest.mark.xfail
     def test_changing_mtime_triggers_recalc_of_hash(self):
         raise NotImplementedError()
 
+    @pytest.mark.xfail
     def test_same_mtime_same_size_leads_to_false_negative(self):
         raise NotImplementedError()
 
@@ -856,7 +859,7 @@ class TestPypipegraph2:
         jobB = ppg.FileGeneratingJob(
             "B", lambda of: counter("b") and of.write_text(a.a_)
         )
-        jobB.depends_on(a.job)
+        jobB.depends_on(a.job[0])
         assert not Path("A").exists()
         ppg.run()
         assert not hasattr(a, "a_")
@@ -930,3 +933,12 @@ class TestPypipegraph2:
         )  # still no rerun - input to A didn't change!
         assert Path("b").read_text() == "2"  # this does not mean that B get's rerun.
         assert Path("B").read_text() == "B"
+
+
+    @pytest.mark.xfail
+    def test_undeclared_output_leads_to_job_and_ppg_failure(self):
+        raise NotImplementedError()
+
+    @pytest.mark.xfail
+    def test_file_gen_in_subfolders(self):
+        raise NotImplementedError()

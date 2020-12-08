@@ -26,3 +26,13 @@ class RunFailed(PPGException):
 
 class _RunAgain(PPGException):
     pass
+
+
+class JobError(PPGException):
+    def __str__(self):
+        return (
+            ("ppg.JobError:\n")
+            + (f"\tException:{self.args[0]}\n")
+            + (f"\tTraceback: {self.args[1]}\n")
+            + ("")
+        )
