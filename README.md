@@ -37,3 +37,6 @@ Differences to pypipegraph
 	- a failed jobs exceptions are no longer available as job.exception,
       they can now be found in ppg.global_pipegraph.last_run[job_id].error
 	  (last_run is also the result of ppg.run() if you set do_raise = False)
+
+	  
+	- CycleError is now NotADag

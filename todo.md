@@ -1,7 +1,4 @@
 Open stuff
-	- FinalJobs (do we support these still)
-	 
-	- 
 	- The call() syntax
 	- magic turn-notebook-cell-into-job-thing
 	- notebook interaction vs early exploding
@@ -17,14 +14,8 @@ Open stuff
 	-
 	- job renaming support (ie. rename a job, but refind it by it's inputs?)
  
-	- 
-	- data loading invalidation triggers
-	- currently doesn't - running a dataloading job *always* triggers it's downstream 
-	  to recalc
-	-	attribute loading only triggers if the contents changed
-	-   - deprecate dataloading, I suppose
-	
 	- pretty and usable and appending runtime logging.
+	 including runtimes
 	- pruning
 -
 
@@ -40,4 +31,6 @@ Open stuff
 		
 		
 	- prebuild jbos
-	- filegenjobs temp output & rename 
+	- 
+	- filegenjobs temp output & rename (so that a crashing job doesn't get counted as 'done'),
+	  though I believe that no longer to be an issue, since we don't update the history?

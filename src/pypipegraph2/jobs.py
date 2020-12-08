@@ -82,6 +82,8 @@ class Job:
                     global_pipegraph.outputs_to_job_ids[other_job]
                 ]
                 o_inputs = [other_job]
+            if o_job.job_id == self.job_id:
+                raise exceptions.NotADag("Job can not depend on itself")
             global_pipegraph.add_edge(o_job, self)
             global_pipegraph.job_inputs[self.job_id].update(o_inputs)
         if other_jobs:
