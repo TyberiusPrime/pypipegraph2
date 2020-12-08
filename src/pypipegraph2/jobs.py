@@ -59,6 +59,10 @@ class Job:
 
         global_pipegraph.add(self)
 
+    def use_resources(self, resources: Resources):
+        self.resources = resources
+        return self
+
     def depends_on(
         self,
         other_job: Union[Union[str, Job], List[Union[str, Job]]],
@@ -176,13 +180,27 @@ class MultiFileGeneratingJob(Job):
                 pid = os.fork()
                 if pid == 0:
                     try:
-                        self.generating_function(self.get_input())
-                        os._exit(0)  # go down hard
+                        try:
+                            self.generating_function(self.get_input())
+                            os._exit(0)  # go down hard
+                        except TypeError as e:
+                            if hasattr(
+                                self.generating_function, "__code__"
+                            ):  # build ins
+                                func_info = f"{self.generating_function.__code__.co_filename}:{self.generating_function.__code__.co_firstlineno}"
+                            else:
+                                func_info = "unknown"
+                            if "takes 0 positional arguments but 1 was given" in str(e):
+                                raise TypeError(
+                                    e.args[0]
+                                    + ". You have forgotten to take the output_files as your first parameter."
+                                    + f"The function was defined in {func_info}."
+                                )
                     except Exception as e:
                         try:
                             tb = traceback.format_exc()
                             sender.send((e, tb))
-                        except Exception as e: 
+                        except Exception as e:
                             print(f"FileGeneratingJob done, but send failed: {e}")
                             pass
                         os._exit(1)
@@ -229,14 +247,19 @@ class MultiFileGeneratingJob(Job):
         else:
             return self.files
 
-    def output_needed(self, _ignored_runner):
+    def output_needed(self, runner):
         for fn in self.files:
             if not fn.exists():
+                return True
+            # other wise we have no history, and the skipping will
+            # break the graph execution
+            if str(fn) not in runner.job_states[self.job_id].historical_output:
                 return True
         return False
 
     def invalidated(self):
         for fn in self.files:
+            logger.job_trace(f"unlinking {fn}")
             fn.unlink()
 
 
@@ -937,6 +960,7 @@ class DataLoadingJob(Job):
         # that would be more inline with the 'only-recalc-if-the-input-actually-changed'
         # philosopy.
         # but it will cause false positives if you return things that have an instable str
+        # (or what ever hash source we use)
         # and it will cause false negatives if the callback is just for the side effects...
         # option a) seperate into calculate and store, so that we always have the actual value?
         # that's of course an API change compared to the pypipegraph. Hm.
@@ -949,6 +973,48 @@ class DataLoadingJob(Job):
             if job.output_needed(runner):
                 return True
         False
+
+
+def CachedDataLoadingJob(
+    cache_filename,
+    calc_callback,
+    load_callback,
+    depend_on_function=True,
+    resources: Resources = Resources.SingleCore,
+):
+    cache_filename = Path(cache_filename)
+
+    def do_cache(output_filename):
+        with open(output_filename, "wb") as op:
+            pickle.dump(calc_callback(), op, pickle.HIGHEST_PROTOCOL)
+
+    cache_job = FileGeneratingJob(
+        cache_filename, do_cache, depend_on_function=False, resources=resources
+    )
+    if depend_on_function:
+        cache_job.depends_on(FunctionInvariant(cache_filename, calc_callback))
+
+    def load():
+        try:
+            with open(cache_filename, "rb") as op:
+                res = pickle.load(op)
+                load_callback(res)
+        except pickle.UnpicklingError as e:
+            raise pickle.UnpicklingError(
+                f"Unpickling error in file {cache_filename}", e
+            )
+
+    load_job = DataLoadingJob(
+        "load" + str(cache_filename),
+        load,
+        depend_on_function=False,
+    )
+    load_job.depends_on(cache_job)
+    if depend_on_function:
+        load_job.depends_on(
+            FunctionInvariant("load" + str(cache_filename), load_callback)
+        )
+    return (load_job, cache_job)
 
 
 class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
@@ -1004,7 +1070,9 @@ def CachedAttributeLoadingJob(
             with open(cache_filename, "rb") as op:
                 return pickle.load(op)
         except pickle.UnpicklingError as e:
-            raise pickle.UnpicklingError(f"Unpickling error in file {cache_filename}", e)
+            raise pickle.UnpicklingError(
+                f"Unpickling error in file {cache_filename}", e
+            )
 
     load_job = AttributeLoadingJob(
         "load" + str(cache_filename),
@@ -1107,14 +1175,12 @@ def PlotJob(
     if render_args is None:
         render_args = {}
     output_filename = Path(output_filename)
-    allowed_suffixes = (".png",".pdf",".svg")
-    if not (
-            output_filename.suffix in allowed_suffixes         ):
-            raise ValueError(
-                f"Don't know how to create a {output_filename.suffix} file, must end on one of {allowed_suffixes}."
-            )
+    allowed_suffixes = (".png", ".pdf", ".svg")
+    if not (output_filename.suffix in allowed_suffixes):
+        raise ValueError(
+            f"Don't know how to create a {output_filename.suffix} file, must end on one of {allowed_suffixes}."
+        )
 
-       
     def do_plot(output_filename):
         if not hasattr(plot_job, "data_"):
             plot_job.data_ = calc_function()
@@ -1123,7 +1189,7 @@ def PlotJob(
 
     plot_job = FileGeneratingJob(output_filename, do_plot, depend_on_function=False)
     if depend_on_function:
-        plot_job.depends_on(FunctionInvariant( str(output_filename), plot_function))
+        plot_job.depends_on(FunctionInvariant(str(output_filename), plot_function))
 
     if cache_calc:
 
@@ -1153,7 +1219,9 @@ def PlotJob(
             cache_filename, plot_job, "data_", do_cache, depend_on_function=False
         )
         if depend_on_function:
-            attribute_cache_job.depends_on(FunctionInvariant(cache_filename, calc_function))
+            attribute_cache_job.depends_on(
+                FunctionInvariant(cache_filename, calc_function)
+            )
         plot_job.depends_on(attribute_load_job)
         cache_job = [attribute_load_job, attribute_cache_job]
     else:
@@ -1186,6 +1254,7 @@ def PlotJob(
     def add_another_plot(output_filename, plot_function, render_args={}):
         if render_args is None:
             render_args = {}
+
         def do_plot_another_plot(output_filename):
             if not hasattr(plot_job, "data_"):
                 plot_job.data_ = calc_function()

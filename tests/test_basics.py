@@ -642,9 +642,13 @@ class TestPypipegraph2:
         import os
 
         pid_here = os.getpid()
-        a = ppg.TempFileGeneratingJob("A", lambda of: counter("A") and Path('a').write_text(str(os.getpid())))
-        b = ppg.TempFileGeneratingJob("B", lambda of: counter("B") and Path('b').write_text(str(os.getpid()))) 
-        c = ppg.FileGeneratingJob('C', lambda of: counter('C'))
+        a = ppg.TempFileGeneratingJob(
+            "A", lambda of: counter("A") and Path("a").write_text(str(os.getpid()))
+        )
+        b = ppg.TempFileGeneratingJob(
+            "B", lambda of: counter("B") and Path("b").write_text(str(os.getpid()))
+        )
+        c = ppg.FileGeneratingJob("C", lambda of: counter("C"))
         c.depends_on(a, b)
         ppg.run()
         pid_a = Path("a").read_text()
@@ -656,9 +660,13 @@ class TestPypipegraph2:
         import os
 
         pid_here = os.getpid()
-        a = ppg.TempFileGeneratingJob("A", lambda of: counter("A") and Path('a').write_text(str(os.getpid())))
-        b = ppg.TempFileGeneratingJob("B", lambda of: counter("b") and Path('b').write_text(str(os.getpid()))) # yes, it's planned that it doesn't write B, this exposed a bug
-        c = ppg.FileGeneratingJob('C', lambda of: counter('C'))
+        a = ppg.TempFileGeneratingJob(
+            "A", lambda of: counter("A") and Path("a").write_text(str(os.getpid()))
+        )
+        b = ppg.TempFileGeneratingJob(
+            "B", lambda of: counter("b") and Path("b").write_text(str(os.getpid()))
+        )  # yes, it's planned that it doesn't write B, this exposed a bug
+        c = ppg.FileGeneratingJob("C", lambda of: counter("C"))
         c.depends_on(a, b)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
@@ -666,9 +674,77 @@ class TestPypipegraph2:
         assert last["A"].state == JobState.Executed
         assert last["B"].state == JobState.Failed
         assert last["C"].state == JobState.UpstreamFailed
-        assert 'FileNotFoundError' in last['B'].error
+        assert isinstance(last["B"].error.args[0], FileNotFoundError)
 
+    def test_file_gen_when_file_existed_outside_of_graph_depending_on_cached_data_load(
+        self, ppg_per_test, job_trace_log
+    ):
+        # this exposed a bug when the file was existing
+        # the graph would never return.
+        o = []
 
+        def load(x):
+            o.append(x)
+
+        load_job, cache_job = ppg.CachedDataLoadingJob(
+            "b", lambda: "52", load, depend_on_function=False
+        )
+        a = ppg.FileGeneratingJob("A", lambda of: of.write_text("a" + o[0]))
+        a.depends_on(load_job)
+        Path("b").write_text("b")
+        ppg.run()
+        assert Path("A").read_text() == "a52"
+
+    def test_event_timeout_handling(self, ppg_per_test):
+        def doit(of):
+            import time
+
+            time.sleep(2)
+            of.write_text("a")
+
+        job = ppg.FileGeneratingJob("a", doit)
+        ppg.run(event_timeout=1)
+        assert Path("a").exists()
+
+    def test_catching_catastrophic_execution_message_passing_failures(
+        self, ppg_per_test
+    ):
+        """if it get's really messed up, we raise a RunFailedInternally.
+        Hopefully there is no way by user code to trigger this"""
+
+        class BadFileGeneratingJob(ppg.FileGeneratingJob):
+            def output_needed(self, runner):
+                for fn in self.files:
+                    if not fn.exists():
+                        return True
+                    # other wise we have no history, and the skipping will
+                    # break the graph execution
+                    # if str(fn) not in runner.job_states[self.job_id].historical_output:
+                    #    return True
+                return False
+
+        # this exposed a bug when the file was existing
+        # the graph would never return.
+        o = []
+
+        def load(x):
+            o.append(x)
+
+        old_fg = ppg.FileGeneratingJob
+        try:
+            ppg.jobs.FileGeneratingJob = BadFileGeneratingJob
+
+            load_job, cache_job = ppg.CachedDataLoadingJob(
+                "b", lambda: "52", load, depend_on_function=False
+            )
+            a = ppg.FileGeneratingJob("A", lambda of: of.write_text("a" + o[0]))
+            a.depends_on(load_job)
+            Path("b").write_text("b")
+            assert type(cache_job) == BadFileGeneratingJob
+            with pytest.raises(ppg.exceptions.RunFailedInternally):
+                ppg.run(event_timeout=1)
+        finally:
+            ppg.jobs.FileGeneratingJob = old_fg
 
     @pytest.mark.xfail
     def test_job_redefinition(self):
@@ -933,7 +1009,6 @@ class TestPypipegraph2:
         )  # still no rerun - input to A didn't change!
         assert Path("b").read_text() == "2"  # this does not mean that B get's rerun.
         assert Path("B").read_text() == "B"
-
 
     @pytest.mark.xfail
     def test_undeclared_output_leads_to_job_and_ppg_failure(self):

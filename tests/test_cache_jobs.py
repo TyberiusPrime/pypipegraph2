@@ -1,10 +1,210 @@
 import pytest
+import pickle
 from pathlib import Path
 import pypipegraph2 as ppg
 
 from .shared import read, write, append, Dummy
 
 
+@pytest.mark.usefixtures("ppg_per_test")
+class TestCachedDataLoadingJob:
+    def test_simple(self):
+        o = Dummy()
+
+        def calc():
+            return ", ".join(str(x) for x in range(0, 100))
+
+        def store(value):
+            o.a = value
+
+        job, cache_job = ppg.CachedDataLoadingJob("out/mycalc", calc, store)
+        of = "out/A"
+        Path('out').mkdir()
+
+        def do_write(of):
+            write(of, o.a)
+
+        ppg.FileGeneratingJob(of, do_write).depends_on(job)
+        ppg.run()
+        assert read(of) == ", ".join(str(x) for x in range(0, 100))
+
+    def test_no_downstream_still_calc(self):
+        o = Dummy()
+
+        def calc():
+            return ", ".join(str(x) for x in range(0, 100))
+
+        def store(value):
+            o.a = value
+
+        Path('out').mkdir()
+        ppg.CachedDataLoadingJob("out/mycalc", calc, store)
+        # job.ignore_code_changes() #or it would run anyway... hm.
+        assert not (Path("out/mycalc").exists())
+        ppg.run()
+        assert Path("out/mycalc").exists()
+
+    def test_passing_non_function_to_calc(self):
+
+        with pytest.raises(ValueError):
+            ppg.CachedDataLoadingJob("out/a", "shu", lambda value: 55)
+
+    def test_passing_non_function_to_store(self):
+        with pytest.raises(ValueError):
+            ppg.CachedDataLoadingJob("out/a", lambda value: 55, "shu")
+
+    def test_passing_non_string_as_jobid(self):
+        with pytest.raises(TypeError):
+            ppg.CachedDataLoadingJob(5, lambda: 1, lambda value: 55)
+
+    def test_being_generated(self):
+        o = Dummy()
+
+        def calc():
+            return 55
+
+        def store(value):
+            o.a = value
+
+        def dump(of):
+            write('out/c', 'c')
+            write("out/A", str(o.a))
+
+        def gen():
+            load_job, cache_job = ppg.CachedDataLoadingJob("out/B", calc, store)
+            dump_job = ppg.FileGeneratingJob("out/A", dump)
+            dump_job.depends_on(load_job)
+
+        Path('out').mkdir()
+        ppg.JobGeneratingJob("out/C", gen)
+        ppg.run()
+        assert read("out/A") == "55"
+        assert read("out/c") == "c"
+
+    def test_being_generated_nested(self):
+        o = Dummy()
+
+        def calc():
+            return 55
+
+        def store(value):
+            o.a = value
+
+        def dump(of):
+            write(of, str(o.a))
+
+        def gen():
+            write('out/c', 'c')
+            calc_job, cache_job = ppg.CachedDataLoadingJob("out/B", calc, store)
+
+            def gen2():
+                write('out/d', 'd')
+                dump_job = ppg.FileGeneratingJob("out/A", dump)
+                dump_job.depends_on(calc_job)
+
+            ppg.JobGeneratingJob("out/D", gen2)
+
+        Path('out').mkdir()
+        ppg.JobGeneratingJob("out/C", gen)
+        ppg.run()
+        assert read("out/c") == "c"
+        assert read("out/d") == "d"
+        assert read("out/A") == "55"
+
+
+
+    def test_cached_dataloading_job_does_not_load_its_preqs_on_cached(
+        self
+    ):
+        o = Dummy()
+
+        def a():
+            o.a = "A"
+            append("out/A", "A")
+
+        def calc():
+            append("out/B", "B")
+            return o.a * 2
+
+        def load(value):
+            o.c = value
+            append("out/Cx", "C")  # not C, that's the cached file, you know...
+
+        def output(of):
+            write(of, o.c)
+        Path('out').mkdir()
+
+        dl = ppg.DataLoadingJob("out/A", a)
+        ca, cca = ppg.CachedDataLoadingJob("out/C", calc, load)
+        fg = ppg.FileGeneratingJob("out/D", output)
+        fg.depends_on(ca)
+        cca.depends_on(dl)
+        ppg.run()
+        assert read("out/D") == "AA"  # we did write the final result
+        assert read("out/A") == "A"  # ran the dl job
+        assert read("out/B") == "B"  # ran the calc job...
+        assert read("out/Cx") == "C"  # ran the load jobo
+        Path("out/D").unlink()  # so the filegen and the loadjob of cached should rerun...
+        ppg.new()
+        dl = ppg.DataLoadingJob("out/A", a)
+        ca, cca = ppg.CachedDataLoadingJob("out/C", calc, load)
+        fg = ppg.FileGeneratingJob("out/D", output)
+        fg.depends_on(ca)
+        cca.depends_on(dl)
+        ppg.run()
+        assert read("out/D") == "AA"  # we did write the final result
+        assert read("out/A") == "A"  # did not run the dl job
+        assert read("out/B") == "B"  # did not run the calc job again
+        assert read("out/Cx") == "CC"  # did run the load job again
+
+    def test_name_must_be_str(self):
+        with pytest.raises(TypeError):
+            ppg.CachedDataLoadingJob(123, lambda: 123, lambda: 5)
+        with pytest.raises(ValueError):
+            ppg.CachedDataLoadingJob("123", 123, lambda: 5)
+        with pytest.raises(ValueError):
+            ppg.CachedDataLoadingJob("123", lambda: 5, 123)
+        with pytest.raises(ValueError):
+            ppg.CachedDataLoadingJob(Path("123"), lambda: 5, 123)
+
+
+    def test_cant_unpickle(self, job_trace_log):
+        o = Dummy()
+
+        def calc():
+            return ", ".join(str(x) for x in range(0, 100))
+
+        def store(value):
+            o.a = value
+
+        job, cache_job = ppg.CachedDataLoadingJob("out/mycalc", calc, store, depend_on_function=False)
+        Path('out').mkdir()
+        write("out/mycalc", "no unpickling this")
+        of = "out/A"
+
+        def do_write(of):
+            write(of, o.a)
+
+        ppg.FileGeneratingJob(of, do_write).depends_on(job)
+        ppg.run() # this does not raise. The file must be generated by the graph!
+        # overwriting it again
+        write("out/mycalc", "no unpickling this")
+        Path(of).unlink()
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        error = ppg.global_pipegraph.last_run_result[job.job_id].error
+        assert isinstance(error, ppg.JobError)
+        assert isinstance(error.args[0], pickle.UnpicklingError)
+        assert "out/mycalc" in str(error)
+
+    def test_use_cores(self):
+        ca, cca = ppg.CachedDataLoadingJob("out/C", lambda: 55, lambda x: None)
+        assert cca.resources is ppg.Resources.SingleCore
+        assert cca.use_resources(ppg.Resources.AllCores) is cca
+        assert cca.resources is ppg.Resources.AllCores
+        assert ca.resources is ppg.Resources.SingleCore
+        assert ca.use_resources(ppg.Resources.AllCores) is ca
+        assert ca.resources is ppg.Resources.AllCores
 
 
 @pytest.mark.usefixtures("ppg_per_test")

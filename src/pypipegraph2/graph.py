@@ -69,7 +69,8 @@ class PyPipeGraph:
         )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
 
     def run(
-        self, print_failures: bool = True, raise_on_job_error=True
+        self, print_failures: bool = True, raise_on_job_error=True,
+        event_timeout=5
     ) -> Dict[str, JobState]:
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
             print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
@@ -95,7 +96,7 @@ class PyPipeGraph:
                 if max_runs == 0:
                     raise ValueError("endless loop")
                 try:
-                    runner = Runner(self, history)
+                    runner = Runner(self, history, event_timeout)
                     result = runner.run()
                     self.update_history(result, history)
                     break

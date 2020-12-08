@@ -13,6 +13,8 @@ A longer description of your project goes here...
 
 Differences to pypipegraph
 
+	- FileGeneratingJobs now must take the target filename as first parameter
+	  MultiFileGeneratingJob receive either their mapping, or their list of output files.
 	- PlotJob now returns a tuple: (PlotJob, Optional(CalcJob), Optional(TableJob).
 	  This removes all the unintuitive uglyness of 'which job will depends_on add the
 	  dependency to'.

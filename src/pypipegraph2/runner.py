@@ -54,10 +54,11 @@ class ExitNow:
 
 
 class Runner:
-    def __init__(self, job_graph, history):
+    def __init__(self, job_graph, history, event_timeout):
         from . import _with_changed_global_pipegraph
 
         logger.job_trace("Runner.__init__")
+        self.event_timeout = event_timeout
         with _with_changed_global_pipegraph(JobCollector()):
             self.jobs = job_graph.jobs.copy()
             self.job_inputs = job_graph.job_inputs.copy()
@@ -199,38 +200,49 @@ class Runner:
             self.push_event("JobReady", (job_id,))
         for job_id in skipped_jobs:
             self.push_event("JobSkipped", (job_id,))
+        self.jobs_in_flight = 0
         for t in self.threads:
             t.start()
         todo = len(self.jobs)
         logger.job_trace(f"jobs: {self.jobs.keys()}")
         logger.job_trace(f"skipped jobs: {skipped_jobs}")
-        while todo:
-            ev = self.events.get(timeout=5)
-            logger.job_trace(
-                f"<-handle {ev[0]} {escape_logging(ev[1][0])}, todo: {todo}"
-            )
-            if ev[0] == "JobSuccess":
-                self.handle_job_success(*ev[1])
-                todo -= 1
-            elif ev[0] == "JobSkipped":
-                self.handle_job_skipped(*ev[1])
-                todo -= 1
-            elif ev[0] == "JobReady":
-                self.handle_job_ready(*ev[1])
-            elif ev[0] == "JobFailed":
-                self.handle_job_failed(*ev[1])
-                todo -= 1
-            elif ev[0] == "JobUpstreamFailed":
-                todo -= 1
-            else:
-                raise NotImplementedError(ev[0])
-            logger.job_trace(f"<-done - todo: {todo}")
+        try:
+            while todo:
+                try:
+                    ev = self.events.get(timeout=self.event_timeout)
+                except queue.Empty:
+                    # long time, no event.
+                    if not self.jobs_in_flight:
+                        #ok, a coding error has lead to us not finishing 
+                        #the todo graph.
+                        raise exceptions.RunFailedInternally
 
-        for t in self.threads:
-            self.jobs_to_run_que.put(ExitNow)
-        logger.job_trace("Joining threads")
-        for t in self.threads:
-            t.join()
+                logger.job_trace(
+                    f"<-handle {ev[0]} {escape_logging(ev[1][0])}, todo: {todo}"
+                )
+                if ev[0] == "JobSuccess":
+                    self.handle_job_success(*ev[1])
+                    todo -= 1
+                elif ev[0] == "JobSkipped":
+                    self.handle_job_skipped(*ev[1])
+                    todo -= 1
+                elif ev[0] == "JobReady":
+                    self.handle_job_ready(*ev[1])
+                elif ev[0] == "JobFailed":
+                    self.handle_job_failed(*ev[1])
+                    todo -= 1
+                elif ev[0] == "JobUpstreamFailed":
+                    todo -= 1
+                else:
+                    raise NotImplementedError(ev[0])
+                logger.job_trace(f"<-done - todo: {todo}")
+        finally:
+
+            for t in self.threads:
+                self.jobs_to_run_que.put(ExitNow)
+            logger.job_trace("Joining threads")
+            for t in self.threads:
+                t.join()
 
         if len(global_pipegraph.jobs) != job_count:
             logger.job_trace(
@@ -272,7 +284,9 @@ class Runner:
                 # }
             job_state.state = JobState.Executed
             self.inform_downstreams_of_outputs(job_id, job_outputs)
-        logger.job_trace(f"after handle_job_success {job_id}.state == {self.job_states[job_id]}")
+        logger.job_trace(
+            f"after handle_job_success {job_id}.state == {self.job_states[job_id]}"
+        )
 
     def inform_downstreams_of_outputs(self, job_id, job_outputs):
         job = self.jobs[job_id]
@@ -293,6 +307,7 @@ class Runner:
                 else:
                     logger.job_trace(f"\t\t\tNot an input {name}")
             if self.all_inputs_finished(downstream_id):
+                logger.job_trace(f"\t\tAll inputs finished {downstream_id}")
                 if (
                     downstream_job.job_kind is JobKind.Temp
                     and downstream_state.validation_state is ValidationState.Invalidated
@@ -324,7 +339,16 @@ class Runner:
     def handle_job_skipped(self, job_id):
         job_state = self.job_states[job_id]
         job_state.state = JobState.Skipped
-        job_state.updated_output = job_state.historical_output.copy()
+        if job_state.historical_output:
+            job_state.updated_output = job_state.historical_output.copy()
+        else: 
+            # yelp, we skipped this job (because it's output existed?
+            # but we do not have a historical state.
+            # that means the downstream jobs will never have all_inputs_finished
+            # and we hang.
+            # so...
+            job_state.updated_output = job_state.historical_output.copy()
+
         # the input has already been filled.
         self.inform_downstreams_of_outputs(
             job_id, job_state.updated_output
@@ -348,10 +372,11 @@ class Runner:
         logger.job_trace(
             f"\t\t\tupdated_input: {escape_logging(self.job_states[job_id].updated_input.keys())}"
         )
-
-        return len(self.job_states[job_id].updated_input) == len(
+        all_finished = len(self.job_states[job_id].updated_input) == len(
             self.job_inputs[job_id]
         )
+        logger.job_trace(f"\t\t\tall_input_finished: {all_finished}")
+        return all_finished
 
     def push_event(self, event, args, indent=0):
         with self.event_lock:
@@ -425,6 +450,7 @@ class Runner:
     def executing_thread(self):
         while True:
             job_id = self.jobs_to_run_que.get()
+            self.jobs_in_flight += 1
             logger.job_trace(f"Executing thread, got {job_id}")
             if job_id is ExitNow:
                 break
@@ -443,6 +469,8 @@ class Runner:
                     job_state.error = exceptions.JobError(e, traceback.format_exc())
                 logger.warning(f"Execute {job_id} failed: {escape_logging(e)}")
                 self.push_event("JobFailed", (job_id, job_id))
+            else:
+                self.jobs_in_flight -= 1
 
 
 class JobCollector:
