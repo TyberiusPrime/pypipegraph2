@@ -30,7 +30,9 @@ Open stuff
 	    without history who's file already exists?
 		
 		
-	- prebuild jbos
+	- prebuild jobs
 	- 
 	- filegenjobs temp output & rename (so that a crashing job doesn't get counted as 'done'),
 	  though I believe that no longer to be an issue, since we don't update the history?
+  
+  

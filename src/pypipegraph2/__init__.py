@@ -33,7 +33,7 @@ def new(
     if history_dir is None:
         history_dir = Path(".ppg/history")
     if log_level is None:
-        log_level = (logging.INFO,)
+        log_level = logging.INFO
 
     _last_new_arguments = cores, log_dir, history_dir, log_level
     global global_pipegraph

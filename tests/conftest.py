@@ -131,6 +131,10 @@ def dir_per_test(request):
     finally:
         os.chdir(old_dir)
 
+@pytest.fixture
+def create_out_dir(request):
+    Path('out').mkdir()
+    yield 
 
 @pytest.fixture
 def both_ppg_and_no_ppg(request):
@@ -291,3 +295,4 @@ def trace_log():  # could not find out how to abstract pytest fixtures
     yield
     logger.remove(handler_id)
     # logger.add(old)
+

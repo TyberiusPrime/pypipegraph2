@@ -45,7 +45,7 @@ class Job:
             self.outputs = outputs
             self.mapped_outputs = {}
         else:
-            raise ValueError("Invalid output definition")
+            raise TypeError("Invalid output definition.")
         self.outputs = sorted([str(x) for x in self.outputs])
         self.job_id = ":::".join(self.outputs)
         self.readd()
@@ -1106,11 +1106,24 @@ class _AttributeCleanupJob(Job):
 
 
 class JobGeneratingJob(Job):
+    """ A job generating job runs once per ppg.Graph.run(),
+    and may alter the graph in essentially any way. The changes are ignored
+    until the first run finishes, then the whole graph is rerun.
+
+    This has has to run every time to actually create its downstream jobs,
+    for example when the first pipegraph run crashed,
+    and you're rerunning the whole program.
+
+    If you depend on a JobGeneratingJob your job will be invalidated
+    every time the JobGeneratingJob runs.
+
+    """
     job_kind = JobKind.JobGenerating
 
     def __init__(self, job_id, callback, depend_on_function=True):
         self.depend_on_function = depend_on_function
         self.callback = callback
+        self.last_run_id = None
         super().__init__(job_id)
 
     def readd(self):  # Todo: refactor
@@ -1119,11 +1132,19 @@ class JobGeneratingJob(Job):
             self.depends_on(func_invariant)
         super().readd()
 
-    def output_needed(self, _ignored_runner):
+    def output_needed(self, runner):
+        logger.error(f"JobGeneratingJob - last_run_id {self.last_run_id}, runner.run_id: {runner.run_id}")
+        if runner.run_id != self.last_run_id:
+            return True
         return False
 
-    def run(self, _runner, historical_output):
+    def run(self, runner, historical_output):
+        self.last_run_id = runner.run_id
         self.callback()
+        #todo: is this the right approach
+        # should we maybe instead return a sorted list of new jobs
+        # if you depend on this, you're going te be triggered
+        # *all* the time. Well once per graph.run
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
         }  # so the downstream get's invalidated

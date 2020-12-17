@@ -263,8 +263,11 @@ class TestJobGeneratingJob:
 
 
 
-    def test_raises_if_generating_within_dataload(self):
-        ppg.util.global_pipegraph.quiet = False
+    def test_creating_within_dataload(self):
+        """This used to be forbidden in ppg1.
+        I don't see a reason to forbid it now, the only
+        substantial difference is that DataLoadingJobs run when their downstream needs them,
+        and JobGeneratingJobs always run"""
         write_job = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "aa"))
 
         def load():
@@ -272,14 +275,14 @@ class TestJobGeneratingJob:
 
         dl = ppg.DataLoadingJob("load_data", load)
         write_job.depends_on(dl)
-        with pytest.raises(ppg.RunFailed):
-            ppg.run()
-        assert "Trying to add new jobs to running pipeline" in str(dl.exception)
+        #with pytest.raises(ppg.RunFailed):
+        ppg.run()
+        assert Path("out/B").exists()
 
     def test_ignored_if_generating_within_filegenerating(self):
         write_job = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "aa"))
 
-        def load():
+        def load(_of):
             ppg.FileGeneratingJob("out/B", lambda of: write("out/B", "aa"))
             write("out/C", "c")
 
@@ -287,22 +290,7 @@ class TestJobGeneratingJob:
         write_job.depends_on(dl)
         ppg.run()
         assert read("out/C") == "c"
-
-    def test_jobgenerating_is_not_dependency_injection(self):
-        old = ppg.FileGeneratingJob("out/D", lambda of: write("out/D", "D"))
-
-        def gen():
-            write("out/E", "E")
-            p = ppg.FileGeneratingJob("out/C", lambda of: write("out/C", "C"))
-            old.depends_on(p)
-
-        j = ppg.JobGeneratingJob("genjob", gen)
-        with pytest.raises(ppg.RunFailed):
-            ppg.run()
-        assert isinstance(j.exception, ppg.JobContractError)
-        assert read("out/E") == "E"
-        assert not os.path.exists("out/C")  # that job never makes it to the pipeline
-        assert read("out/D") == "D"
+        assert not Path('out/B').exists()
 
     def test_invalidation(self):
         def gen():
@@ -365,278 +353,3 @@ class TestJobGeneratingJob:
         assert read("out/D") == "E"
         assert counter[0] == 3
 
-
-@pytest.mark.usefixtures("new_pipegraph")
-class TestDependencyInjectionJob:
-    def test_basic(self):
-        # TODO: there is a problem with this apporach. The AttributeLoadingJob
-        # references different objects, since it get's pickled alongside with the method,
-        # and depickled again, and then it's not the same object anymore,
-        # so the FileGeneratingJob and the AttributeLoadingJob in this test
-        # reference different objects.
-        # I'm not sure how to handle this right now though.
-
-        # I have an idea: Do JobGraphModifyingJobs in each worker, and send back just the
-        # dependency data (and new job name).
-        # that way, we can still execute on any worker, and all the pointers should be
-        # right.
-        ppg.new()
-
-        o = Dummy()
-        of = "out/A"
-
-        def do_write(of):
-            # logging.info("Accessing dummy (o) %i in pid %s" % (id(o), os.getpid()))
-            write(of, o.A + o.B)
-
-        job = ppg.FileGeneratingJob(of, do_write)
-
-        def generate_deps():
-            def load_a():
-                # logging.info('executing load A')
-                return "A"
-
-            def load_b():
-                # logging.info('executing load B')
-                return "B"
-
-            # logging.info("Creating dl on %i in pid %s" % (id(o), os.getpid()))
-            dlA = ppg.AttributeLoadingJob("dlA", o, "A", load_a)
-            # logging.info("created dlA")
-            dlB = ppg.AttributeLoadingJob("dlB", o, "B", load_b)
-            job.depends_on(dlA)
-            job.depends_on(dlB)
-            return [dlA, dlB]
-
-        gen_job = ppg.DependencyInjectionJob("C", generate_deps)
-        job.depends_on(gen_job)
-        ppg.run()
-        assert read(of) == "AB"
-
-    def test_raises_on_non_dependend_job_injection(self):
-        o = Dummy()
-        of = "out/A"
-
-        def do_write(of):
-            write(of, o.A + o.B)
-
-        job = ppg.FileGeneratingJob(of, do_write)
-        jobD = ppg.FileGeneratingJob("out/D", lambda of: write("out/D", "D"))
-
-        def generate_deps():
-            def load_a():
-                return "A"
-
-            def load_b():
-                return "B"
-
-            dlA = ppg.AttributeLoadingJob("dlA", o, "A", load_a)
-            dlB = ppg.AttributeLoadingJob("dlB", o, "B", load_b)
-            job.depends_on(dlA)
-            jobD.depends_on(dlB)  # this line must raise
-
-        gen_job = ppg.DependencyInjectionJob("C", generate_deps)
-        job.depends_on(gen_job)
-        with pytest.raises(ppg.RunFailed):
-            ppg.run()
-
-        assert not (os.path.exists(of))  # since the gen job crashed
-        assert os.path.exists(
-            "out/D"
-        )  # since it has no relation to the gen job actually...
-        assert isinstance(gen_job.exception, ppg.JobContractError)
-        assert "was not dependand on the " in str(gen_job.exception)
-
-    def test_raises_on_non_dependend_job_injection2(self):
-        o = Dummy()
-        of = "out/A"
-
-        def do_write(of):
-            write(of, o.A + o.B)
-
-        job = ppg.FileGeneratingJob(of, do_write)
-        ppg.FileGeneratingJob("out/D", lambda of: write("out/D", "D"))
-
-        def generate_deps():
-            def load_a():
-                return "A"
-
-            def load_b():
-                return "B"
-
-            dlA = ppg.AttributeLoadingJob("dlA", o, "A", load_a)
-            ppg.AttributeLoadingJob("dlB", o, "B", load_b)
-            job.depends_on(dlA)
-            # let's not do anything with dlA
-
-        gen_job = ppg.DependencyInjectionJob("C", generate_deps)
-        job.depends_on(gen_job)
-        with pytest.raises(ppg.RunFailed):
-            ppg.run()
-
-        assert not (os.path.exists(of))  # since the gen job crashed
-        assert os.path.exists(
-            "out/D"
-        )  # since it has no relation to the gen job actually...
-        assert isinstance(gen_job.exception, ppg.JobContractError)
-        assert "case 1" in str(gen_job.exception)
-
-    def test_raises_on_non_dependend_job_injection2_can_be_ignored(self):
-        o = Dummy()
-        of = "out/A"
-
-        def do_write(of):
-            write(of, o.A)  # + o.B - but B is not in the dependency chain!
-
-        job = ppg.FileGeneratingJob(of, do_write)
-        ppg.FileGeneratingJob("out/D", lambda of: write("out/D", "D"))
-
-        def generate_deps():
-            def load_a():
-                return "A"
-
-            def load_b():
-                return "B"
-
-            dlA = ppg.AttributeLoadingJob("dlA", o, "A", load_a)
-            ppg.AttributeLoadingJob("dlB", o, "B", load_b)
-            job.depends_on(dlA)
-            # let's not do anything with dlA
-
-        gen_job = ppg.DependencyInjectionJob(
-            "C", generate_deps, check_for_dependency_injections=False
-        )
-        job.depends_on(gen_job)
-        ppg.run()
-
-        assert os.path.exists(of)  # since the gen job crashed
-
-    def test_injecting_filegenerating_job(self):
-        of = "out/A"
-
-        def do_write(of):
-            write(of, read("out/B"))
-
-        job = ppg.FileGeneratingJob(of, do_write)
-
-        def generate_dep():
-            def write_B():
-                write("out/B", "B")
-
-            inner_job = ppg.FileGeneratingJob("out/B", write_B)
-            job.depends_on(inner_job)
-
-        job_gen = ppg.DependencyInjectionJob("gen_job", generate_dep)
-        job.depends_on(job_gen)
-        ppg.run()
-        assert read("out/A") == "B"
-
-    def test_passing_non_function(self):
-        with pytest.raises(ValueError):
-            ppg.DependencyInjectionJob("out/a", "shu")
-
-
-    def test_passing_non_string_as_jobid(self):
-        with pytest.raises(TypeError):
-            ppg.DependencyInjectionJob(5, lambda: 1)
-
-    def test_injecting_into_data_loading_does_not_retrigger(self):
-        o = Dummy()
-
-        def do_write(of):
-            append("out/A", o.a + o.b)
-            append("out/B", "X")
-
-        def dl_a():
-            o.a = "A"
-
-        def do_run():
-            of = "out/A"
-
-            def inject():
-                def dl_b():
-                    o.b = "B"
-
-                job_dl_b = ppg.DataLoadingJob("ob", dl_b)
-                job_dl.depends_on(job_dl_b)
-
-            job_fg = ppg.FileGeneratingJob(of, do_write)
-            job_dl = ppg.DataLoadingJob("oa", dl_a)
-            job_fg.depends_on(job_dl)
-            job_inject = ppg.DependencyInjectionJob("inject", inject)
-            job_dl.depends_on(job_inject)
-            ppg.run()
-
-        do_run()
-        assert read("out/A") == "AB"
-        assert read("out/B") == "X"
-        ppg.new()
-        do_run()
-        assert read("out/A") == "AB"  # same data
-        assert read("out/B") == "X"  # no rerun!
-        # now let's test if a change triggers the rerun
-
-        def do_run2():
-            of = "out/A"
-
-            def inject():
-                def dl_b():
-                    o.b = "C"  # so this dl has changed...
-
-                job_dl_b = ppg.DataLoadingJob("ob", dl_b)
-                job_dl.depends_on(job_dl_b)
-
-            job_fg = ppg.FileGeneratingJob(of, do_write)
-            job_dl = ppg.DataLoadingJob("oa", dl_a)
-            job_fg.depends_on(job_dl)
-            job_inject = ppg.DependencyInjectionJob("inject", inject)
-            job_dl.depends_on(job_inject)
-            ppg.run()
-
-        ppg.new()
-        do_run2()
-        assert read("out/A") == "AC"  # same data
-        assert read("out/B") == "XX"  # one rerun...
-
-    def test_generated_job_depends_on_failing_job(self):
-        # import logging
-        # ppg.new(log_file="debug.log", log_level=logging.DEBUG)
-        def fn_a():
-            raise ValueError()
-
-        def fn_b():
-            c = ppg.FileGeneratingJob("c", lambda of: write("c", read("a")))
-            c.depends_on(a)
-            return [c]
-
-        a = ppg.FileGeneratingJob("a", fn_a)
-        b = ppg.JobGeneratingJob("b", fn_b)
-        with pytest.raises(ppg.RunFailed):
-            ppg.run()
-
-        assert isinstance(a.exception, ValueError)
-        assert a.error_reason == "Exception"
-        assert b.error_reason == "no error"
-        assert ppg.util.global_pipegraph.jobs["c"].error_reason == "Indirect"
-
-    def test_generated_job_depends_on_failing_job_inverse(self):
-        # import logging
-        # ppg.new(log_file="debug.log", log_level=logging.DEBUG)
-        def fn_a():
-            raise ValueError()
-
-        def fn_b():
-            c = ppg.FileGeneratingJob("c", lambda of: write("c", read("a")))
-            c.depends_on(a)
-            return [c]
-
-        # note swapped order respective to previous test
-        b = ppg.JobGeneratingJob("b", fn_b)
-        a = ppg.FileGeneratingJob("a", fn_a)
-        with pytest.raises(ppg.RunFailed):
-            ppg.run()
-
-        assert isinstance(a.exception, ValueError)
-        assert a.error_reason == "Exception"
-        assert b.error_reason == "no error"
-        assert ppg.util.global_pipegraph.jobs["c"].error_reason == "Indirect"

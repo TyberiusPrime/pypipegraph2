@@ -67,6 +67,7 @@ class PyPipeGraph:
         self.outputs_to_job_ids = (
             {}
         )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
+        self.run_id = 0
 
     def run(
         self, print_failures: bool = True, raise_on_job_error=True,
@@ -83,7 +84,7 @@ class PyPipeGraph:
             logger.add(
                 self.log_dir / f"ppg_run_{time.time():.0f}.log", level=self.log_level
             )
-            logger.info(f"Run is go {id(self)} pid: {os.getpid()}")
+            logger.info(f"Run is go {id(self)} pid: {os.getpid()}, run_id {self.run_id}")
         self.history_dir.mkdir(exist_ok=True, parents=True)
         try:
             result = None
@@ -92,12 +93,13 @@ class PyPipeGraph:
             history = self.load_historical()
             max_runs = 5
             while True:
-                max_runs -=1 
+                max_runs -=1
                 if max_runs == 0:
                     raise ValueError("endless loop")
                 try:
                     runner = Runner(self, history, event_timeout)
-                    result = runner.run()
+                    result = runner.run(self.run_id)
+                    self.run_id += 1
                     self.update_history(result, history)
                     break
                 except _RunAgain as e:

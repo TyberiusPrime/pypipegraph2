@@ -979,14 +979,14 @@ class TestPypipegraph2:
         ppg.new()
         gen()
         ppg.run()
-        assert Path("a").read_text() == "1"
+        assert Path("a").read_text() == "2"
         assert Path("b").read_text() == "1"
         assert Path("B").read_text() == "B"
         ppg.new()
         jobA = gen()
         jobA.depends_on(ppg.ParameterInvariant("PA", "a"))
         ppg.run()
-        assert Path("a").read_text() == "2"
+        assert Path("a").read_text() == "3"
         assert Path("b").read_text() == "1"  # this does not mean that B get's rerun.
         assert Path("B").read_text() == "B"
 
@@ -996,19 +996,49 @@ class TestPypipegraph2:
         jobA.depends_on(ppg.ParameterInvariant("PA", "a"))
         ppg.run()
         assert (
-            Path("a").read_text() == "2"
-        )  # still no rerun - input to A didn't change!
-        assert Path("b").read_text() == "1"  # this does not mean that B get's rerun.
-        assert not Path("B").exists()
+            Path("a").read_text() == "4"
+        )  # a runs once per ppg.run()
+        assert Path("b").read_text() == "2"  # must rerun b, since file B is missing
+        assert Path("B").exists()
 
         ppg.new()
         gen()
         ppg.run()  # missing ParameterInvariant triggers A to run
         assert (
-            Path("a").read_text() == "3"
+            Path("a").read_text() == "5"
         )  # still no rerun - input to A didn't change!
         assert Path("b").read_text() == "2"  # this does not mean that B get's rerun.
         assert Path("B").read_text() == "B"
+
+    def test_job_generating_generated_fails_rerun(self, ppg_per_test, job_trace_log):
+        local_counter = [0]
+        def inner():
+            counter('a')
+            def fg(of):
+                if counter('b') in ('0', '1'):
+                    raise ValueError()
+                of.write_text('B')
+            ppg.FileGeneratingJob('B', fg)
+        def gen():
+            ppg.JobGeneratingJob('A', inner)
+        gen()
+        assert not Path('a').exists()
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert Path('a').read_text() == '1'
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert Path('a').read_text() == '2' # new .run means rerun this thing
+        assert not Path('B').exists()
+        ppg.new()
+        gen()
+        ppg.run()
+        assert Path('B').read_text() == 'B'
+        assert Path('a').read_text() == '3' # new pipegraph means we need to rerun the jobgenerating job
+
+
+
+
 
     @pytest.mark.xfail
     def test_undeclared_output_leads_to_job_and_ppg_failure(self):

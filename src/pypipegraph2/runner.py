@@ -166,7 +166,7 @@ class Runner:
                 result.append(upstream_job_id)
         return result
 
-    def run(self):
+    def run(self, run_id):
         from . import _with_changed_global_pipegraph, global_pipegraph
 
         job_count = len(global_pipegraph.jobs)  # track if new jobs are being created
@@ -175,6 +175,7 @@ class Runner:
 
         self.output_hashes = {}
         self.new_history = {}  # what are the job outputs this time.
+        self.run_id = run_id # to allow jobgenerating jobs to run just once per graph.run()
 
         job_ids_topological = list(networkx.algorithms.dag.topological_sort(self.dag))
 
