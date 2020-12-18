@@ -4,12 +4,10 @@ from loguru import logger
 import stat
 import time
 import hashlib
-import subprocess
 import shutil
 import pytest
 import pypipegraph2 as ppg
 from .shared import write, read, append, Dummy, counter
-import sys
 
 
 class Undepickable(object):
@@ -552,7 +550,7 @@ class TestInvariant:
             ppg.run()
         assert read("out/b") == "a"  # job was not run
 
-    def test_invariant_loading_issues_on_value_undepickableclass(self, job_trace_log):
+    def test_invariant_loading_issues_on_value_undepickableclass(self):
         import tempfile
         import pickle
 
@@ -1395,7 +1393,7 @@ class TestDependency:
             return [jobB]
 
         jobA.depends_on(gen_deps)
-        assert not "FunctionInvariant:out/B" in ppg.global_pipegraph.jobs
+        assert "FunctionInvariant:out/B" not in ppg.global_pipegraph.jobs
         ppg.run()
         assert read("out/A") == "AB"
 

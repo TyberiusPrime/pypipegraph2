@@ -42,7 +42,7 @@ class PyPipeGraph:
         log_level: int,
         paths: Optional[Dict[str, Union[Path, str]]] = None,
         run_mode: RunMode = default_run_mode(),
-        allow_short_filenames=False
+        allow_short_filenames=False,
     ):
 
         if cores is ALL_CORES:
@@ -148,7 +148,7 @@ class PyPipeGraph:
 
     def _get_history_fn(self):
         fn = Path(sys.argv[0]).name
-        return self.history_dir / f"ppg_status_{fn}"
+        return self.history_dir / f"ppg_status_{fn}.history"  # don't end on .py
 
     def load_historical(self):
         logger.trace("load_historicals")
@@ -174,14 +174,16 @@ class PyPipeGraph:
                             except (TypeError, pickle.UnpicklingError) as e:
                                 logger.job_trace(f"unipckling error {e}")
                                 if job_id is None:
-                                    raise exceptions.RunFailed("Could not depickle job id - history file is borked beyond automatic recovery")
+                                    raise exceptions.RunFailed(
+                                        "Could not depickle job id - history file is borked beyond automatic recovery"
+                                    )
                                 else:
                                     msg = (
-                                    f"Could not depickle invariant for {job_id} - "
-                                    "check code for depickling bugs. "
-                                    "Job will rerun, probably until the (de)pickling bug is fixed."
-                                    f"\n Exception: {e}"
-                                )
+                                        f"Could not depickle invariant for {job_id} - "
+                                        "check code for depickling bugs. "
+                                        "Job will rerun, probably until the (de)pickling bug is fixed."
+                                        f"\n Exception: {e}"
+                                    )
                                     self.do_raise.append(msg)
                                 # use pickle tools to read the pickles op codes until
                                 # the end of the current pickle, hopefully allowing decoding of the next one
@@ -195,7 +197,7 @@ class PyPipeGraph:
                                     raise exceptions.RunFailed(
                                         "Could not depickle invariants - "
                                         f"depickling of {job_id} failed, could not skip to next pickled dataset"
-                                        f" Exception was {e}" 
+                                        f" Exception was {e}"
                                     )
 
                     except EOFError:
@@ -247,17 +249,18 @@ class PyPipeGraph:
         # for the callbacks may create jobs
         # so we can't simply iterate over the jobs.values()
         with_callback = [j for j in self.jobs.values() if j.dependency_callbacks]
-        logger.info(f'with callbacks {[j.job_id for j in with_callback]}')
+        logger.info(f"with callbacks {[j.job_id for j in with_callback]}")
         if not with_callback:
             return
         for j in with_callback:
             dc = j.dependency_callbacks
-            j.dependency_callbacks = [] # must reset before run, might add new ones, right?
+            j.dependency_callbacks = (
+                []
+            )  # must reset before run, might add new ones, right?
             for c in dc:
                 logger.info(f"{j.job_id}, {c}")
                 j.depends_on(c())
         self.fill_dependency_callbacks()  # nested?
-
 
     def _print_failures(self):
         logger.trace("print_failures")

@@ -14,6 +14,7 @@ import shutil
 import os
 import pypipegraph2 as ppg
 import sys
+from loguru import logger
 
 # support code to remove test created files
 # only if the test suceeded
@@ -131,10 +132,12 @@ def dir_per_test(request):
     finally:
         os.chdir(old_dir)
 
+
 @pytest.fixture
 def create_out_dir(request):
-    Path('out').mkdir()
-    yield 
+    Path("out").mkdir()
+    yield
+
 
 @pytest.fixture
 def both_ppg_and_no_ppg(request):
@@ -255,11 +258,6 @@ def both_ppg_and_no_ppg(request):
             os.chdir(old_dir)
 
 
-from _pytest.logging import caplog as _caplog
-import logging
-from loguru import logger
-
-
 @pytest.fixture
 def job_trace_log():
     def fmt(record):
@@ -272,7 +270,7 @@ def job_trace_log():
             out = f"<blue>{out}</blue>"
         return out
 
-    old = logger.remove()
+    logger.remove()
     handler_id = logger.add(sys.stderr, format=fmt, level=6)
     yield
     logger.remove(handler_id)
@@ -295,4 +293,3 @@ def trace_log():  # could not find out how to abstract pytest fixtures
     yield
     logger.remove(handler_id)
     # logger.add(old)
-

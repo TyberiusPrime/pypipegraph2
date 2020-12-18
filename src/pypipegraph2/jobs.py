@@ -36,8 +36,6 @@ class Job:
         resources: Resources = Resources.SingleCore,
     ):
 
-        from . import global_pipegraph
-
         self.resources = resources
         if isinstance(outputs, str):
             self.outputs = [outputs]
@@ -82,7 +80,6 @@ class Job:
         (todo: when is the later useful)
         """
 
-
         from . import global_pipegraph
 
         if isinstance(other_job, list):
@@ -94,7 +91,7 @@ class Job:
                 o_inputs = other_job.outputs
             elif other_job is None:
                 return self
-            elif hasattr(other_job, '__call__'):
+            elif hasattr(other_job, "__call__"):
                 self.dependency_callbacks.append(other_job)
                 return self
             else:
@@ -152,16 +149,6 @@ class Job:
         job = ParameterInvariant(self.job_id, params)
         self.depends_on(job)
         return DependsOnInvariant(job, self)
-
-
-class InitialJob(Job):
-    job_kind = JobKind.Invariant
-
-    def __init__(self):
-        Job.__init__(self, "%%%initial%%%")
-
-    def run(self, _ignored_runner, _historical_output):
-        return {self.job_id: "I"}
 
 
 class _DownstreamNeedsMeChecker(Job):
@@ -270,12 +257,6 @@ class MultiFileGeneratingJob(Job):
                     else:
                         raise ValueError("Process died. Todo: extend tihs")
 
-                # p = multiprocessing.Process(target=self._inner_run, args=())
-                # p.start()
-                # p.join()
-                # res = que.get()
-                # if isinstance(res, Exception):
-                # raise res
         else:
             self.generating_function(self.get_input())
         missing_files = [x for x in self.files if not x.exists()]
@@ -286,14 +267,6 @@ class MultiFileGeneratingJob(Job):
 
         res = {str(of): hashers.hash_file(of) for of in self.files}
         return res
-
-    def _inner_run(self):
-        try:
-            self.generating_function(self.get_input())
-            # que.put(None)
-        except Exception as e:
-            # que.put(e)
-            pass
 
     def get_input(self):
         if self._single_file:
@@ -891,8 +864,8 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         super().__init__(str(self.file))
         if len(self.job_id) < 3 and not global_pipegraph.allow_short_filenames:
             raise ValueError(
-                "This is probably not the filename you intend to use: {}.".format(self) + 
-                " Use a longer filename or set graph.allow_short_filenames"
+                "This is probably not the filename you intend to use: {}.".format(self)
+                + " Use a longer filename or set graph.allow_short_filenames"
             )
 
     def output_needed(self, _ignored_runner):
@@ -1207,7 +1180,7 @@ def PlotJob(
     depend_on_function=True,
     cache_calc=True,
     create_table=True,
-):
+):  # noqa:C901
     """Return a tuple of 3 jobs, the last two entries might be none.
 
     The first one is always a FileGeneratingJob

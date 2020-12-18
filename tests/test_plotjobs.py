@@ -1,31 +1,7 @@
-"""
-The MIT License (MIT)
-
-Copyright (c) 2012, Florian Finkernagel <finkernagel@imt.uni-marburg.de>
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-"""
-
 import pytest
 import os
 from pathlib import Path
-from .shared import read, write, append, Dummy
+from .shared import read, write, append
 import pickle
 
 try:
@@ -54,7 +30,7 @@ if has_pyggplot:  # noqa C901
 
     @pytest.mark.usefixtures("ppg_per_test")
     class TestPlotJob:
-        def test_basic(self, job_trace_log):
+        def test_basic(self):
             def calc():
                 return pd.DataFrame(
                     {"X": list(range(0, 100)), "Y": list(range(50, 150))}
@@ -216,7 +192,7 @@ if has_pyggplot:  # noqa C901
             with pytest.raises(ValueError):
                 inner()
 
-        def test_reruns_just_plot_if_plot_changed(self, ppg_per_test, job_trace_log):
+        def test_reruns_just_plot_if_plot_changed(self):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -246,7 +222,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "A"
             assert read("out/plot") == "BB"
 
-        def test_no_rerun_if_ignore_code_changes_and_plot_changes(self, ppg_per_test, job_trace_log):
+        def test_no_rerun_if_ignore_code_changes_and_plot_changes(self):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -279,7 +255,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "A"
             assert read("out/plot") == "B"
 
-        def test_reruns_both_if_calc_changed(self, ppg_per_test):
+        def test_reruns_both_if_calc_changed(self):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -303,7 +279,10 @@ if has_pyggplot:  # noqa C901
                 append("out/calc", "A")
                 x = 5  # noqa: E157,F841
                 return pd.DataFrame(
-                    {"X": list(range(1, 101)), "Y": list(range(50, 150))} # output must really change
+                    {
+                        "X": list(range(1, 101)),
+                        "Y": list(range(50, 150)),
+                    }  # output must really change
                 )
 
             ppg.PlotJob(of, calc2, plot)
@@ -312,7 +291,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "AA"
             assert read("out/plot") == "BB"
 
-        def test_no_rerun_if_calc_change_but_ignore_codechanges(self, ppg_per_test):
+        def test_no_rerun_if_calc_change_but_ignore_codechanges(self):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -359,7 +338,8 @@ if has_pyggplot:  # noqa C901
                 ppg.run(print_failures=False)
             print(ppg.global_pipegraph.last_run_result[cache_job[1].job_id].error)
             assert isinstance(
-                ppg.global_pipegraph.last_run_result[cache_job[1].job_id].error, ppg.JobError
+                ppg.global_pipegraph.last_run_result[cache_job[1].job_id].error,
+                ppg.JobError,
             )
 
         def test_raises_if_plot_returns_non_plot(self):
@@ -406,7 +386,7 @@ if has_pyggplot:  # noqa C901
             with pytest.raises(TypeError):
                 inner()
 
-        def test_unpickling_error(self, ppg_per_test):
+        def test_unpickling_error(self):
             def calc():
                 return pd.DataFrame(
                     {"X": list(range(0, 100)), "Y": list(range(50, 150))}

@@ -166,7 +166,7 @@ class TestCachedDataLoadingJob:
         with pytest.raises(TypeError):
             ppg.CachedDataLoadingJob(Path("123"), lambda: 5, 123)
 
-    def test_cant_unpickle(self, job_trace_log):
+    def test_cant_unpickle(self):
         o = Dummy()
 
         def calc():
@@ -236,7 +236,7 @@ class TestCachedAttributeJob:
         ppg.run()
         assert Path("mycalc").exists()
 
-    def test_invalidation_redoes_output(self, ppg_per_test):
+    def test_invalidation_redoes_output(self):
         o = Dummy()
 
         def calc():
@@ -252,7 +252,7 @@ class TestCachedAttributeJob:
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 
-        ppg_per_test.new()
+        ppg.new()
 
         def calc2():
             return ", ".join(str(x) for x in range(0, 200))
@@ -264,7 +264,7 @@ class TestCachedAttributeJob:
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 200))
 
-    def test_invalidation_ignored_does_not_redo_output(self, ppg_per_test):
+    def test_invalidation_ignored_does_not_redo_output(self):
         o = Dummy()
 
         def calc():
@@ -280,7 +280,7 @@ class TestCachedAttributeJob:
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 
-        ppg_per_test.new()
+        ppg.new()
 
         def calc2():
             return ", ".join(str(x) for x in range(0, 200))
@@ -292,7 +292,7 @@ class TestCachedAttributeJob:
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 
-        ppg_per_test.new()
+        ppg.new()
         job, cache_job = ppg.CachedAttributeLoadingJob("mycalc", o, "a", calc2)
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run()
@@ -368,7 +368,7 @@ class TestCachedAttributeJob:
         with pytest.raises(ppg.JobContractError):
             ppg.CachedAttributeLoadingJob("A", o2, "a", cache)
 
-    def test_cached_attribute_job_does_not_load_its_preqs_on_cached(self, ppg_per_test):
+    def test_cached_attribute_job_does_not_load_its_preqs_on_cached(self):
         o = Dummy()
 
         def a():
@@ -392,7 +392,7 @@ class TestCachedAttributeJob:
         assert read("A") == "A"  # ran the dl job
         assert read("B") == "B"  # ran the calc job...
         Path("D").unlink()  # so the filegen and the loadjob of cached should rerun...
-        ppg_per_test.new()
+        ppg.new()
 
         dl = ppg.DataLoadingJob("A", a)
         ca, cache_job = ppg.CachedAttributeLoadingJob("C", o, "c", calc)

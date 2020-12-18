@@ -30,7 +30,7 @@ def simple():
         fg = ppg.FileGeneratingJob(
             str(ii),
             lambda of, ii=ii: of.write_text(data[ii]),
-            #resources=ppg.Resources.RunsHere,
+            # resources=ppg.Resources.RunsHere,
         )
         fg.depends_on(loader)
         if ii > 10:
@@ -40,7 +40,7 @@ def simple():
                 loader.depends_on(jobs[ii % 10])
         jobs.append(fg)
     for i in range(10):
-        ppg.run() # i really want to see the nothing to do parts
+        ppg.run()  # i really want to see the nothing to do parts
 
 
 def test_simple(benchmark):

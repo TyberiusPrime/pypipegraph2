@@ -1,5 +1,3 @@
-
-
 import pytest
 import pypipegraph2 as ppg
 from .shared import write
@@ -15,7 +13,6 @@ class TestCycles:
             jobB.depends_on(jobA)
             # ppg.run()
 
-
     def test_indirect_cicle(self):
         jobA = ppg.FileGeneratingJob("A", lambda: write("A", "A"))
         jobB = ppg.FileGeneratingJob("B", lambda: write("B", "A"))
@@ -26,7 +23,6 @@ class TestCycles:
 
         with pytest.raises(ppg.exceptions.NotADag):
             ppg.run()
-
 
     def test_exceeding_max_cycle(self):
         max_depth = 50

@@ -1,6 +1,4 @@
 from pathlib import Path
-from hashlib import md5
-from .parallel import CoreLock
 from xxhash import xxh3_128
 
 
@@ -13,8 +11,8 @@ def hash_file(path: Path):
     # when passed more than 100kb (otherwise it's a
     # faster *not* to acquire the lock!)
     hasher = xxh3_128()
-    #if known_st_size is None:
-        #known_st_size = path.stat().st_size
+    # if known_st_size is None:
+    # known_st_size = path.stat().st_size
     # we are not acquiring the core lock here.
     # why? because this is essentially always
     # limited by the read-bandwidth, not the
@@ -25,9 +23,9 @@ def hash_file(path: Path):
     # (except for memory bandwith. oh well, at least
     # it shouldn't go into swap with the tiny buffer we use here)
     with open(path, "rb") as op:
-        block = op.read(1024*512)
+        block = op.read(1024 * 512)
         while block:
             hasher.update(block)
-            block = op.read(1024*512)
+            block = op.read(1024 * 512)
 
     return {"xx": hasher.hexdigest()}

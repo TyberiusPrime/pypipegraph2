@@ -1,13 +1,11 @@
 from . import exceptions
 import queue
-import collections
 from loguru import logger
 import time
 import traceback
 import networkx
 from .util import escape_logging
 from .enums import JobKind, ValidationState, JobState
-from .jobs import InitialJob
 from .exceptions import _RunAgain
 from .parallel import CoreLock
 import threading
@@ -167,7 +165,7 @@ class Runner:
         return result
 
     def run(self, run_id):
-        from . import _with_changed_global_pipegraph, global_pipegraph
+        from . import global_pipegraph
 
         job_count = len(global_pipegraph.jobs)  # track if new jobs are being created
 
@@ -175,7 +173,9 @@ class Runner:
 
         self.output_hashes = {}
         self.new_history = {}  # what are the job outputs this time.
-        self.run_id = run_id # to allow jobgenerating jobs to run just once per graph.run()
+        self.run_id = (
+            run_id  # to allow jobgenerating jobs to run just once per graph.run()
+        )
 
         job_ids_topological = list(networkx.algorithms.dag.topological_sort(self.dag))
 
@@ -214,8 +214,8 @@ class Runner:
                 except queue.Empty:
                     # long time, no event.
                     if not self.jobs_in_flight:
-                        #ok, a coding error has lead to us not finishing 
-                        #the todo graph.
+                        # ok, a coding error has lead to us not finishing
+                        # the todo graph.
                         raise exceptions.RunFailedInternally
 
                 logger.job_trace(
@@ -250,7 +250,7 @@ class Runner:
                 f"created new jobs. _RunAgain issued {len(global_pipegraph.jobs)} != {job_count}"
             )
             for job_id in global_pipegraph.jobs:
-                if not job_id in self.jobs:
+                if job_id not in self.jobs:
                     logger.job_trace(f"new job {job_id}")
             raise _RunAgain(self.job_states)
         logger.job_trace("Left runner.run()")
@@ -342,7 +342,7 @@ class Runner:
         job_state.state = JobState.Skipped
         if job_state.historical_output:
             job_state.updated_output = job_state.historical_output.copy()
-        else: 
+        else:
             # yelp, we skipped this job (because it's output existed?
             # but we do not have a historical state.
             # that means the downstream jobs will never have all_inputs_finished

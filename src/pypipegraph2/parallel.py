@@ -1,7 +1,5 @@
 from threading import Lock, Condition
 import threading
-import _thread
-import time
 
 # from loguru import logger
 

@@ -54,7 +54,7 @@ class TestCoreLock:
         threads = []
 
         def inner(c):
-            with mylock.using(c % 8 +1):
+            with mylock.using(c % 8 + 1):
                 counter.append(c)
 
         for i in range(8 * 4 + 1):

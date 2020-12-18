@@ -23,9 +23,14 @@ class JobContractError(PPGException):
 class RunFailed(PPGException):
     pass
 
+
 class RunFailedInternally(RunFailed):
     def __init__(self, *args, **kwargs):
-        super().__init__("RunFailedInternally: Due to some bug in the graph-running, we could not finish running. File a bug report.", *args, **kwargs)
+        super().__init__(
+            "RunFailedInternally: Due to some bug in the graph-running, we could not finish running. File a bug report.",
+            *args,
+            **kwargs,
+        )
 
 
 class _RunAgain(PPGException):

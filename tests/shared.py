@@ -31,7 +31,7 @@ def counter(filename):
     """Helper for counting invocations in a side-effect file"""
     try:
         res = int(Path(filename).read_text())
-    except:
+    except:  # noqa: E722
         res = 0
     Path(filename).write_text(str(res + 1))
     return str(res)

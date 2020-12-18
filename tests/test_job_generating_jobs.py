@@ -60,7 +60,7 @@ class TestJobGeneratingJob:
         jobA = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))
         jobA.memory_needed = 1024
         ppg.run()
-        assert os.path.exists("out/A")  # since the gen job crashed
+        assert Path("out/A").exists()  # since the gen job crashed
 
     def test_injecting_multiple_stages(self):
         def gen():
@@ -76,14 +76,14 @@ class TestJobGeneratingJob:
         ppg.run()
         assert read("out/D") == "D"
 
-    def test_generated_job_depending_on_each_other_one_of_them_is_Invariant(
-        self
-    ):
+    def test_generated_job_depending_on_each_other_one_of_them_is_Invariant(self):
         # basic idea. You have jobgen A,
         # it not only creates filegenB, but also ParameterDependencyC that A depends on
         # does that work
         def gen():
-            jobB = ppg.FileGeneratingJob("out/B", lambda of: write("out/B", "B"), depend_on_function=False)
+            jobB = ppg.FileGeneratingJob(
+                "out/B", lambda of: write("out/B", "B"), depend_on_function=False
+            )
             jobC = ppg.ParameterInvariant("C", ("ccc",))
             jobB.depends_on(jobC)
 
@@ -94,7 +94,9 @@ class TestJobGeneratingJob:
         ppg.new()
 
         def gen2():
-            jobB = ppg.FileGeneratingJob("out/B", lambda of: write("out/B", "C"), depend_on_function=False)
+            jobB = ppg.FileGeneratingJob(
+                "out/B", lambda of: write("out/B", "C"), depend_on_function=False
+            )
             jobC = ppg.ParameterInvariant("C", ("ccc",))
             jobB.depends_on(jobC)
 
@@ -114,9 +116,7 @@ class TestJobGeneratingJob:
         ppg.run()
         assert read("out/B") == "C"  # did get rerun
 
-    def test_generated_job_depending_on_job_that_cant_have_finished(
-        self
-    ):
+    def test_generated_job_depending_on_job_that_cant_have_finished(self):
         # basic idea. You have jobgen A, and filegen B.
         # filegenB depends on jobgenA.
         # jobGenA created C depends on filegenB
@@ -159,7 +159,9 @@ class TestJobGeneratingJob:
         # does that work
         def gen():
             jobB = ppg.FileGeneratingJob("out/B", lambda of: write("out/B", "B"))
-            jobC = ppg.FileGeneratingJob("out/C", lambda of: write("out/C", read("out/B")))
+            jobC = ppg.FileGeneratingJob(
+                "out/C", lambda of: write("out/C", read("out/B"))
+            )
             jobC.depends_on(jobB)
 
         ppg.JobGeneratingJob("A", gen)
@@ -192,11 +194,9 @@ class TestJobGeneratingJob:
         with pytest.raises(TypeError):
             ppg.JobGeneratingJob("out/a", "shu")
 
-
     def test_passing_non_string_as_jobid(self):
         with pytest.raises(TypeError):
             ppg.JobGeneratingJob(5, lambda: 1)
-
 
     def test_generated_jobs_that_can_not_run_right_away_because_of_dataloading_do_not_crash(
         self,
@@ -216,15 +216,15 @@ class TestJobGeneratingJob:
         assert read("out/C") == "Ashu"
         assert read("out/D") == "Bshu"
 
-    def test_filegen_invalidated_jobgen_created_filegen_later_also_invalidated(
-        self
-    ):
-        a = ppg.FileGeneratingJob("out/A", lambda of: writeappend("out/A", "out/Ac", "A"))
+    def test_filegen_invalidated_jobgen_created_filegen_later_also_invalidated(self):
+        a = ppg.FileGeneratingJob(
+            "out/A", lambda of: writeappend("out/A", "out/Ac", "A")
+        )
         p = ppg.ParameterInvariant("p", "p")
         a.depends_on(p)
 
         def gen():
-            append('out/g', 'g')
+            append("out/g", "g")
             c = ppg.FileGeneratingJob(
                 "out/C", lambda of: writeappend("out/C", "out/Cx", "C")
             )
@@ -233,35 +233,39 @@ class TestJobGeneratingJob:
         # difference to ppg1 - gen jobs will not rerun if their inputs did not change!
         ppg.JobGeneratingJob("b", gen).depends_on(a)
         ppg.run()
-        assert read('out/g') == 'g'
+        assert read("out/g") == "g"
         assert read("out/A") == "A"
         assert read("out/Ac") == "A"
         assert read("out/C") == "C"
         assert read("out/Cx") == "C"
 
         ppg.new()
-        a = ppg.FileGeneratingJob("out/A", lambda of: writeappend("out/A", "out/Ac", "A"))
+        a = ppg.FileGeneratingJob(
+            "out/A", lambda of: writeappend("out/A", "out/Ac", "A")
+        )
         p = ppg.ParameterInvariant("p", "p2")
         a.depends_on(p)
         ppg.JobGeneratingJob("b", gen).depends_on(a)
         ppg.run()
-        assert read('out/g') == 'gg'
+        assert read("out/g") == "gg"
         assert read("out/Ac") == "AA"
-        assert read("out/Cx") == "C" # this is a difference to the pipegraph. depending on A 
+        assert (
+            read("out/Cx") == "C"
+        )  # this is a difference to the pipegraph. depending on A
         # does not retrigger just because a's upstream changed.
         # only if a truly changed
 
         ppg.new()
-        a = ppg.FileGeneratingJob("out/A", lambda of: writeappend("out/A", "out/Ac", "B"))
+        a = ppg.FileGeneratingJob(
+            "out/A", lambda of: writeappend("out/A", "out/Ac", "B")
+        )
         p = ppg.ParameterInvariant("p", "p3")
         a.depends_on(p)
         ppg.JobGeneratingJob("b", gen).depends_on(a)
         ppg.run()
-        assert read('out/g') == 'ggg'
+        assert read("out/g") == "ggg"
         assert read("out/Ac") == "AAB"
         assert read("out/Cx") == "CC"
-
-
 
     def test_creating_within_dataload(self):
         """This used to be forbidden in ppg1.
@@ -275,7 +279,7 @@ class TestJobGeneratingJob:
 
         dl = ppg.DataLoadingJob("load_data", load)
         write_job.depends_on(dl)
-        #with pytest.raises(ppg.RunFailed):
+        # with pytest.raises(ppg.RunFailed):
         ppg.run()
         assert Path("out/B").exists()
 
@@ -290,7 +294,7 @@ class TestJobGeneratingJob:
         write_job.depends_on(dl)
         ppg.run()
         assert read("out/C") == "c"
-        assert not Path('out/B').exists()
+        assert not Path("out/B").exists()
 
     def test_invalidation(self):
         def gen():
@@ -352,4 +356,3 @@ class TestJobGeneratingJob:
         ppg.run()
         assert read("out/D") == "E"
         assert counter[0] == 3
-

@@ -1,4 +1,3 @@
-# noqa: F841
 from pathlib import Path
 from loguru import logger
 import pytest
@@ -9,7 +8,7 @@ from .shared import counter
 
 @pytest.mark.usefixtures("ppg_per_test")
 class TestPypipegraph2:
-    def test_very_simple(self, job_trace_log):
+    def test_very_simple(self):
         assert not Path("A").exists()
         job = ppg.FileGeneratingJob("A", lambda of: of.write_text("Done"))
         ppg.run()
@@ -39,7 +38,7 @@ class TestPypipegraph2:
         assert Path("A").read_text() == "AAA"
         assert Path("B").read_text() == "BBBAAA"
 
-    def test_very_simple_chain_rerun(self, job_trace_log):
+    def test_very_simple_chain_rerun(self):
         assert not Path("A").exists()
         assert not Path("B").exists()
         counter = 0
@@ -97,7 +96,7 @@ class TestPypipegraph2:
         # but C was not rerun, since the B output did not change.
         assert Path("C").read_text() == "CCC0"
 
-    def test_changing_inputs(self, job_trace_log):
+    def test_changing_inputs(self):
         jobA = ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
         jobB = ppg.FileGeneratingJob(
             "B", lambda of: of.write_text("B" + Path("A").read_text())
@@ -115,7 +114,7 @@ class TestPypipegraph2:
         assert Path("A").read_text() == "c"
         assert Path("B").read_text() == "Bc"
 
-    def test_changing_inputs_when_job_was_temporarily_missing(self, job_trace_log):
+    def test_changing_inputs_when_job_was_temporarily_missing(self):
         jobA = ppg.FileGeneratingJob(
             "A", lambda of: counter("a") and of.write_text("AAA")
         )
@@ -168,7 +167,7 @@ class TestPypipegraph2:
         ppg.run()
         assert Path("A").read_text() == str(["hello", "world"])
 
-    def test_failed_pruning(self, job_trace_log):
+    def test_failed_pruning(self):
         def a(of):
             raise ValueError()
 
@@ -185,8 +184,7 @@ class TestPypipegraph2:
         assert last["C"].state == JobState.Executed
         assert "ValueError" in str(last["A"].error)
 
-    def test_multi_file_generating_job(self, job_trace_log):
-        import collections
+    def test_multi_file_generating_job(self):
 
         assert counter("X") == "0"
         # make sure the counter function does what it's supposed to
@@ -630,7 +628,7 @@ class TestPypipegraph2:
         assert pid_a != pid_b
         assert pid_a != pid_here
 
-    def test_temp_jobs_run_in_different_pids(self, job_trace_log):
+    def test_temp_jobs_run_in_different_pids(self):
         import os
 
         pid_here = os.getpid()
@@ -648,7 +646,7 @@ class TestPypipegraph2:
         assert pid_a != pid_b
         assert pid_a != pid_here
 
-    def test_temp_job_not_writing_its_file(self, job_trace_log):
+    def test_temp_job_not_writing_its_file(self):
         import os
 
         pid_here = os.getpid()
@@ -669,7 +667,7 @@ class TestPypipegraph2:
         assert isinstance(last["B"].error.args[0], ppg.JobContractError)
 
     def test_file_gen_when_file_existed_outside_of_graph_depending_on_cached_data_load(
-        self, job_trace_log
+        self,
     ):
         # this exposed a bug when the file was existing
         # the graph would never return.
@@ -748,7 +746,7 @@ class TestPypipegraph2:
     def test_same_mtime_same_size_leads_to_false_negative(self):
         raise NotImplementedError()
 
-    def test_file_invariant(self, job_trace_log):
+    def test_file_invariant(self):
         Path("A").write_text("A")
         jobA = ppg.FileInvariant("A")
         jobB = ppg.FileGeneratingJob(
@@ -765,7 +763,7 @@ class TestPypipegraph2:
         assert Path("b").read_text() == "2"
         assert Path("B").read_text() == "AA"
 
-    def test_adding_and_removing_variants(self, job_trace_log):
+    def test_adding_and_removing_variants(self):
         Path("A").write_text("A")
         jobA = ppg.FileInvariant("A")
         jobB = ppg.FileGeneratingJob(
@@ -817,7 +815,7 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "b"
         assert Path("b").read_text() == "2"
 
-    def test_parameter_invariant(self, job_trace_log):
+    def test_parameter_invariant(self):
         params = ["a"]
         jobA = ppg.ParameterInvariant("A", params)
 
@@ -847,7 +845,7 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "b"
         assert Path("b").read_text() == "2"
 
-    def test_data_loading_job(self, job_trace_log):
+    def test_data_loading_job(self):
         self.store = []  # use attribute to avoid cuosure binding
         try:
             jobA = ppg.DataLoadingJob("A", lambda: self.store.append("A"))
@@ -884,7 +882,7 @@ class TestPypipegraph2:
         finally:
             del self.store
 
-    def test_attribute_loading_job(self, job_trace_log):
+    def test_attribute_loading_job(self):
         class TestRecv:
             def __init__(self):
                 self.job = ppg.AttributeLoadingJob(
@@ -914,7 +912,7 @@ class TestPypipegraph2:
         assert Path("a").read_text() == "2"
         assert not hasattr(a, "a_")
 
-    def test_cached_attribute_loading_job(self, job_trace_log):
+    def test_cached_attribute_loading_job(self):
         class TestRecv:
             def __init__(self):
                 self.job = ppg.CachedAttributeLoadingJob(
@@ -951,7 +949,7 @@ class TestPypipegraph2:
         assert not hasattr(a, "a_")
         assert Path("A").exists()
 
-    def test_job_generating(self, job_trace_log):
+    def test_job_generating(self):
         def inner():  # don't keep it inside, or the FunctionInvariant will trigger each time.
             counter("a")
             ppg.FileGeneratingJob("B", lambda of: counter("b") and of.write_text("B"))
@@ -998,7 +996,7 @@ class TestPypipegraph2:
         assert Path("b").read_text() == "2"  # this does not mean that B get's rerun.
         assert Path("B").read_text() == "B"
 
-    def test_job_generating_generated_fails_rerun(self, job_trace_log):
+    def test_job_generating_generated_fails_rerun(self):
         local_counter = [0]
 
         def inner():

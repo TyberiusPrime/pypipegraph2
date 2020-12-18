@@ -12,7 +12,7 @@ def CPUs():
     Detects the number of CPUs on a system. Cribbed from pp.
     """
     global cpu_count
-    if cpu_count == None:
+    if cpu_count is None:
         cpu_count = 1  # default
         # Linux, Unix and MacOS:
         if hasattr(os, "sysconf"):

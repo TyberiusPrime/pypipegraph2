@@ -49,7 +49,7 @@ class RunMode(Enum):
 class Resources(Enum):
     SingleCore = "SingleCore"
     AllCores = "AllCores"
-    MemoryHog = "MemoryHog" #todo
+    MemoryHog = "MemoryHog"  # todo
     Exclusive = "Exclusive"
     RateLimited = "RateLimited"  # todo, think web requests
     RunsHere = "RunsHere"  # in this process
@@ -58,9 +58,8 @@ class Resources(Enum):
         if self is Resources.SingleCore:
             return 1
         elif self is Resources.AllCores:
-            return max_cores -1
-        elif  self is Resources.Exclusive:
+            return max_cores - 1
+        elif self is Resources.Exclusive:
             return max_cores
         else:
             raise ValueError("Not an external Resource with a given number of cores")
-
