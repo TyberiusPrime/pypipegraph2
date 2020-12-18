@@ -66,6 +66,9 @@ global_pipegraph = new()
 
 
 def run(print_failures=True, raise_on_job_error=True, event_timeout=5):
+    if global_pipegraph is None:
+            raise ValueError("Must instantiate a pipegraph before you can run it.")
+
     global_pipegraph.run(
         print_failures=print_failures,
         raise_on_job_error=raise_on_job_error,

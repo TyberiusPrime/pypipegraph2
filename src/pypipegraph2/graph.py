@@ -249,7 +249,7 @@ class PyPipeGraph:
         # for the callbacks may create jobs
         # so we can't simply iterate over the jobs.values()
         with_callback = [j for j in self.jobs.values() if j.dependency_callbacks]
-        logger.info(f"with callbacks {[j.job_id for j in with_callback]}")
+        # logger.info(f"with callbacks {[j.job_id for j in with_callback]}")
         if not with_callback:
             return
         for j in with_callback:
@@ -258,7 +258,7 @@ class PyPipeGraph:
                 []
             )  # must reset before run, might add new ones, right?
             for c in dc:
-                logger.info(f"{j.job_id}, {c}")
+                # logger.info(f"{j.job_id}, {c}")
                 j.depends_on(c())
         self.fill_dependency_callbacks()  # nested?
 

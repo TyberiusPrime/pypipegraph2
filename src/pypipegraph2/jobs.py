@@ -59,6 +59,8 @@ class Job:
         Without any dependencies!
         """
         from . import global_pipegraph
+        if global_pipegraph is None:
+            raise ValueError("Must instantiate a pipegraph before creating any Jobs")
 
         global_pipegraph.add(self)
 
