@@ -42,12 +42,13 @@ class PyPipeGraph:
         log_level: int,
         paths: Optional[Dict[str, Union[Path, str]]] = None,
         run_mode: RunMode = default_run_mode(),
+        allow_short_filenames=False
     ):
 
         if cores is ALL_CORES:
             self.cores = CPUs()
         else:
-            self.cores = cores
+            self.cores = int(cores)
         if log_dir:
             self.log_dir = Path(log_dir)
         else:
@@ -68,10 +69,10 @@ class PyPipeGraph:
             {}
         )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
         self.run_id = 0
+        self.allow_short_filenames = allow_short_filenames
 
     def run(
-        self, print_failures: bool = True, raise_on_job_error=True,
-        event_timeout=5
+        self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5
     ) -> Dict[str, JobState]:
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
             print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
@@ -79,13 +80,17 @@ class PyPipeGraph:
         else:
             # print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
             pass
+        self.fill_dependency_callbacks()
         if self.log_dir:
             self.log_dir.mkdir(exist_ok=True, parents=True)
             logger.add(
                 self.log_dir / f"ppg_run_{time.time():.0f}.log", level=self.log_level
             )
-            logger.info(f"Run is go {id(self)} pid: {os.getpid()}, run_id {self.run_id}")
+            logger.info(
+                f"Run is go {id(self)} pid: {os.getpid()}, run_id {self.run_id}"
+            )
         self.history_dir.mkdir(exist_ok=True, parents=True)
+        self.do_raise = []
         try:
             result = None
             if self.run_mode == RunMode.INTERACTIVE:
@@ -93,7 +98,7 @@ class PyPipeGraph:
             history = self.load_historical()
             max_runs = 5
             while True:
-                max_runs -=1
+                max_runs -= 1
                 if max_runs == 0:
                     raise ValueError("endless loop")
                 try:
@@ -105,18 +110,17 @@ class PyPipeGraph:
                 except _RunAgain as e:
                     self.update_history(e.args[0], history)
                     pass
-            do_raise = False
             for job_id, job_state in result.items():
                 if job_state.state == JobState.Failed:
                     if print_failures:
                         msg = textwrap.indent(str(job_state.error), "\t")
                         logger.error(f"{job_id} failed.\n {escape_logging(msg)}")
                         print(f"{job_id} failed.\n {escape_logging(msg)}")
-                    if raise_on_job_error:
-                        do_raise = True
+                    if raise_on_job_error and not self.do_raise:
+                        self.do_raise.append("At least one job failed")
             self.last_run_result = result
-            if do_raise:
-                raise exceptions.RunFailed()
+            if self.do_raise:
+                raise exceptions.RunFailed(*self.do_raise)
             return result
         finally:
             if print_failures:
@@ -127,17 +131,19 @@ class PyPipeGraph:
 
     def update_history(self, job_results, history):
         # we must keep the history of jobs unseen in this run.
-        # firstly to allow partial runs
-        # and second: to allow JobGeneratingJob to not always run,
-        # but only if their input changed
-        new_history = history# .copy() don't copy. we reuse this in the subsequent runs 
-        new_history.update({
-            job_id: (
-                job_results[job_id].updated_input,
-                job_results[job_id].updated_output,
-            )
-            for job_id in job_results
-        })
+        # tly to allow partial runs
+        new_history = (
+            history  # .copy() don't copy. we reuse this in the subsequent runs
+        )
+        new_history.update(
+            {
+                job_id: (
+                    job_results[job_id].updated_input,
+                    job_results[job_id].updated_output,
+                )
+                for job_id in job_results
+            }
+        )
         self.save_historical(new_history)
 
     def _get_history_fn(self):
@@ -152,14 +158,51 @@ class PyPipeGraph:
         history = {}
         if fn.exists():
             logger.debug("Historical existed")
-            with open(fn, "rb") as op:
-                try:
-                    while True:
-                        job_id = pickle.load(op)
-                        inputs = pickle.load(op)
-                        history[job_id] = inputs
-                except EOFError:
-                    pass
+            try:
+                with open(fn, "rb") as op:
+                    try:
+                        counter = 0
+                        while True:
+                            try:
+                                logger.job_trace(f"History read {counter}")
+                                counter += 1
+                                job_id = None
+                                job_id = pickle.load(op)
+                                logger.job_trace(f"read job_id {job_id}")
+                                inputs_and_outputs = pickle.load(op)
+                                history[job_id] = inputs_and_outputs
+                            except (TypeError, pickle.UnpicklingError) as e:
+                                logger.job_trace(f"unipckling error {e}")
+                                if job_id is None:
+                                    raise exceptions.RunFailed("Could not depickle job id - history file is borked beyond automatic recovery")
+                                else:
+                                    msg = (
+                                    f"Could not depickle invariant for {job_id} - "
+                                    "check code for depickling bugs. "
+                                    "Job will rerun, probably until the (de)pickling bug is fixed."
+                                    f"\n Exception: {e}"
+                                )
+                                    self.do_raise.append(msg)
+                                # use pickle tools to read the pickles op codes until
+                                # the end of the current pickle, hopefully allowing decoding of the next one
+                                # of course if the actual on disk file is messed up beyond this,
+                                # we're done for.
+                                import pickletools
+
+                                try:
+                                    list(pickletools.genops(op))
+                                except Exception as e:
+                                    raise exceptions.RunFailed(
+                                        "Could not depickle invariants - "
+                                        f"depickling of {job_id} failed, could not skip to next pickled dataset"
+                                        f" Exception was {e}" 
+                                    )
+
+                    except EOFError:
+                        pass
+            except Exception as e:
+                raise exceptions.RunFailed("Could not load history data", e)
+
         return history
 
     def save_historical(self, historical):
@@ -167,10 +210,54 @@ class PyPipeGraph:
         if self.history_dir is None:
             return
         fn = self._get_history_fn()
+        raise_keyboard_interrupt = False
+        raise_run_failed_internally = False
         with open(fn, "wb") as op:
-            for job_id, input_hashes in historical.items():
-                pickle.dump(job_id, op, pickle.HIGHEST_PROTOCOL)
-                pickle.dump(input_hashes, op, pickle.HIGHEST_PROTOCOL)
+            # robust history saving.
+            # for KeyboardInterrupt, write again
+            # for other exceptions: skip job
+            for job_id, input_and_output_hashes in historical.items():
+                try_again = True
+                while try_again:
+                    try_again = False
+                    try:
+                        a = pickle.dumps(
+                            job_id, pickle.HIGHEST_PROTOCOL
+                        ) + pickle.dumps(
+                            input_and_output_hashes, pickle.HIGHEST_PROTOCOL
+                        )
+                        op.write(a)
+                    except KeyboardInterrupt:
+                        try_again = True
+                        raise_keyboard_interrupt = True
+                    except Exception as e:
+                        logger.error(f"Could not pickle state for {job_id} - {e}")
+                        raise_run_failed_internally = (job_id, e)
+        if raise_run_failed_internally:
+            job_id, exc = raise_run_failed_internally
+            raise exceptions.RunFailedInternally(
+                f"Pickling of {job_id} inputs/outputs failed.", exc
+            )
+        if raise_keyboard_interrupt:
+            logger.error("Keyboard interrupt")
+            raise KeyboardInterrupt()
+
+    def fill_dependency_callbacks(self):
+        # we need this copy,
+        # for the callbacks may create jobs
+        # so we can't simply iterate over the jobs.values()
+        with_callback = [j for j in self.jobs.values() if j.dependency_callbacks]
+        logger.info(f'with callbacks {[j.job_id for j in with_callback]}')
+        if not with_callback:
+            return
+        for j in with_callback:
+            dc = j.dependency_callbacks
+            j.dependency_callbacks = [] # must reset before run, might add new ones, right?
+            for c in dc:
+                logger.info(f"{j.job_id}, {c}")
+                j.depends_on(c())
+        self.fill_dependency_callbacks()  # nested?
+
 
     def _print_failures(self):
         logger.trace("print_failures")
@@ -214,3 +301,6 @@ class PyPipeGraph:
 
     def add_edge(self, upstream_job, downstream_job):
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)
+
+    def has_edge(self, upstream_job, downstream_job):
+        return self.job_dag.has_edge(upstream_job.job_id, downstream_job.job_id)

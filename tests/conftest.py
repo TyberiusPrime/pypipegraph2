@@ -64,7 +64,7 @@ def ppg_per_test(request):
                 first[0] = True
 
             # rc = ppg.resource_coordinators.LocalSystem(1)
-            g = ppg.new(cores=1, log_level=5)
+            g = ppg.new(cores=1, log_level=5, allow_short_filenames=True)
             g.new = np
             return g
 

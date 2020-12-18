@@ -189,7 +189,7 @@ class TestJobGeneratingJob:
         assert read("out/A") == "123"
 
     def test_passing_non_function(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             ppg.JobGeneratingJob("out/a", "shu")
 
 

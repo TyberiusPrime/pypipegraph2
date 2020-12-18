@@ -38,5 +38,5 @@ Differences to pypipegraph
       they can now be found in ppg.global_pipegraph.last_run[job_id].error
 	  (last_run is also the result of ppg.run() if you set do_raise = False)
 
-	  
 	- CycleError is now NotADag
+	- ParameterInvariant no longer take an 'accept_as_unchanged' function. I suppose it would be trivial to implement using compare_hashes, but I couldn't find any current usage.

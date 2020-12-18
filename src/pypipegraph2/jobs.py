@@ -12,6 +12,7 @@ from typing import Union, List, Dict, Optional, Tuple, Callable
 from loguru import logger  # noqa:F401
 from pathlib import Path
 from io import StringIO
+from collections import namedtuple
 from . import hashers, exceptions
 from .enums import JobKind, Resources
 from .util import escape_logging
@@ -20,6 +21,9 @@ module_type = type(sys)
 
 non_chdired_path = Path(".").absolute()
 python_version = tuple(sys.version_info)[:2]  # we only care about major.minor
+
+DependsOnInvariant = namedtuple("DependsOnInvariant", ["invariant", "self"])
+CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
 
 
 class Job:
@@ -48,6 +52,7 @@ class Job:
             raise TypeError("Invalid output definition.")
         self.outputs = sorted([str(x) for x in self.outputs])
         self.job_id = ":::".join(self.outputs)
+        self.dependency_callbacks = []
         self.readd()
 
     def readd(self):
@@ -65,9 +70,19 @@ class Job:
 
     def depends_on(
         self,
-        other_job: Union[Union[str, Job], List[Union[str, Job]]],
+        other_job: Union[Union[str, Job], List[Union[str, Job]]] = None,
         *other_jobs: Union[Union[str, Job], List[Union[str, Job]]],
     ):
+        """Depend on another Job, which must be done before this one can run.
+        If the other job changes it's output, this job will be invalidated (and rerun).
+
+        You may pass in one ore more Jobs, a list of such,
+        ore a callable that will return such. The callable will
+        be called when the ppg is run the first time
+        (todo: when is the later useful)
+        """
+
+
         from . import global_pipegraph
 
         if isinstance(other_job, list):
@@ -77,6 +92,11 @@ class Job:
             if isinstance(other_job, Job):
                 o_job = other_job
                 o_inputs = other_job.outputs
+            elif other_job is None:
+                return self
+            elif hasattr(other_job, '__call__'):
+                self.dependency_callbacks.append(other_job)
+                return self
             else:
                 o_job = global_pipegraph.jobs[
                     global_pipegraph.outputs_to_job_ids[other_job]
@@ -84,6 +104,11 @@ class Job:
                 o_inputs = [other_job]
             if o_job.job_id == self.job_id:
                 raise exceptions.NotADag("Job can not depend on itself")
+            if global_pipegraph.has_edge(self, o_job):
+                raise exceptions.NotADag(
+                    f"{o_job.job_id} is already upstream of {self.job_id}, can't be downstream as well (cycle)"
+                )
+
             global_pipegraph.add_edge(o_job, self)
             global_pipegraph.job_inputs[self.job_id].update(o_inputs)
         if other_jobs:
@@ -104,6 +129,29 @@ class Job:
     @classmethod
     def compare_hashes(cls, old_hash, new_hash):
         return old_hash == new_hash
+
+    def depends_on_func(self, function, name=None):
+        """Create a function invariant.
+        Return a NamedTumple (function_invariant, function_invariant, self)
+        """
+        if isinstance(function, str):
+            function, name = name, function
+        if not name:
+            name = FunctionInvariant.func_to_name(function)
+
+        upstream = FunctionInvariant(function, self.job_id + "_" + name)
+        self.depends_on(upstream)
+        return DependsOnInvariant(upstream, self)
+
+    def depends_on_file(self, filename):
+        job = FileInvariant(filename)
+        self.depends_on(job)
+        return DependsOnInvariant(job, self)
+
+    def depends_on_params(self, params):
+        job = ParameterInvariant(self.job_id, params)
+        self.depends_on(job)
+        return DependsOnInvariant(job, self)
 
 
 class InitialJob(Job):
@@ -230,6 +278,12 @@ class MultiFileGeneratingJob(Job):
                 # raise res
         else:
             self.generating_function(self.get_input())
+        missing_files = [x for x in self.files if not x.exists()]
+        if missing_files:
+            raise exceptions.JobContractError(
+                f"Job {self.job_id} did not create the following files: {missing_files}"
+            )
+
         res = {str(of): hashers.hash_file(of) for of in self.files}
         return res
 
@@ -349,8 +403,24 @@ class _FileCleanupJob(Job):
         return {self.outputs[0]: None}  # todo: optimize this awy?
 
 
+class _InvariantMixin:
+    def depends_on(
+        self,
+        other_job: Union[Union[str, Job], List[Union[str, Job]]] = None,
+        *other_jobs: Union[Union[str, Job], List[Union[str, Job]]],
+    ):
+        raise exceptions.JobContractError(
+            "Invariants may not depend on other jobs. "
+            "They get evaluated every time anyway. "
+            "And they would insulate from their upstreams. "
+            "Makes no sense"
+        )
+
+
 class _FileInvariantMixin:
-    def calculate(self, file, stat):
+    def calculate(
+        self, file, stat
+    ):  # so that FileInvariant and FunctionInvariant can reuse it
         return {
             "mtime": int(stat.st_mtime),
             "size": stat.st_size,
@@ -358,7 +428,7 @@ class _FileInvariantMixin:
         }
 
 
-class FunctionInvariant(Job, _FileInvariantMixin):
+class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     job_kind = JobKind.Invariant
 
     def __init__(
@@ -407,7 +477,7 @@ class FunctionInvariant(Job, _FileInvariantMixin):
                         new_file_hash = historical_output["source_file"]
                 else:
                     new_file_hash = self.calculate(sf, stat)
-                    if (
+                    if ("source_file" in historical_output) and (
                         new_file_hash["hash"]
                         == historical_output["source_file"]["hash"]
                     ):
@@ -492,7 +562,7 @@ class FunctionInvariant(Job, _FileInvariantMixin):
         """Return the 'source' and whether this was a python function"""
         if self.function is None:
             # since the 'default invariant' is False, this will still read 'invalidated the first time it's being used'
-            return None
+            return None, False
         if self.is_python_function(self.function):
             return self._get_python_source(self.function), True
         else:
@@ -568,96 +638,11 @@ class FunctionInvariant(Job, _FileInvariantMixin):
             )
 
     @classmethod
-    def _get_invariant_from_non_python_function(cls, function):
-        if str(function).startswith("<built-in function"):
-            return str(function)
-        elif (
-            hasattr(function, "im_func")
-            and (
-                "cyfunction" in repr(function.im_func)
-                or repr(function.im_func).startswith("<built-in function")
-            )
-        ) or "cython_function_or_method" in str(type(function)):
-            return cls.get_cython_source(function)
-        elif isinstance(
-            function, types.MethodType
-        ) and "cython_function_or_method" in str(type(function.__func__)):
-            return cls.get_cython_source(function.__func__)
-        else:
-            raise ValueError("Can't handle this object %s" % function)
-
-    @classmethod
     def _hash_function(cls, function):
         key = id(function.__code__)
         new_source, new_funchash = cls._get_func_hash(key, function)
         new_closure = cls.extract_closure(function)
         return new_source, new_funchash, new_closure
-
-    def _get_invariant(self, old, all_invariant_stati, version_info=sys.version_info):
-        if self.function is None:
-            # since the 'default invariant' is False, this will still read 'invalidated the first time it's being used'
-            return None
-        if (not hasattr(self.function, "__code__")) or (
-            "cython_function_or_method" in str(type(self.function))
-            or (
-                isinstance(self.function, types.MethodType)
-                and "cython_function_or_method" in str(type(self.function.__func__))
-            )
-        ):
-
-            return self._get_invariant_from_non_python_function(self.function)
-        new_source, new_funchash, new_closure = self._hash_function(self.function)
-        return self._compare_new_and_old(new_source, new_funchash, new_closure, old)
-
-    @staticmethod
-    def _compare_new_and_old(new_source, new_funchash, new_closure, old):
-        new = {
-            "source": new_source,
-            str(sys.version_info[:2]): (new_funchash, new_closure),
-        }
-
-        if isinstance(old, dict):
-            pass  # the current style
-        elif isinstance(old, tuple):
-            # the previous style.
-            old_funchash = old[2]
-            old_closure = old[3]
-            old = {
-                # if you change python version and pypipegraph at the same time, you're out of luck and will possibly rebuild
-                str(sys.version_info[:2]): (
-                    old_funchash,
-                    old_closure,
-                )
-            }
-        elif isinstance(old, str):
-            # the old old style, just concatenated.
-            old = {"old": old}
-            new["old"] = new_funchash + new_closure
-        elif old is False:  # never ran before
-            return new
-        elif (
-            old is None
-        ):  # if you provided a None type instead of a function, you will run into this
-            return new
-        else:  # pragma: no cover
-            raise ValueError(
-                "Could not understand old FunctionInvariant invariant. Was Type(%s): %s"
-                % (type(old), old)
-            )
-        unchanged = False
-        for k in set(new.keys()).intersection(old.keys()):
-            if k != "_version" and new[k] == old[k]:
-                unchanged = True
-        out = old.copy()
-        out.update(new)
-        out[
-            "_version"
-        ] = 3  # future proof, since this is *at least* the third way we're doing this
-        if "old" in out:
-            del out["old"]
-        if unchanged:
-            raise ppg_exceptions.NothingChanged(out)
-        return out
 
     @staticmethod
     def extract_closure(function):
@@ -842,7 +827,7 @@ class FunctionInvariant(Job, _FileInvariantMixin):
 
     def verify_arguments(self, job_id, function):
         if not callable(function) and function is not None:
-            raise ValueError("%s function was not a callable (or None)" % job_id)
+            raise TypeError("%s function was not a callable (or None)" % job_id)
         if hasattr(self, "function") and not FunctionInvariant.functions_equal(
             function, self.function
         ):
@@ -866,20 +851,56 @@ class FunctionInvariant(Job, _FileInvariantMixin):
             )
         return name
 
+    def __str__(self):
+        if (
+            hasattr(self, "function")
+            and self.function
+            and hasattr(self.function, "__code__")
+        ):  # during creating, __str__ migth be called by a debug function before function is set...
+            return "%s (job_id=%s,id=%s\n Function: %s:%s)" % (
+                self.__class__.__name__,
+                self.job_id,
+                id(self),
+                self.function.__code__.co_filename,
+                self.function.__code__.co_firstlineno,
+            )
+        elif hasattr(self, "function") and str(self.function).startswith(
+            "<built-in function"
+        ):
+            return "%s (job_id=%s,id=%s, Function: %s)" % (
+                self.__class__.__name__,
+                self.job_id,
+                id(self),
+                self.function,
+            )
+        else:
+            return "%s (job_id=%s,id=%s, Function: None)" % (
+                self.__class__.__name__,
+                self.job_id,
+                id(self),
+            )
 
-class FileInvariant(Job, _FileInvariantMixin):
+
+class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     job_kind = JobKind.Invariant
 
     def __init__(self, file):
+        from . import global_pipegraph
+
         self.file = Path(file)
         super().__init__(str(self.file))
+        if len(self.job_id) < 3 and not global_pipegraph.allow_short_filenames:
+            raise ValueError(
+                "This is probably not the filename you intend to use: {}.".format(self) + 
+                " Use a longer filename or set graph.allow_short_filenames"
+            )
 
     def output_needed(self, _ignored_runner):
         return True
 
     def run(self, _runner, historical_output):
         if not self.file.exists():
-            raise FileNotFoundError(f"{self.path} did not exist")
+            raise FileNotFoundError(f"{self.file} did not exist")
         stat = self.file.stat()
         if not historical_output:
             return {self.outputs[0]: self.calculate(self.file, stat)}
@@ -896,10 +917,11 @@ class FileInvariant(Job, _FileInvariantMixin):
         return new_hash["hash"] == old_hash.get("hash", "")
 
 
-class ParameterInvariant(Job):
+class ParameterInvariant(_InvariantMixin, Job):
     job_kind = JobKind.Invariant
 
     def __init__(self, job_id, parameters):
+        job_id = "PI" + job_id
         self.parameters = self.freeze(parameters)
         super().__init__(job_id)
 
@@ -913,7 +935,7 @@ class ParameterInvariant(Job):
     def freeze(obj):
         """Turn dicts into tuples of (key,value),
         lists into tuples, and sets
-        into frozensets, recursively - usefull
+        into frozensets, recursively - useful
         to get a hash value..
         """
 
@@ -1016,7 +1038,7 @@ def CachedDataLoadingJob(
         load_job.depends_on(
             FunctionInvariant("load" + str(cache_filename), load_callback)
         )
-    return (load_job, cache_job)
+    return CachedJobTuple(load_job, cache_job)
 
 
 class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
@@ -1084,7 +1106,7 @@ def CachedAttributeLoadingJob(
         depend_on_function=False,
     )
     load_job.depends_on(cache_job)
-    return (load_job, cache_job)
+    return CachedJobTuple(load_job, cache_job)
 
 
 class _AttributeCleanupJob(Job):
@@ -1106,7 +1128,7 @@ class _AttributeCleanupJob(Job):
 
 
 class JobGeneratingJob(Job):
-    """ A job generating job runs once per ppg.Graph.run(),
+    """A job generating job runs once per ppg.Graph.run(),
     and may alter the graph in essentially any way. The changes are ignored
     until the first run finishes, then the whole graph is rerun.
 
@@ -1118,6 +1140,7 @@ class JobGeneratingJob(Job):
     every time the JobGeneratingJob runs.
 
     """
+
     job_kind = JobKind.JobGenerating
 
     def __init__(self, job_id, callback, depend_on_function=True):
@@ -1133,7 +1156,9 @@ class JobGeneratingJob(Job):
         super().readd()
 
     def output_needed(self, runner):
-        logger.error(f"JobGeneratingJob - last_run_id {self.last_run_id}, runner.run_id: {runner.run_id}")
+        logger.error(
+            f"JobGeneratingJob - last_run_id {self.last_run_id}, runner.run_id: {runner.run_id}"
+        )
         if runner.run_id != self.last_run_id:
             return True
         return False
@@ -1141,7 +1166,7 @@ class JobGeneratingJob(Job):
     def run(self, runner, historical_output):
         self.last_run_id = runner.run_id
         self.callback()
-        #todo: is this the right approach
+        # todo: is this the right approach
         # should we maybe instead return a sorted list of new jobs
         # if you depend on this, you're going te be triggered
         # *all* the time. Well once per graph.run
