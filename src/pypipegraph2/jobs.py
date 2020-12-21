@@ -35,8 +35,7 @@ class Job:
         outputs: Union[str, List[str], Dict[str, str]],
         resources: Resources = Resources.SingleCore,
     ):
-
-        self.resources = resources
+        self.use_resources(resources)
         if isinstance(outputs, str):
             self.outputs = [outputs]
             self.mapped_outputs = {}
@@ -59,12 +58,15 @@ class Job:
         Without any dependencies!
         """
         from . import global_pipegraph
+
         if global_pipegraph is None:
             raise ValueError("Must instantiate a pipegraph before creating any Jobs")
 
         global_pipegraph.add(self)
 
     def use_resources(self, resources: Resources):
+        if not isinstance(resources, Resources):
+            raise TypeError("resources must by pipegraph2.enums.Resources")
         self.resources = resources
         return self
 
@@ -187,13 +189,22 @@ class MultiFileGeneratingJob(Job):
         generating_function: Callable[List[Path]],
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
+        empty_ok=True,
     ):
 
         self.generating_function = generating_function
         self.depend_on_function = depend_on_function
+        if not hasattr(files, '__iter__'):
+            raise TypeError("files was not iterable")
+        if isinstance(files, (str, Path)):
+            raise TypeError('files must not be a single string or Path, but an iterable')
+        for f in files:
+            if not isinstance(f, (str, Path)):
+                raise TypeError("Files for (Multi)FileGeneratingJob must be Path/str")
         Job.__init__(self, files, resources)
         self.files = [Path(x) for x in self.outputs]
         self._single_file = False
+        self.empty_ok = empty_ok
 
     def readd(self):
         if self.depend_on_function:
@@ -235,13 +246,18 @@ class MultiFileGeneratingJob(Job):
                                     + ". You have forgotten to take the output_files as your first parameter."
                                     + f"The function was defined in {func_info}."
                                 )
+                            else:
+                                raise
                     except Exception as e:
                         try:
                             tb = traceback.format_exc()
                             sender.send((e, tb))
-                        except Exception as e:
-                            print(f"FileGeneratingJob done, but send failed: {e}")
-                            pass
+                        except Exception as e2:
+                            try:
+                                sender.send((repr(e), tb))
+                            except Exception as e3:
+                                print(f"FileGeneratingJob done, but send failed: \n{type(e)} {e} - \n {type(e2)} {e2}\n{type(e3)} - {e3}")
+                                pass
                         os._exit(1)
                 else:
                     _, waitstatus = os.waitpid(pid, 0)
@@ -264,9 +280,14 @@ class MultiFileGeneratingJob(Job):
         missing_files = [x for x in self.files if not x.exists()]
         if missing_files:
             raise exceptions.JobContractError(
-                f"Job {self.job_id} did not create the following files: {missing_files}"
+                f"Job {self.job_id} did not create the following files: {[str(x) for x in missing_files]}"
             )
-
+        if not self.empty_ok:
+            empty_files = [x for x in self.files if x.stat().st_size == 0]
+            if empty_files:
+                raise exceptions.JobContractError(
+                    f"Job {self.job_id} created empty files and empty_ok was False: {[str(x) for x in empty_files]}"
+                )
         res = {str(of): hashers.hash_file(of) for of in self.files}
         return res
 
@@ -301,9 +322,15 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
         generating_function: Callable[Path],
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
+        empty_ok=False,
     ):
         MultiFileGeneratingJob.__init__(
-            self, [output_filename], generating_function, resources, depend_on_function
+            self,
+            [output_filename],
+            generating_function,
+            resources,
+            depend_on_function,
+            empty_ok=empty_ok,
         )
         self._single_file = True
 
@@ -333,7 +360,7 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
             job = runner.jobs[downstream_id]
             if job.output_needed(runner):
                 return True
-        False
+        return False
 
     def output_exists(self):
         for fn in self.files:

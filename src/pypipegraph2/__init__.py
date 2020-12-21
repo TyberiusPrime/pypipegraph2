@@ -8,6 +8,8 @@ import contextlib
 from .graph import PyPipeGraph, ALL_CORES
 from .jobs import *  # TODO
 from .exceptions import *  # TODO
+from . import enums
+from .enums import Resources
 
 _last_new_arguments = None
 
@@ -69,7 +71,7 @@ def run(print_failures=True, raise_on_job_error=True, event_timeout=5):
     if global_pipegraph is None:
             raise ValueError("Must instantiate a pipegraph before you can run it.")
 
-    global_pipegraph.run(
+    return global_pipegraph.run(
         print_failures=print_failures,
         raise_on_job_error=raise_on_job_error,
         event_timeout=event_timeout,

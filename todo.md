@@ -36,3 +36,6 @@ Open stuff
 	  though I believe that no longer to be an issue, since we don't update the history?
   
   
+  
+	- jobs overwriting the files of other jobs(!)
+	- multifilegeneratingjob,allow dict as outputd definition

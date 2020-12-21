@@ -182,18 +182,29 @@ class Runner:
         def is_initial(job_id):
             return (
                 not self.job_inputs[job_id]
-                and not self.jobs[job_id].is_temp_job()
+                #and not self.jobs[job_id].is_temp_job() # what is wrong with starting with a temp job?
                 and self.jobs[job_id].output_needed(self)
             )
 
         def is_skipped(job_id):
             return (
                 not self.job_inputs[job_id]
-                and not self.jobs[job_id].is_temp_job()
+                #and not self.jobs[job_id].is_temp_job()
                 and not self.jobs[job_id].output_needed(self)
             )
 
+        logger.job_trace(f"job_ids_topological {job_ids_topological}")
+        logger.job_trace(f"self.job_inputs {escape_logging(self.job_inputs)}")
         initial_job_ids = [x for x in job_ids_topological if is_initial(x)]
+        for job_id in job_ids_topological:
+                logger.info(f"{job_id} - inputs - {escape_logging(self.job_inputs[job_id])}")
+                logger.info(f"{job_id} - istemp - {self.jobs[job_id].is_temp_job()}")
+                logger.info(f"{job_id} - outputneeded - {self.jobs[job_id].output_needed(self)}")
+        #if not initial_job_ids:
+            #if self.jobs:
+                #raise exceptions.RunFailedInternally("Could not identify inital jobs")
+            #else:
+                #return {}
         skipped_jobs = [x for x in job_ids_topological if is_skipped(x)]
         self.events = queue.Queue()
         for job_id in initial_job_ids:
@@ -470,7 +481,7 @@ class Runner:
                     job_state.error = exceptions.JobError(e, traceback.format_exc())
                 logger.warning(f"Execute {job_id} failed: {escape_logging(e)}")
                 self.push_event("JobFailed", (job_id, job_id))
-            else:
+            finally:
                 self.jobs_in_flight -= 1
 
 

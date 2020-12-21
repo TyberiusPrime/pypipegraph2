@@ -40,3 +40,11 @@ Differences to pypipegraph
 
 	- CycleError is now NotADag
 	- ParameterInvariant no longer take an 'accept_as_unchanged' function. I suppose it would be trivial to implement using compare_hashes, but I couldn't find any current usage.
+	- job + job (which returned a JobList) is no longer supported. Job.depends_on can be called with any number of jobs (this was already true in ppg1, but the + syntax was still around)
+	- job.is_in_dependency_chain has been removed
+	- the 'graph dumping' functionality has been removed for now
+	- passing the wrong type of argument (such as a non callable to FunctionInvariant) raises TypeError instead of ValueError
+	- FileGeneratingJob by default reject empty outputs (this can be changed with empty_ok=True) as a parameter. The default is inversed for MultiFileGeneratingJob.
+	- In ppg1 if a file existed, a (new) FileGeneratingJob covering it was not run. PPG2 runs the FileGeneratingJob in order to record a hash.
+	- a failing job does no longer remove it's output. We know to rerun it because we didn't record the new input hashes.
+	- TempFileGeneratingJob.do_cleanup_if_was_never_run is no more - I don't think it was ever used outside of testing

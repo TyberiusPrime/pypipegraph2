@@ -3,7 +3,7 @@ from loguru import logger
 import pytest
 import pypipegraph2 as ppg
 from pypipegraph2.runner import JobState
-from .shared import counter
+from .shared import counter, write, read
 
 
 @pytest.mark.usefixtures("ppg_per_test")
@@ -1045,3 +1045,43 @@ class TestPypipegraph2:
     @pytest.mark.xfail
     def test_file_gen_in_subfolders(self):
         raise NotImplementedError()
+
+    def test_working_failing_filegen(self):
+        a = ppg.FileGeneratingJob(
+            "A", lambda of: write(of, "A"), depend_on_function=True
+        )
+        ppg.run()
+        write("do_raise", "True")
+
+        def raiser(of):
+            if read("do_raise") == "True":
+                write(of, "B")
+                raise ValueError()
+            else:
+                write(of, "C")
+
+        a = ppg.FileGeneratingJob("A", raiser)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        write("do_raise", "False")
+        ppg.run()
+        assert read("A") == "C"
+
+    def test_failing_working_no_function_dep(self):
+        write("do_raise", "True")
+
+        def raiser(of):
+            if read("do_raise") == "True":
+                write(of, "B")
+                raise ValueError()
+            else:
+                write(of, "C")
+        a = ppg.FileGeneratingJob("A", raiser, depend_on_function=False)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert read("A") == "B"
+        write("do_raise", "False")
+        ppg.run()
+        assert read("A") == "C"
+
+
