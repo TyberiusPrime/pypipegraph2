@@ -58,6 +58,7 @@ class Runner:
         logger.job_trace("Runner.__init__")
         self.event_timeout = event_timeout
         with _with_changed_global_pipegraph(JobCollector()):
+            self.job_graph = job_graph
             self.jobs = job_graph.jobs.copy()
             self.job_inputs = job_graph.job_inputs.copy()
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
@@ -333,7 +334,8 @@ class Runner:
                     downstream_state.validation_state is ValidationState.Invalidated
                     or downstream_job.output_needed(self)
                 ):
-                    self.push_event("JobReady", (downstream_id,), 3)
+                    self.push_event("JobReady", (downstream_id,), 3) 
+                    # todo: do I need to do this for loadin jobs that are lacking downstream?
                 else:
                     if len(downstream_state.updated_input) < len(
                         downstream_state.historical_input
@@ -345,8 +347,16 @@ class Runner:
                         downstream_state.validation_state = ValidationState.Invalidated
                         self.push_event("JobReady", (downstream_id,), 3)
                     else:
-                        downstream_state.validation_state = ValidationState.Validated
-                        self.push_event("JobSkipped", (downstream_id,), 3)
+                        if downstream_job.job_kind is JobKind.Cleanup:
+                            if self.job_states[downstream_job.parent_job.job_id].validation_state is ValidationState.Invalidated:
+                                downstream_state.validation_state = ValidationState.Invalidated
+                                self.push_event("JobReady", (downstream_id,), 3)
+                            else:
+                                downstream_state.validation_state = ValidationState.Validated
+                                self.push_event("JobSkipped", (downstream_id,), 3)
+                        else:
+                            downstream_state.validation_state = ValidationState.Validated
+                            self.push_event("JobSkipped", (downstream_id,), 3)
 
     def handle_job_skipped(self, job_id):
         job_state = self.job_states[job_id]

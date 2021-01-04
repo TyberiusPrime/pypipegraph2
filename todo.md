@@ -39,3 +39,6 @@ Open stuff
   
 	- jobs overwriting the files of other jobs(!)
 	- multifilegeneratingjob,allow dict as outputd definition
+-
+
+	- command runner job? kind of a replacement for mbf_externals.ExternalAlgorithm

@@ -18,6 +18,7 @@ def new(
     cores=None,
     log_dir=None,
     history_dir=None,
+    run_dir=None,
     log_level=None,
     allow_short_filenames=None,
 ):
@@ -30,6 +31,7 @@ def new(
         cores is None
         and log_dir is None
         and history_dir is None
+        and run_dir is None
         and log_level is None
         and allow_short_filenames is None
     ):
@@ -38,6 +40,7 @@ def new(
                 cores,
                 log_dir,
                 history_dir,
+                run_dir,
                 log_level,
                 allow_short_filenames,
             ) = _last_new_arguments
@@ -47,17 +50,27 @@ def new(
         log_dir = Path(".ppg/logs")
     if history_dir is None:
         history_dir = Path(".ppg/history")
+    if run_dir is None:
+        run_dir = Path(".ppg/run")
     if log_level is None:
         log_level = logging.INFO
     if allow_short_filenames is None:
         allow_short_filenames = False
 
-    _last_new_arguments = cores, log_dir, history_dir, log_level, allow_short_filenames
+    _last_new_arguments = (
+        cores,
+        log_dir,
+        history_dir,
+        run_dir,
+        log_level,
+        allow_short_filenames,
+    )
     global global_pipegraph
     global_pipegraph = PyPipeGraph(
         cores=cores,
         log_dir=log_dir,
         history_dir=history_dir,
+        run_dir=run_dir,
         log_level=log_level,
         allow_short_filenames=allow_short_filenames,
     )
@@ -69,7 +82,7 @@ global_pipegraph = new()
 
 def run(print_failures=True, raise_on_job_error=True, event_timeout=5):
     if global_pipegraph is None:
-            raise ValueError("Must instantiate a pipegraph before you can run it.")
+        raise ValueError("Must instantiate a pipegraph before you can run it.")
 
     return global_pipegraph.run(
         print_failures=print_failures,

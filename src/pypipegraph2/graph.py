@@ -39,6 +39,7 @@ class PyPipeGraph:
         cores: Union[int, ALL_CORES],
         log_dir: Optional[Path],
         history_dir: Path,
+        run_dir: Path,
         log_level: int,
         paths: Optional[Dict[str, Union[Path, str]]] = None,
         run_mode: RunMode = default_run_mode(),
@@ -53,7 +54,8 @@ class PyPipeGraph:
             self.log_dir = Path(log_dir)
         else:
             self.log_dir = None
-        self.history_dir = Path(history_dir) if history_dir else None
+        self.history_dir = Path(history_dir) 
+        self.run_dir = Path(run_dir)
         self.log_level = log_level
         self.paths = {k: Path(v) for (k, v) in paths} if paths else None
         self.run_mode = run_mode
@@ -90,6 +92,7 @@ class PyPipeGraph:
                 f"Run is go {id(self)} pid: {os.getpid()}, run_id {self.run_id}"
             )
         self.history_dir.mkdir(exist_ok=True, parents=True)
+        self.run_dir.mkdir(exist_ok=True, parents=True)
         self.do_raise = []
         try:
             result = None
@@ -301,6 +304,7 @@ class PyPipeGraph:
             ] = job.job_id  # todo: seperate this into two dicts?
         self.jobs[job.job_id] = job
         self.job_dag.add_node(job.job_id)
+        job.job_number = len(self.jobs) - 1
 
     def add_edge(self, upstream_job, downstream_job):
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)

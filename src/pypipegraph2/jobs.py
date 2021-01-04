@@ -1,4 +1,5 @@
 from __future__ import annotations
+import tempfile
 import traceback
 import pickle
 import multiprocessing
@@ -121,7 +122,7 @@ class Job:
         return False
 
     def output_needed(self, _ignored_runner):
-        False
+        return False
 
     def invalidated(self):
         """Inputs changed - nuke outputs etc"""
@@ -190,14 +191,17 @@ class MultiFileGeneratingJob(Job):
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
         empty_ok=True,
+        always_capture_output=True,
     ):
 
         self.generating_function = generating_function
         self.depend_on_function = depend_on_function
-        if not hasattr(files, '__iter__'):
+        if not hasattr(files, "__iter__"):
             raise TypeError("files was not iterable")
         if isinstance(files, (str, Path)):
-            raise TypeError('files must not be a single string or Path, but an iterable')
+            raise TypeError(
+                "files must not be a single string or Path, but an iterable"
+            )
         for f in files:
             if not isinstance(f, (str, Path)):
                 raise TypeError("Files for (Multi)FileGeneratingJob must be Path/str")
@@ -205,6 +209,9 @@ class MultiFileGeneratingJob(Job):
         self.files = [Path(x) for x in self.outputs]
         self._single_file = False
         self.empty_ok = empty_ok
+        self.always_capture_output = always_capture_output
+        self.stdout = "not captured"
+        self.stderr = "not captured"
 
     def readd(self):
         if self.depend_on_function:
@@ -227,12 +234,35 @@ class MultiFileGeneratingJob(Job):
                 # que = multiprocessing.Queue() # replace by pipe
                 logger.job_trace(f"Forking for {self.job_id}")
                 recv, sender = multiprocessing.Pipe(duplex=False)
+                # these only get closed by the parent process
+                stdout = tempfile.NamedTemporaryFile(
+                    mode="w+",
+                    dir=runner.job_graph.run_dir,
+                    suffix=f"__{self.job_number}.stdout",
+                )
+                stdout = open("stdout",'w+')
+                stderr = tempfile.NamedTemporaryFile(
+                    mode="w+",
+                    dir=runner.job_graph.run_dir,
+                    suffix=f"__{self.job_number}.stderr",
+                )
+                stdout = open("stderr",'w+')
+
                 pid = os.fork()
                 if pid == 0:
                     try:
+                        logger.info(f"tempfilename: {stderr.name}")
+                        stdout_ = sys.stdout
+                        stderr_ = sys.stderr
+                        sys.stdout = stdout
+                        sys.stderr = stderr
                         try:
                             self.generating_function(self.get_input())
-                            os._exit(0)  # go down hard
+                            stdout.flush()
+                            stderr.flush()
+                            # else:
+                            # sender.send((True, "output omitted", "output omitted"))
+                            os._exit(0)  # go down hard, do not call atexit and co.
                         except TypeError as e:
                             if hasattr(
                                 self.generating_function, "__code__"
@@ -248,6 +278,11 @@ class MultiFileGeneratingJob(Job):
                                 )
                             else:
                                 raise
+                        finally:
+                            stdout.flush()
+                            stderr.flush()
+                            sys.stdout = stdout_
+                            sys.stderr = stderr_
                     except Exception as e:
                         try:
                             tb = traceback.format_exc()
@@ -256,7 +291,9 @@ class MultiFileGeneratingJob(Job):
                             try:
                                 sender.send((repr(e), tb))
                             except Exception as e3:
-                                print(f"FileGeneratingJob done, but send failed: \n{type(e)} {e} - \n {type(e2)} {e2}\n{type(e3)} - {e3}")
+                                print(
+                                    f"FileGeneratingJob done, but send failed: \n{type(e)} {e} - \n {type(e2)} {e2}\n{type(e3)} - {e3}"
+                                )
                                 pass
                         os._exit(1)
                 else:
@@ -265,13 +302,24 @@ class MultiFileGeneratingJob(Job):
                         # normal termination.
                         exitcode = os.WEXITSTATUS(waitstatus)
                         if exitcode != 0:
+                            self.stdout, self.stderr = self._read_stdout_stderr(
+                                stdout, stderr
+                            )
+
                             if recv.poll(1):
-                                exception, tb_str = recv.recv()
+                                (
+                                    exception,
+                                    tb_str,
+                                ) = recv.recv()
                                 raise exceptions.JobError(exception, tb_str)
                             else:
                                 raise exceptions.JobContractError(
                                     f"Job {self.job_id} died but did not return an exception object"
                                 )
+                        elif self.always_capture_output:
+                            self.stdout, self.stderr = self._read_stdout_stderr(
+                                stdout, stderr
+                            )
                     else:
                         raise ValueError("Process died. Todo: extend tihs")
 
@@ -290,6 +338,33 @@ class MultiFileGeneratingJob(Job):
                 )
         res = {str(of): hashers.hash_file(of) for of in self.files}
         return res
+
+    def _read_stdout_stderr(self, stdout, stderr):
+        try:
+            stdout.flush()
+            stdout.seek(0, os.SEEK_SET)
+            stdout_text = stdout.read()
+            stdout.close()
+        except ValueError as e:  # pragma: no cover - defensive
+            if "I/O operation on closed file" in str(e):
+                stdout_text = (
+                    "Stdout could not be captured / io operation on closed file"
+                )
+            else:
+                raise
+        try:
+            stderr.flush()
+            stderr.seek(0, os.SEEK_SET)
+            stderr_text = stderr.read()
+            stderr.close()
+        except ValueError as e:  # pragma: no cover - defensive
+            if "I/O operation on closed file" in str(e):
+                stderr_text = (
+                    "stderr could not be captured / io operation on closed file"
+                )
+            else:
+                raise
+        return stdout_text, stderr_text
 
     def get_input(self):
         if self._single_file:
@@ -323,6 +398,7 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
         empty_ok=False,
+        always_capture_output=True,
     ):
         MultiFileGeneratingJob.__init__(
             self,
@@ -331,6 +407,7 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
             resources,
             depend_on_function,
             empty_ok=empty_ok,
+            always_capture_output=always_capture_output
         )
         self._single_file = True
 
@@ -1121,7 +1198,7 @@ class _AttributeCleanupJob(Job):
 
     def __init__(self, parent_job):
         Job.__init__(self, ["CleanUp:" + parent_job.job_id], Resources.RunsHere)
-        self.parent_job = parent_job
+        self.parent_job = parent_job  # what are we cleaning up?
 
     def run(self, _ignored_runner, _historical_output):
         delattr(self.parent_job.object, self.parent_job.attribute_name)

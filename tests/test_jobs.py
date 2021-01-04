@@ -317,6 +317,67 @@ class TestFileGeneratingJob:
         assert job.stdout == "stdout is cool\n"
         assert job.stderr == "I am stderr"  # no \n here
 
+    def test_simple_filegeneration_disabled_stdout_capture(self):
+        of = "out/a"
+        data_to_write = "hello"
+
+        def do_write(of):
+            write(of, data_to_write)
+            print("stdout is cool")
+            sys.stderr.write("I am stderr")
+
+        job = ppg.FileGeneratingJob(of, do_write, always_capture_output=False)
+        ppg.run()
+        assert Path(of).exists()
+        op = open(of, "r")
+        data = op.read()
+        op.close()
+        assert data == data_to_write
+        assert job.stdout == "not captured"
+        assert job.stderr == "not captured"  # no \n here
+
+
+    def test_simple_filegeneration_captures_stdout_stderr_giant_response(self, capsys ):
+        of = "out/a"
+
+        def do_write(of):
+            write(of, 'hello')
+            print("s" * (16 * 1024**2))
+            sys.stderr.write("I" * (256 * 1024**2))
+
+        job = ppg.FileGeneratingJob(of, do_write)
+        with capsys.disabled():
+            ppg.run()
+        assert Path(of).exists()
+        assert read(of) == 'hello'
+        assert job.stdout == "s" * (16 * 1024**2) + "\n"
+        assert job.stderr == "I" * (256 * 1024**2)  # no \n here
+
+
+    def test_simple_filegeneration_captures_stdout_stderr_failure(self):
+        of = "out/a"
+        data_to_write = "hello"
+
+        def do_write(of):
+            op = open(of, "w")
+            op.write(data_to_write)
+            op.close()
+            print("stdout is cool")
+            sys.stderr.write("I am stderr")
+            raise ValueError()
+
+        job = ppg.FileGeneratingJob(of, do_write)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert Path(of).exists()
+        op = open(of, "r")
+        data = op.read()
+        op.close()
+        assert data == data_to_write
+        assert job.stdout == "stdout is cool\n"
+        assert job.stderr == "I am stderr"  # no \n here
+
+
     def test_filegeneration_does_not_change_mcp(self):
         global global_test
         global_test = 1
@@ -995,7 +1056,7 @@ class TestAttributeJob:
         assert read(of) == "shu"
         assert not (hasattr(o, "a"))
 
-    def test_attribute_loading_does_not_run_withot_dependency(self):
+    def test_attribute_loading_does_not_run_withot_dependency(self, job_trace_log):
         o = Dummy()
         tf = "out/testfile"
 
@@ -1110,7 +1171,7 @@ class TestAttributeJob:
         with pytest.raises(ppg.JobContractError):
             ppg.CachedAttributeLoadingJob("out/A", o2, "a", cache)
 
-    def test_ignore_code_changes(self):
+    def test_ignore_code_changes(self, job_trace_log):
         def a():
             append("out/Aa", "A")
             return "5"
@@ -1204,13 +1265,13 @@ class TestTempFileGeneratingJob:
         assert read(count_file) == "X"
         assert read(normal_count_file) == "A"
 
-    def test_does_not_get_return_if_output_is_not(self):
+    def test_does_not_get_return_if_output_is_not(self, job_trace_log):
         temp_file = "out/temp"
         out_file = "out/A"
         count_file = "out/count"
         normal_count_file = "out/countA"
 
-        def write_count():
+        def write_count(out_file):
             try:
                 count = read(out_file)
                 count = count[: count.find(":")]
@@ -1240,10 +1301,10 @@ class TestTempFileGeneratingJob:
         jobTemp = ppg.TempFileGeneratingJob(temp_file, write_temp)
         jobA.depends_on(jobTemp)
         ppg.run()
-        assert not (Path(temp_file).exists())
         assert read(out_file) == "1:temp"  # since the outfile was removed...
         assert read(count_file) == "XX"
         assert read(normal_count_file) == "AA"
+        assert not (Path(temp_file).exists())
 
     def test_dependand_explodes(self):
         temp_file = "out/temp"
@@ -1267,7 +1328,7 @@ class TestTempFileGeneratingJob:
 
         ppg.new()
 
-        def write_A_ok():
+        def write_A_ok(ofA):
             write(ofA, read(temp_file))
 
         temp_job = ppg.TempFileGeneratingJob(temp_file, write_temp)
