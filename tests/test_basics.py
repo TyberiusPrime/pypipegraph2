@@ -856,6 +856,14 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "b"
         assert Path("b").read_text() == "2"
 
+    def test_parameter_invariant_needs_hash(self, create_out_dir):
+        class NoHash:
+            def __hash__(self):
+                raise TypeError("can't hash this")
+
+        with pytest.raises(TypeError):
+            ppg.ParameterInvariant("C", (NoHash(),))
+
     def test_data_loading_job(self):
         self.store = []  # use attribute to avoid cuosure binding
         try:
@@ -1150,13 +1158,14 @@ class TestPypipegraph2:
     def test_failing_jobs_and_downstreams(self):
         def do_a():
             raise ValueError()
-        a = ppg.FileGeneratingJob('A', do_a)
-        b = ppg.FileGeneratingJob('B', lambda of: of.write_text(Path('A').read_text()))
+
+        a = ppg.FileGeneratingJob("A", do_a)
+        b = ppg.FileGeneratingJob("B", lambda of: of.write_text(Path("A").read_text()))
         b.depends_on(a)
-        c = ppg.FileGeneratingJob('C', lambda of: write(of, 'C'))
+        c = ppg.FileGeneratingJob("C", lambda of: write(of, "C"))
         c.depends_on(b)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
-        assert not Path('A').exists()
-        assert not Path('B').exists()
-        assert not Path('C').exists()
+        assert not Path("A").exists()
+        assert not Path("B").exists()
+        assert not Path("C").exists()

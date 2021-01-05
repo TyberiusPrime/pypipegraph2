@@ -1,4 +1,5 @@
 from . import exceptions
+import os
 import queue
 from loguru import logger
 import time
@@ -148,7 +149,9 @@ class Runner:
                     ]  # nobody below you? your cleanup will run right after you
                 for downstream_job_id in downstreams:
                     dag.add_edge(downstream_job_id, cleanup_job.job_id)
-                    self.job_inputs[cleanup_job.job_id].add(downstream_job_id)
+                    self.job_inputs[cleanup_job.job_id].update(
+                        self.jobs[downstream_job_id].outputs
+                    )
         return dag
 
         # now add an initial job, so we can cut off the evaluation properly
@@ -222,7 +225,7 @@ class Runner:
             # if we have no dependencies, we add the cleanup directly after the job
             # but it's not getting added to skipped_jobs
             # and I don't want to write an output_needed for the cleanup jobs
-            if hasattr(self.jobs[job_id], 'cleanup_job_class'):
+            if hasattr(self.jobs[job_id], "cleanup_job_class"):
                 for downstream_id in self.dag.neighbors(job_id):
                     self.push_event("JobSkipped", (downstream_id,))
         self.jobs_in_flight = 0
@@ -240,6 +243,8 @@ class Runner:
                     if not self.jobs_in_flight:
                         # ok, a coding error has lead to us not finishing
                         # the todo graph.
+                        for job_id in self.job_states:
+                            logger.info(f"{job_id}, {self.job_states[job_id].state}")
                         raise exceptions.RunFailedInternally
 
                 logger.job_trace(
@@ -341,7 +346,9 @@ class Runner:
                     if self.job_has_non_temp_somewhere_downstream(downstream_id):
                         if self.job_failed_last_time(downstream_id):
                             self.push_event("JobFailed", (downstream_id, downstream_id))
-                            self.job_states[downstream_id].error = self.last_job_states[downstream_id].error
+                            self.job_states[downstream_id].error = self.last_job_states[
+                                downstream_id
+                            ].error
                         else:
                             self.push_event("JobReady", (downstream_id,), 3)
                     else:
@@ -352,7 +359,9 @@ class Runner:
                 ):
                     if self.job_failed_last_time(downstream_id):
                         self.push_event("JobFailed", (downstream_id, downstream_id))
-                        self.job_states[downstream_id].error = self.last_job_states[downstream_id].error
+                        self.job_states[downstream_id].error = self.last_job_states[
+                            downstream_id
+                        ].error
                     else:
                         self.push_event("JobReady", (downstream_id,), 3)
                     # todo: do I need to do this for loading jobs that are lacking downstream? check me, there is a test case I broke for this...
@@ -367,7 +376,9 @@ class Runner:
                         downstream_state.validation_state = ValidationState.Invalidated
                         if self.job_failed_last_time(downstream_id):
                             self.push_event("JobFailed", (downstream_id, downstream_id))
-                            self.job_states[downstream_id].error = self.last_job_states[downstream_id].error
+                            self.job_states[downstream_id].error = self.last_job_states[
+                                downstream_id
+                            ].error
                         else:
                             self.push_event("JobReady", (downstream_id,), 3)
                     else:
@@ -385,7 +396,9 @@ class Runner:
                                     self.push_event(
                                         "JobFailed", (downstream_id, downstream_id)
                                     )
-                                    self.job_states[downstream_id].error = self.last_job_states[downstream_id].error
+                                    self.job_states[
+                                        downstream_id
+                                    ].error = self.last_job_states[downstream_id].error
                                 else:
                                     self.push_event("JobReady", (downstream_id,), 3)
                             else:
@@ -520,6 +533,8 @@ class Runner:
         return result
 
     def executing_thread(self):
+        my_pid = os.getpid()
+        cwd = os.getcwd()
         while True:
             job_id = self.jobs_to_run_que.get()
             self.jobs_in_flight += 1
@@ -527,22 +542,43 @@ class Runner:
             if job_id is ExitNow:
                 break
             job = self.jobs[job_id]
-            job_state = self.job_states[job_id]
-            try:
-                logger.job_trace(f"\tExecuting {job_id}")
-                job.start_time = time.time()
-                outputs = job.run(self, job_state.historical_output)
-                job.run_time = time.time() - job.start_time
-                self.push_event("JobSuccess", (job_id, outputs))
-            except Exception as e:
-                if isinstance(e, exceptions.JobError):
-                    job_state.error = e
-                else:
-                    job_state.error = exceptions.JobError(e, traceback.format_exc())
-                logger.warning(f"Execute {job_id} failed: {escape_logging(e)}")
-                self.push_event("JobFailed", (job_id, job_id))
-            finally:
-                self.jobs_in_flight -= 1
+            c = job.resources.to_number(self.core_lock.max_cores)
+            logger.job_trace(f"cores: {c}, max: {self.core_lock.max_cores}")
+            with self.core_lock.using(c):
+                job_state = self.job_states[job_id]
+                try:
+                    logger.job_trace(f"\tExecuting {job_id}")
+                    job.start_time = time.time()
+                    outputs = job.run(self, job_state.historical_output)
+                    if os.getcwd() != cwd:
+                        os.chdir(
+                            cwd
+                        )  # restore and hope we can recover enough to actually print the exception, I suppose.
+                        logger.error(
+                            f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
+                        )
+                        raise exceptions.JobContractError(
+                            f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
+                        )
+
+                    job.stop_time = time.time()
+                    job.run_time = job.stop_time - job.start_time
+                    self.push_event("JobSuccess", (job_id, outputs))
+                except SystemExit as e:
+                    logger.job_trace(
+                        "SystemExit in spawned process -> converting to hard exit"
+                    )
+                    if os.getpid() != my_pid:
+                        os._exit(e.args[0])
+                except Exception as e:
+                    if isinstance(e, exceptions.JobError):
+                        job_state.error = e
+                    else:
+                        job_state.error = exceptions.JobError(e, traceback.format_exc())
+                    logger.warning(f"Execute {job_id} failed: {escape_logging(e)}")
+                    self.push_event("JobFailed", (job_id, job_id))
+                finally:
+                    self.jobs_in_flight -= 1
 
 
 class JobCollector:

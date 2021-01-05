@@ -308,6 +308,11 @@ class PyPipeGraph:
         job.job_number = len(self.jobs) - 1
 
     def add_edge(self, upstream_job, downstream_job):
+        if not upstream_job.job_id in self.jobs:
+            raise KeyError(f"{upstream_job} not in this graph. Call job.readd() first")
+        if not downstream_job.job_id in self.jobs:
+            raise KeyError(f"{downstream_job} not in this graph. Call job.readd() first")
+
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)
 
     def has_edge(self, upstream_job, downstream_job):

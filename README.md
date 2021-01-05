@@ -50,3 +50,6 @@ Differences to pypipegraph
 	- TempFileGeneratingJob.do_cleanup_if_was_never_run is no more - I don't think it was ever used outside of testing
 	- Defining multiple jobs creating the same output raises JobOutputConflict (more specific than ValueError)
 	- The execution of 'useless' leaf jobs now usually happens at least once, due to them being invalidated by their FunctionInvariant
+	- JobDiedException is now called just 'JobDied'
+	- The various 'FileTimeInvariant/FileChecksumInvariant/RobustFileChecksumInvariant' forwarders have been removed. Use FileInvariant.
+	- MultiFileInvariant is gone. Adding/removing FileInvariants now triggers by itself, no need to stuff multiple into a MultiFileInvariant

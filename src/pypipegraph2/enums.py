@@ -61,5 +61,7 @@ class Resources(Enum):
             return max_cores - 1
         elif self is Resources.Exclusive:
             return max_cores
+        elif self is Resources.RunsHere:
+            return 1
         else:
             raise ValueError("Not an external Resource with a given number of cores")

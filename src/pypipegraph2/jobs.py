@@ -60,7 +60,7 @@ class Job:
         """
         from . import global_pipegraph
 
-        logger.info(f"adding {self.job_id}")
+        logger.job_trace(f"adding {self.job_id}")
 
         if global_pipegraph is None:
             raise ValueError("Must instantiate a pipegraph before creating any Jobs")
@@ -96,6 +96,8 @@ class Job:
             if isinstance(other_job, Job):
                 o_job = other_job
                 o_inputs = other_job.outputs
+            elif isinstance(other_job, CachedJobTuple):
+                raise TypeError("You passed in a CachedJobTuple - unclear. Pass in either .load or .calc")
             elif other_job is None:
                 return self
             elif hasattr(other_job, "__call__"):
@@ -207,8 +209,11 @@ class MultiFileGeneratingJob(Job):
         for f in files:
             if not isinstance(f, (str, Path)):
                 raise TypeError("Files for (Multi)FileGeneratingJob must be Path/str")
-        Job.__init__(self, files, resources)
-        self.files = [Path(x) for x in self.outputs]
+        self.files = [Path(x).resolve().relative_to(Path('.').absolute()) for x in files]
+        self.files = sorted(self.files)
+        if len(self.files) != len(set(self.files)):
+            raise ValueError("Paths were present multiple times in files argument. Fix your input")
+        Job.__init__(self, self.files, resources)
         self._single_file = False
         self.empty_ok = empty_ok
         self.always_capture_output = always_capture_output
@@ -216,10 +221,10 @@ class MultiFileGeneratingJob(Job):
         self.stderr = "not captured"
 
     def readd(self):
+        super().readd()
         if self.depend_on_function:
             func_invariant = FunctionInvariant(self.generating_function, self.job_id)
             self.depends_on(func_invariant)
-        super().readd()
 
     def run(self, runner, _historical_output):
         for fn in self.files:  # we rebuild anyway!
@@ -230,98 +235,115 @@ class MultiFileGeneratingJob(Job):
             Resources.AllCores,
             Resources.Exclusive,
         ):
-            c = self.resources.to_number(runner.core_lock.max_cores)
-            # logger.info(f'cores: {c}, max: {runner.core_lock.max_cores}')
-            with runner.core_lock.using(c):
-                # que = multiprocessing.Queue() # replace by pipe
-                logger.job_trace(f"Forking for {self.job_id}")
-                recv, sender = multiprocessing.Pipe(duplex=False)
-                # these only get closed by the parent process
-                stdout = tempfile.NamedTemporaryFile(
-                    mode="w+",
-                    dir=runner.job_graph.run_dir,
-                    suffix=f"__{self.job_number}.stdout",
-                )
-                stderr = tempfile.NamedTemporaryFile(
-                    mode="w+",
-                    dir=runner.job_graph.run_dir,
-                    suffix=f"__{self.job_number}.stderr",
-                )
+            # que = multiprocessing.Queue() # replace by pipe
+            logger.job_trace(f"Forking for {self.job_id}")
+            recv, sender = multiprocessing.Pipe(duplex=False)
+            # these only get closed by the parent process
+            stdout = tempfile.NamedTemporaryFile(
+                mode="w+",
+                dir=runner.job_graph.run_dir,
+                suffix=f"__{self.job_number}.stdout",
+            )
+            stderr = tempfile.NamedTemporaryFile(
+                mode="w+",
+                dir=runner.job_graph.run_dir,
+                suffix=f"__{self.job_number}.stderr",
+            )
 
-                pid = os.fork()
-                if pid == 0:
+            pid = os.fork()
+            if pid == 0:
+                try:
+                    stdout.delete = False  # that's the parent's job!
+                    stderr.delete = False
+                    stdout._closer.delete = False  # that's the parent's job!
+                    stderr._closer.delete = False
+
+                    # logger.info(f"tempfilename: {stderr.name}")
+                    stdout_ = sys.stdout
+                    stderr_ = sys.stderr
+                    sys.stdout = stdout
+                    sys.stderr = stderr
                     try:
-                        #logger.info(f"tempfilename: {stderr.name}")
-                        stdout_ = sys.stdout
-                        stderr_ = sys.stderr
-                        sys.stdout = stdout
-                        sys.stderr = stderr
-                        try:
-                            self.generating_function(self.get_input())
-                            stdout.flush()
-                            stderr.flush()
-                            # else:
-                            # sender.send((True, "output omitted", "output omitted"))
-                            os._exit(0)  # go down hard, do not call atexit and co.
-                        except TypeError as e:
-                            if hasattr(
-                                self.generating_function, "__code__"
-                            ):  # build ins
-                                func_info = f"{self.generating_function.__code__.co_filename}:{self.generating_function.__code__.co_firstlineno}"
-                            else:
-                                func_info = "unknown"
-                            if "takes 0 positional arguments but 1 was given" in str(e):
-                                raise TypeError(
-                                    e.args[0]
-                                    + ". You have forgotten to take the output_files as your first parameter."
-                                    + f"The function was defined in {func_info}."
-                                )
-                            else:
-                                raise
-                        finally:
-                            stdout.flush()
-                            stderr.flush()
-                            sys.stdout = stdout_
-                            sys.stderr = stderr_
-                    except Exception as e:
-                        try:
-                            tb = traceback.format_exc()
-                            sender.send((e, tb))
-                        except Exception as e2:
-                            try:
-                                sender.send((repr(e), tb))
-                            except Exception as e3:
-                                print(
-                                    f"FileGeneratingJob done, but send failed: \n{type(e)} {e} - \n {type(e2)} {e2}\n{type(e3)} - {e3}"
-                                )
-                                pass
-                        os._exit(1)
-                else:
-                    _, waitstatus = os.waitpid(pid, 0)
-                    if os.WIFEXITED(waitstatus):
-                        # normal termination.
-                        exitcode = os.WEXITSTATUS(waitstatus)
-                        if exitcode != 0:
-                            self.stdout, self.stderr = self._read_stdout_stderr(
-                                stdout, stderr
+                        self.generating_function(self.get_input())
+                        stdout.flush()
+                        stderr.flush()
+                        # else:
+                        # sender.send((True, "output omitted", "output omitted"))
+                        os._exit(0)  # go down hard, do not call atexit and co.
+                    except TypeError as e:
+                        if hasattr(self.generating_function, "__code__"):  # build ins
+                            func_info = f"{self.generating_function.__code__.co_filename}:{self.generating_function.__code__.co_firstlineno}"
+                        else:
+                            func_info = "unknown"
+                        if "takes 0 positional arguments but 1 was given" in str(e):
+                            raise TypeError(
+                                e.args[0]
+                                + ". You have forgotten to take the output_files as your first parameter."
+                                + f"The function was defined in {func_info}."
                             )
+                        else:
+                            raise
+                    finally:
+                        stdout.flush()
+                        stderr.flush()
+                        sys.stdout = stdout_
+                        sys.stderr = stderr_
+                except Exception as e:
+                    try:
+                        tb = traceback.format_exc()
+                        sender.send((e, tb))
+                    except Exception as e2:
+                        try:
+                            sender.send((repr(e), tb))
+                        except Exception as e3:
+                            print(
+                                f"FileGeneratingJob done, but send failed: \n{type(e)} {e} - \n {type(e2)} {e2}\n{type(e3)} - {e3}"
+                            )
+                            pass
+                    os._exit(1)
+            else:
+                logger.info(f"Child pid {pid}")
+                _, waitstatus = os.waitpid(pid, 0)
+                if os.WIFEXITED(waitstatus):
+                    # normal termination.
+                    exitcode = os.WEXITSTATUS(waitstatus)
+                    if exitcode != 0:
+                        self.stdout, self.stderr = self._read_stdout_stderr(
+                            stdout, stderr
+                        )
 
-                            if recv.poll(1):
-                                (
-                                    exception,
-                                    tb_str,
-                                ) = recv.recv()
-                                raise exceptions.JobError(exception, tb_str)
-                            else:
-                                raise exceptions.JobContractError(
-                                    f"Job {self.job_id} died but did not return an exception object"
-                                )
-                        elif self.always_capture_output:
-                            self.stdout, self.stderr = self._read_stdout_stderr(
-                                stdout, stderr
+                        if recv.poll(1):
+                            (
+                                exception,
+                                tb_str,
+                            ) = recv.recv()
+                            raise exceptions.JobError(exception, tb_str)
+                        else:
+                            logger.error(f"Job died (=exitcode != 0): {self.job_id}")
+                            raise exceptions.JobDied(
+                                f"Job {self.job_id} died but did not return an exception object",
+                                exitcode,
                             )
+                    elif self.always_capture_output:
+                        self.stdout, self.stderr = self._read_stdout_stderr(
+                            stdout, stderr
+                        )
+                else:
+                    if os.WIFSIGNALED(waitstatus):
+                        exitcode = -1 * os.WTERMSIG(waitstatus)
+                        self.stdout, self.stderr = self._read_stdout_stderr(
+                            stdout, stderr
+                        )
+                        # don't bother to retrieve an exception, there won't be anay
+                        logger.error(f"Job killed by signal: {self.job_id}")
+                        raise exceptions.JobDied(
+                            f"Job {self.job_id} was killed", exitcode
+                        )
+
                     else:
-                        raise ValueError("Process died. Todo: extend tihs")
+                        raise ValueError(
+                            "Process did not exit, did not signal, but is dead?. Figure out and extend, I suppose"
+                        )
 
         else:
             self.generating_function(self.get_input())
@@ -1000,6 +1022,8 @@ class ParameterInvariant(_InvariantMixin, Job):
     job_kind = JobKind.Invariant
 
     def __init__(self, job_id, parameters):
+        if isinstance(job_id, Path):
+            job_id = str(job_id)
         job_id = "PI" + job_id
         self.parameters = self.freeze(parameters)
         super().__init__(job_id)
@@ -1033,7 +1057,7 @@ class ParameterInvariant(_InvariantMixin, Job):
         elif isinstance(obj, set):
             return frozenset(obj)
         else:
-            msg = "Unsupported type: %r" % type(obj).__name__
+            msg = "Unsupported type: %r - needs __hash__ support" % type(obj).__name__
             raise TypeError(msg)
 
 
@@ -1046,10 +1070,10 @@ class DataLoadingJob(Job):
         super().__init__(job_id)
 
     def readd(self):
+        super().readd()
         if self.depend_on_function:
             func_invariant = FunctionInvariant(self.callback, self.job_id)
             self.depends_on(func_invariant)
-        super().readd()
 
     def run(self, runner, historical_output):
         self.callback()
@@ -1137,10 +1161,10 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
         self.cleanup_job_class = _AttributeCleanupJob
 
     def readd(self):  # Todo: refactor
+        super().readd()
         if self.depend_on_function:
             func_invariant = FunctionInvariant(self.callback, self.job_id)
             self.depends_on(func_invariant)
-        super().readd()
 
     def run(self, _runner, historical_output):
         setattr(self.object, self.attribute_name, self.callback())
@@ -1156,7 +1180,6 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
             if job.output_needed(runner):
                 return True
         return False
-
 
 
 def CachedAttributeLoadingJob(
@@ -1240,10 +1263,10 @@ class JobGeneratingJob(Job):
         super().__init__(job_id)
 
     def readd(self):  # Todo: refactor
+        super().readd()
         if self.depend_on_function:
             func_invariant = FunctionInvariant(self.callback, self.job_id)
             self.depends_on(func_invariant)
-        super().readd()
 
     def output_needed(self, runner):
         if runner.run_id != self.last_run_id:

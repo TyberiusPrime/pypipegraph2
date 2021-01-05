@@ -31,3 +31,25 @@ def CPUs():
             if ncpus > 0:
                 cpu_count = ncpus
     return cpu_count
+
+def job_or_filename(job_or_filename, invariant_class=None):
+    """Take a filename, or a job. Return Path(filename), dependency-for-that-file
+    ie. either the job, or a invariant_class (default: FileInvariant)"""
+    from .jobs import Job, FileInvariant
+    from pathlib import Path
+
+    if invariant_class is None:
+        invariant_class = FileInvariant
+
+    if isinstance(job_or_filename, Job):
+        filename = job_or_filename.files[0]
+        deps = [job_or_filename]
+    elif job_or_filename is not None:
+        filename = Path(job_or_filename)
+        deps = [invariant_class(filename)]
+    else:
+        filename = None
+        deps = []
+    return filename, deps
+
+

@@ -12,11 +12,13 @@ class NotADag(FatalGraphException):
 
 class JobOutputConflict(ValueError):
     """Multiple jobs with overlapping (but not identical) outputs were defined"""
-
     pass
 
 
 class JobContractError(PPGException):
+    pass
+
+class JobDied(PPGException):
     pass
 
 
