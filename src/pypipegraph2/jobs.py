@@ -60,6 +60,8 @@ class Job:
         """
         from . import global_pipegraph
 
+        logger.info(f"adding {self.job_id}")
+
         if global_pipegraph is None:
             raise ValueError("Must instantiate a pipegraph before creating any Jobs")
 
@@ -240,18 +242,16 @@ class MultiFileGeneratingJob(Job):
                     dir=runner.job_graph.run_dir,
                     suffix=f"__{self.job_number}.stdout",
                 )
-                stdout = open("stdout",'w+')
                 stderr = tempfile.NamedTemporaryFile(
                     mode="w+",
                     dir=runner.job_graph.run_dir,
                     suffix=f"__{self.job_number}.stderr",
                 )
-                stdout = open("stderr",'w+')
 
                 pid = os.fork()
                 if pid == 0:
                     try:
-                        logger.info(f"tempfilename: {stderr.name}")
+                        #logger.info(f"tempfilename: {stderr.name}")
                         stdout_ = sys.stdout
                         stderr_ = sys.stderr
                         sys.stdout = stdout
@@ -382,7 +382,7 @@ class MultiFileGeneratingJob(Job):
             # break the graph execution
             if str(fn) not in runner.job_states[self.job_id].historical_output:
                 return True
-        return False
+        False
 
     def invalidated(self):
         for fn in self.files:
@@ -407,7 +407,7 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
             resources,
             depend_on_function,
             empty_ok=empty_ok,
-            always_capture_output=always_capture_output
+            always_capture_output=always_capture_output,
         )
         self._single_file = True
 
@@ -1051,8 +1051,9 @@ class DataLoadingJob(Job):
             self.depends_on(func_invariant)
         super().readd()
 
-    def run(self, _runner, historical_output):
+    def run(self, runner, historical_output):
         self.callback()
+
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
         }  # so the downstream get's invalidated
@@ -1065,7 +1066,7 @@ class DataLoadingJob(Job):
         # but it will cause false positives if you return things that have an instable str
         # (or what ever hash source we use)
         # and it will cause false negatives if the callback is just for the side effects...
-        # option a) seperate into calculate and store, so that we always have the actual value?
+        # option a) separate into calculate and store, so that we always have the actual value?
         # that's of course an API change compared to the pypipegraph. Hm.
 
     def _output_needed(
@@ -1075,7 +1076,7 @@ class DataLoadingJob(Job):
             job = runner.jobs[downstream_id]
             if job.output_needed(runner):
                 return True
-        False
+        return False
 
 
 def CachedDataLoadingJob(
@@ -1146,6 +1147,16 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
         }  # so the downstream get's invalidated
+
+    def _output_needed(
+        self, runner
+    ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
+        for downstream_id in runner.dag.neighbors(self.job_id):
+            job = runner.jobs[downstream_id]
+            if job.output_needed(runner):
+                return True
+        return False
+
 
 
 def CachedAttributeLoadingJob(
@@ -1235,14 +1246,12 @@ class JobGeneratingJob(Job):
         super().readd()
 
     def output_needed(self, runner):
-        logger.error(
-            f"JobGeneratingJob - last_run_id {self.last_run_id}, runner.run_id: {runner.run_id}"
-        )
         if runner.run_id != self.last_run_id:
             return True
         return False
 
     def run(self, runner, historical_output):
+        logger.job_trace(f"running jobgenerating {self.job_id}")
         self.last_run_id = runner.run_id
         self.callback()
         # todo: is this the right approach

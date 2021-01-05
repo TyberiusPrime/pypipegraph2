@@ -335,7 +335,7 @@ class TestPypipegraph2:
 
     def test_just_a_tempfile(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "TA", lambda of: of.write_text("A" + counter("a"))
+            "TA", lambda of: of.write_text("A" + counter("a")), depend_on_function=False
         )
         ppg.run()
         assert not Path("TA").exists()
@@ -346,13 +346,22 @@ class TestPypipegraph2:
             "TA", lambda of: of.write_text("A" + counter("a"))
         )
         jobB = ppg.TempFileGeneratingJob(
-            "B", lambda of: of.write_text("B" + counter("b") + Path("A").read_text())
+            "B", lambda of: of.write_text("B" + counter("b") + Path("TA").read_text())
+        )
+        jobB.depends_on(jobA)
+        ppg.run()
+        assert not Path("TA").exists()
+        assert Path("a").exists()
+        assert not Path("B").exists()
+        assert Path("b").exists()
+
+    def test_just_chained_tempfile_no_invariant(self, trace_log):
+        jobA = ppg.TempFileGeneratingJob(
+            "TA", lambda of: of.write_text("A" + counter("a")), depend_on_function=False
         )
         ppg.run()
         assert not Path("TA").exists()
         assert not Path("a").exists()
-        assert not Path("B").exists()
-        assert not Path("b").exists()
 
     def test_just_chained_tempfile3(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
@@ -364,14 +373,16 @@ class TestPypipegraph2:
         jobC = ppg.TempFileGeneratingJob(
             "C", lambda of: of.write_text("C" + counter("c") + Path("B").read_text())
         )
+        jobB.depends_on(jobA)
+        jobC.depends_on(jobB)
 
         ppg.run()
         assert not Path("A").exists()
-        assert not Path("a").exists()
+        assert Path("a").exists()
         assert not Path("B").exists()
-        assert not Path("b").exists()
+        assert Path("b").exists()
         assert not Path("C").exists()
-        assert not Path("c").exists()
+        assert Path("c").exists()
 
     def test_tempfile_triggered_by_invalidating_final_job(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
@@ -1076,7 +1087,8 @@ class TestPypipegraph2:
                 raise ValueError()
             else:
                 write(of, "C")
-        a = ppg.FileGeneratingJob("A", raiser, depend_on_function=False)
+
+        ppg.FileGeneratingJob("A", raiser, depend_on_function=False)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         assert read("A") == "B"
@@ -1084,4 +1096,67 @@ class TestPypipegraph2:
         ppg.run()
         assert read("A") == "C"
 
+    def test_failing_plus_job_gen_runs_failing_only_once(self, job_trace_log):
+        def a(of):
+            counter(of)
+            counter("a")
+            raise ValueError()
 
+        def b():
+            counter("B")
+            ppg.FileGeneratingJob("C", lambda of: counter(of))
+
+        jobA = ppg.FileGeneratingJob("A", a)
+        ppg.FileGeneratingJob("E", lambda of: counter(of)).depends_on(jobA)
+        ppg.JobGeneratingJob("B", b)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert read("B") == "1"
+        assert read("C") == "1"
+        assert read("A") == "1"
+        assert read("a") == "1"
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert read("A") == "1"  # get's unlinked prior to run
+        assert read("a") == "2"  # the real 'run' counter'
+
+    def test_actually_multithreading(self, job_trace_log):
+        # use the Barrier  primivite to force it to actually wait for all three threads
+        from threading import Barrier
+
+        barrier = Barrier(3, timeout=1)
+
+        def inner(of):
+            def inner2():
+                c = barrier.wait()
+                write(of, str(c))
+
+            return inner2
+
+        ppg.new(cores=3)
+        a = ppg.DataLoadingJob("A", inner("A"), depend_on_function=False)
+        b = ppg.DataLoadingJob("B", inner("B"), depend_on_function=False)
+        c = ppg.DataLoadingJob("C", inner("C"), depend_on_function=False)
+        d = ppg.JobGeneratingJob("D", lambda: None)
+        d.depends_on(a, b, c)
+
+        ppg.run()
+        seen = set()
+        seen.add(read("A"))
+        seen.add(read("B"))
+        seen.add(read("C"))
+        assert seen == set(["0", "1", "2"])
+
+    def test_failing_jobs_and_downstreams(self):
+        def do_a():
+            raise ValueError()
+        a = ppg.FileGeneratingJob('A', do_a)
+        b = ppg.FileGeneratingJob('B', lambda of: of.write_text(Path('A').read_text()))
+        b.depends_on(a)
+        c = ppg.FileGeneratingJob('C', lambda of: write(of, 'C'))
+        c.depends_on(b)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert not Path('A').exists()
+        assert not Path('B').exists()
+        assert not Path('C').exists()

@@ -45,6 +45,8 @@ Differences to pypipegraph
 	- the 'graph dumping' functionality has been removed for now
 	- passing the wrong type of argument (such as a non callable to FunctionInvariant) raises TypeError instead of ValueError
 	- FileGeneratingJob by default reject empty outputs (this can be changed with empty_ok=True) as a parameter. The default is inversed for MultiFileGeneratingJob.
-	- In ppg1 if a file existed, a (new) FileGeneratingJob covering it was not run. PPG2 runs the FileGeneratingJob in order to record a hash.
-	- a failing job does no longer remove it's output. We know to rerun it because we didn't record the new input hashes.
+	- In ppg1 if a file existed, a (new) FileGeneratingJob covering it was not run. PPG2 runs the FileGeneratingJob in order to record the right hash.
+	- A failing job does no longer remove it's output. We know to rerun it because we didn't record it's new input hashes. This also means the rename_broken has been removed
 	- TempFileGeneratingJob.do_cleanup_if_was_never_run is no more - I don't think it was ever used outside of testing
+	- Defining multiple jobs creating the same output raises JobOutputConflict (more specific than ValueError)
+	- The execution of 'useless' leaf jobs now usually happens at least once, due to them being invalidated by their FunctionInvariant

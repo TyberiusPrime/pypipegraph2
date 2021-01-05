@@ -141,7 +141,7 @@ class Runner:
                 self.jobs[cleanup_job.job_id] = cleanup_job
                 self.outputs_to_job_ids[cleanup_job.outputs[0]] = cleanup_job.job_id
                 dag.add_node(cleanup_job.job_id)
-                downstreams = dag.neighbors(job_id)
+                downstreams = list(dag.neighbors(job_id))
                 if not downstreams:
                     downstreams = [
                         job_id
@@ -165,7 +165,7 @@ class Runner:
                 result.append(upstream_job_id)
         return result
 
-    def run(self, run_id):
+    def run(self, run_id, last_job_states):
         from . import global_pipegraph
 
         job_count = len(global_pipegraph.jobs)  # track if new jobs are being created
@@ -177,35 +177,41 @@ class Runner:
         self.run_id = (
             run_id  # to allow jobgenerating jobs to run just once per graph.run()
         )
+        self.last_job_states = last_job_states
 
         job_ids_topological = list(networkx.algorithms.dag.topological_sort(self.dag))
 
         def is_initial(job_id):
             return (
                 not self.job_inputs[job_id]
-                #and not self.jobs[job_id].is_temp_job() # what is wrong with starting with a temp job?
+                # and not self.jobs[job_id].is_temp_job() # what is wrong with starting with a temp job?
                 and self.jobs[job_id].output_needed(self)
+                and not self.job_failed_last_time(job_id)
             )
 
         def is_skipped(job_id):
             return (
-                not self.job_inputs[job_id]
-                #and not self.jobs[job_id].is_temp_job()
-                and not self.jobs[job_id].output_needed(self)
+                (
+                    not self.job_inputs[job_id]
+                    # and not self.jobs[job_id].is_temp_job()
+                    and not self.jobs[job_id].output_needed(self)
+                )
+                # or self.job_states[job_id].state == JobState.Failed
+                or self.job_failed_last_time(job_id)
             )
 
         logger.job_trace(f"job_ids_topological {job_ids_topological}")
         logger.job_trace(f"self.job_inputs {escape_logging(self.job_inputs)}")
         initial_job_ids = [x for x in job_ids_topological if is_initial(x)]
-        for job_id in job_ids_topological:
-                logger.info(f"{job_id} - inputs - {escape_logging(self.job_inputs[job_id])}")
-                logger.info(f"{job_id} - istemp - {self.jobs[job_id].is_temp_job()}")
-                logger.info(f"{job_id} - outputneeded - {self.jobs[job_id].output_needed(self)}")
-        #if not initial_job_ids:
-            #if self.jobs:
-                #raise exceptions.RunFailedInternally("Could not identify inital jobs")
-            #else:
-                #return {}
+        # for job_id in job_ids_topological:
+        # logger.info(f"{job_id} - inputs - {escape_logging(self.job_inputs[job_id])}")
+        # logger.info(f"{job_id} - istemp - {self.jobs[job_id].is_temp_job()}")
+        # logger.info(f"{job_id} - outputneeded - {self.jobs[job_id].output_needed(self)}")
+        # if not initial_job_ids:
+        # if self.jobs:
+        # raise exceptions.RunFailedInternally("Could not identify inital jobs")
+        # else:
+        # return {}
         skipped_jobs = [x for x in job_ids_topological if is_skipped(x)]
         self.events = queue.Queue()
         for job_id in initial_job_ids:
@@ -213,6 +219,12 @@ class Runner:
             self.push_event("JobReady", (job_id,))
         for job_id in skipped_jobs:
             self.push_event("JobSkipped", (job_id,))
+            # if we have no dependencies, we add the cleanup directly after the job
+            # but it's not getting added to skipped_jobs
+            # and I don't want to write an output_needed for the cleanup jobs
+            if hasattr(self.jobs[job_id], 'cleanup_job_class'):
+                for downstream_id in self.dag.neighbors(job_id):
+                    self.push_event("JobSkipped", (downstream_id,))
         self.jobs_in_flight = 0
         for t in self.threads:
             t.start()
@@ -327,15 +339,23 @@ class Runner:
                 ):
                     logger.job_trace(f"{downstream_id} was Temp")
                     if self.job_has_non_temp_somewhere_downstream(downstream_id):
-                        self.push_event("JobReady", (downstream_id,), 3)
+                        if self.job_failed_last_time(downstream_id):
+                            self.push_event("JobFailed", (downstream_id, downstream_id))
+                            self.job_states[downstream_id].error = self.last_job_states[downstream_id].error
+                        else:
+                            self.push_event("JobReady", (downstream_id,), 3)
                     else:
                         self.push_event("JobSkipped", (downstream_id,), 3)
                 elif (
                     downstream_state.validation_state is ValidationState.Invalidated
                     or downstream_job.output_needed(self)
                 ):
-                    self.push_event("JobReady", (downstream_id,), 3) 
-                    # todo: do I need to do this for loadin jobs that are lacking downstream?
+                    if self.job_failed_last_time(downstream_id):
+                        self.push_event("JobFailed", (downstream_id, downstream_id))
+                        self.job_states[downstream_id].error = self.last_job_states[downstream_id].error
+                    else:
+                        self.push_event("JobReady", (downstream_id,), 3)
+                    # todo: do I need to do this for loading jobs that are lacking downstream? check me, there is a test case I broke for this...
                 else:
                     if len(downstream_state.updated_input) < len(
                         downstream_state.historical_input
@@ -345,18 +365,48 @@ class Runner:
                         )
                         logger.job_trace("\t\t\tinput disappeared -> invalidate")
                         downstream_state.validation_state = ValidationState.Invalidated
-                        self.push_event("JobReady", (downstream_id,), 3)
+                        if self.job_failed_last_time(downstream_id):
+                            self.push_event("JobFailed", (downstream_id, downstream_id))
+                            self.job_states[downstream_id].error = self.last_job_states[downstream_id].error
+                        else:
+                            self.push_event("JobReady", (downstream_id,), 3)
                     else:
                         if downstream_job.job_kind is JobKind.Cleanup:
-                            if self.job_states[downstream_job.parent_job.job_id].validation_state is ValidationState.Invalidated:
-                                downstream_state.validation_state = ValidationState.Invalidated
-                                self.push_event("JobReady", (downstream_id,), 3)
+                            if (
+                                self.job_states[
+                                    downstream_job.parent_job.job_id
+                                ].validation_state
+                                is ValidationState.Invalidated
+                            ):
+                                downstream_state.validation_state = (
+                                    ValidationState.Invalidated
+                                )
+                                if self.job_failed_last_time(downstream_id):
+                                    self.push_event(
+                                        "JobFailed", (downstream_id, downstream_id)
+                                    )
+                                    self.job_states[downstream_id].error = self.last_job_states[downstream_id].error
+                                else:
+                                    self.push_event("JobReady", (downstream_id,), 3)
                             else:
-                                downstream_state.validation_state = ValidationState.Validated
+                                downstream_state.validation_state = (
+                                    ValidationState.Validated
+                                )
                                 self.push_event("JobSkipped", (downstream_id,), 3)
                         else:
-                            downstream_state.validation_state = ValidationState.Validated
+                            downstream_state.validation_state = (
+                                ValidationState.Validated
+                            )
                             self.push_event("JobSkipped", (downstream_id,), 3)
+
+    def job_failed_last_time(self, job_id):
+        res = (
+            self.last_job_states
+            and job_id in self.last_job_states
+            and self.last_job_states[job_id].state == JobState.Failed
+        )
+        logger.job_trace(f"job_failed_last_time: {job_id}: {res}")
+        return res
 
     def handle_job_skipped(self, job_id):
         job_state = self.job_states[job_id]
@@ -463,7 +513,7 @@ class Runner:
         return False
 
     def start_job_executing_threads(self):
-        count = 1
+        count = self.job_graph.cores
         result = []
         for ii in range(count):
             result.append(threading.Thread(target=self.executing_thread))

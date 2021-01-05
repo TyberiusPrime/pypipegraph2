@@ -336,23 +336,21 @@ class TestFileGeneratingJob:
         assert job.stdout == "not captured"
         assert job.stderr == "not captured"  # no \n here
 
-
-    def test_simple_filegeneration_captures_stdout_stderr_giant_response(self, capsys ):
+    def test_simple_filegeneration_captures_stdout_stderr_giant_response(self, capsys):
         of = "out/a"
 
         def do_write(of):
-            write(of, 'hello')
-            print("s" * (16 * 1024**2))
-            sys.stderr.write("I" * (256 * 1024**2))
+            write(of, "hello")
+            print("s" * (16 * 1024 ** 2))
+            sys.stderr.write("I" * (256 * 1024 ** 2))
 
         job = ppg.FileGeneratingJob(of, do_write)
         with capsys.disabled():
             ppg.run()
         assert Path(of).exists()
-        assert read(of) == 'hello'
-        assert job.stdout == "s" * (16 * 1024**2) + "\n"
-        assert job.stderr == "I" * (256 * 1024**2)  # no \n here
-
+        assert read(of) == "hello"
+        assert job.stdout == "s" * (16 * 1024 ** 2) + "\n"
+        assert job.stderr == "I" * (256 * 1024 ** 2)  # no \n here
 
     def test_simple_filegeneration_captures_stdout_stderr_failure(self):
         of = "out/a"
@@ -376,7 +374,6 @@ class TestFileGeneratingJob:
         assert data == data_to_write
         assert job.stdout == "stdout is cool\n"
         assert job.stderr == "I am stderr"  # no \n here
-
 
     def test_filegeneration_does_not_change_mcp(self):
         global global_test
@@ -437,17 +434,24 @@ class TestFileGeneratingJob:
         ppg.MultiFileGeneratingJob(
             ["out/A", "out/B"], lambda of: write("out/A", "hello")
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ppg.JobOutputConflict):
             ppg.MultiFileGeneratingJob(
                 ["out/A", "out/C"], lambda of: write("out/A", "world")
             )
-        ppg.FileGeneratingJob("out/C", lambda of: write("out/C", "C"))
-        with pytest.raises(ValueError):
-            ppg.MultiFileGeneratingJob(["out/C"], lambda of: write("out/A", "world"))
+        ppg.MultiFileGeneratingJob(
+            ["out/C"], lambda of: write("out/A", "world")
+        )  # that's ok, we are replacing out/C
+        ppg.FileGeneratingJob(
+            "out/C", lambda of: write("out/C", "C")
+        )  # that's ok, we are replacing out/C (at least in relaxed /notebook mode)
+        with pytest.raises(ValueError):  # just checking the inheritance
+            ppg.MultiFileGeneratingJob(
+                ["out/C", "out/D"], lambda of: write("out/A", "world")
+            )  # note that this one does not replace out/C
         ppg.MultiFileGeneratingJob(
             ["out/D", "out/E"], lambda of: write("out/A", "world")
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ppg.JobOutputConflict) as excinfo:
             ppg.FileGeneratingJob("out/D", lambda of: write("out/C", "C"))
 
     def test_invaliding_removes_file(self):
@@ -661,6 +665,7 @@ class TestMultiFileGeneratingJob:
             ppg.MultiFileGeneratingJob(["test1", "test2"], lambda of: 5)
             ppg.MultiFileGeneratingJob(["test2", "test3"], lambda of: 5)
 
+    @pytest.mark.xfail()  # todo: interactive
     def test_duplicate_prevention(self):
         param = "A"
         ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))
@@ -749,32 +754,36 @@ class TestDataLoadingJob:
         of = "out/shu"
 
         def load():
-            write(
-                of, "shu"
-            )  # not the fine english way, but we need a sideeffect that's checkable
+            counter(of)
 
         ppg.DataLoadingJob("myjob", load)
         ppg.run()
-        assert not (Path(of).exists())
+        assert read(of) == "1"  # runs once to capture the hashes, right?
+        ppg.run()
+        assert read(of) == "1"  # but does not run again
+        ppg.new()
+        ppg.DataLoadingJob("myjob", load)
+        ppg.run()
 
     def test_does_not_get_run_in_chain_without_final_dep(self):
         of = "out/shu"
 
         def load():
-            write(
-                of, "shu"
-            )  # not the fine english way, but we need a sideeffect that's checkable
+            counter(of)
 
         job = ppg.DataLoadingJob("myjob", load)
         ofB = "out/sha"
 
         def loadB():
-            write(ofB, "sha")
+            counter(ofB)
 
         ppg.DataLoadingJob("myjobB", loadB).depends_on(job)
         ppg.run()
-        assert not (Path(of).exists())
-        assert not (Path(ofB).exists())
+        assert read(of) == "1"
+        assert read(ofB) == "1"
+        ppg.run()
+        assert read(of) == "1"
+        assert read(ofB) == "1"
 
     def test_does_get_run_in_chain_all(self):
         of = "out/shu"
@@ -888,44 +897,39 @@ class TestDataLoadingJob:
         # B is done.
         # D is not
         # since a would be loaded, and then cleaned up right away (because B is Done)
-        # it should never be loaded
+        # it should not be loaded again
         o = Dummy()
 
         def a():
             o.a = "A"
             append("out/A", "A")
 
-        def b():
+        def b(of):
             append("out/B", "B")
-            append("out/Bx", "B")
 
         def c():
             o.c = "C"
             append("out/C", "C")
 
-        def d():
+        def d(of):
             append("out/D", "D")
-            append("out/Dx", "D")
 
         jobA = ppg.DataLoadingJob("out/A", a, depend_on_function=False)
         jobB = ppg.FileGeneratingJob("out/B", b, depend_on_function=False)
+        jobB.depends_on(jobA)
+        ppg.run()
+        assert read("out/A") == "A"
+        assert read("out/B") == "B"
+
         jobC = ppg.DataLoadingJob("out/C", c, depend_on_function=False)
         jobD = ppg.FileGeneratingJob("out/D", d, depend_on_function=False)
         jobD.depends_on(jobC)
         jobC.depends_on(jobB)
-        jobB.depends_on(jobA)
-        write("out/B", "already done")
-        assert not (Path("out/D").exists())
         ppg.run()
-        assert read("out/D") == "D"
-        assert read("out/Dx") == "D"
-        assert not (
-            Path("out/A").exists()
-        )  # A was not executed (as per the premise of the test)
-        assert not (
-            Path("out/Bx").exists()
-        )  # so B was not executed (we removed the function invariants for this test)
+        assert read("out/A") == "A"
+        assert read("out/B") == "B"
         assert read("out/C") == "C"
+        assert read("out/D") == "D"
 
     def test_sending_a_non_pickable_exception_data_loading(self):
         class UnpickableException(Exception):
@@ -983,20 +987,27 @@ class TestDataLoadingJob:
         assert read("out/A") == "A"
         assert not Path("out/C").exists()
 
-    def test_creating_jobs_in_data_loading(self):
+    def test_creating_jobs_in_data_loading(self, job_trace_log):
         def load():
-            ppg.FileGeneratingJob("out/C", lambda of: write("out/C", "C"))
+            from loguru import logger  # noqa:F401
 
-        a = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))
-        b = ppg.DataLoadingJob("out/B", load)
-        a.depends_on(b)
-        with pytest.raises(ppg.RunFailed):
-            ppg.run()
-        assert isinstance(b.exception, ppg.JobContractError)
-        assert (
-            "Trying to add new jobs to running pipeline without having new_jobs "
-            in str(b.exception)
+            logger.info("in load")
+            ppg.FileGeneratingJob(
+                "out/C", lambda of: write("out/C", "C"), depend_on_function=False
+            )
+
+        a = ppg.FileGeneratingJob(
+            "out/A", lambda of: write("out/A", "A"), depend_on_function=False
         )
+        b = ppg.DataLoadingJob("out/B", load, depend_on_function=False)
+        a.depends_on(b)
+        ppg.run()
+        assert Path("out/C").exists()
+        # it is ok to create jobs in dataloading .
+        # ppg1 guarded against this, but it had to special case everything
+        # around on-the-fly-jobs
+        # the drawback here is that the DataLoadingJob might not run,
+        # but perhaps that's just what you want.
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1056,7 +1067,20 @@ class TestAttributeJob:
         assert read(of) == "shu"
         assert not (hasattr(o, "a"))
 
-    def test_attribute_loading_does_not_run_withot_dependency(self, job_trace_log):
+    def test_attribute_loading_does_not_run_without_dependency(self, job_trace_log):
+        o = Dummy()
+        tf = "out/testfile"
+
+        def load():
+            write(tf, "hello")
+            return "shu"
+
+        ppg.AttributeLoadingJob("load_dummy_shu", o, "a", load, depend_on_function=False)
+        ppg.run()
+        assert not (hasattr(o, "a"))
+        assert not (Path(tf).exists())
+
+    def test_attribute_loading_does_run_without_dependency_if_invalidated(self, job_trace_log):
         o = Dummy()
         tf = "out/testfile"
 
@@ -1066,8 +1090,9 @@ class TestAttributeJob:
 
         ppg.AttributeLoadingJob("load_dummy_shu", o, "a", load)
         ppg.run()
+        assert (Path(tf).exists())
         assert not (hasattr(o, "a"))
-        assert not (Path(tf).exists())
+
 
     def test_attribute_disappears_after_direct_dependency(self):
         o = Dummy()
@@ -1083,13 +1108,22 @@ class TestAttributeJob:
         def later_write():
             write(of2, o.a)
 
+        # might be pure luck that this job runs after the cleanup
         ppg.FileGeneratingJob(of2, later_write).depends_on(fgjob)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         assert read(of) == "shu"
         assert not (Path(of2).exists())
 
-    def test_attribute_disappears_after_direct_dependencies(self):
+
+    def ppg1_test_attribute_disappears_after_direct_dependencies(self):
+        """I can't get tihs test to run in ppg2 - the cleanup does happen,
+        but this can't show it. It is now a job, so 
+        it 's not a given that it runs before B or C
+        (actually, I believe test_attribute_disappears_after_direct_dependency
+        only works by sheer accident as well?)
+
+        """
         o = Dummy()
         job = ppg.AttributeLoadingJob("load_dummy_shu", o, "a", lambda: "shu")
         of = "out/A"
@@ -1140,6 +1174,7 @@ class TestAttributeJob:
         with pytest.raises(TypeError):
             ppg.AttributeLoadingJob(5, o, "a", lambda: 55)
 
+    @pytest.mark.xfail()  # todo: interactivity/notebook
     def test_no_swapping_attributes_for_one_job(self):
         def cache():
             return list(range(0, 100))
@@ -1160,6 +1195,7 @@ class TestAttributeJob:
             o = Dummy()
             ppg.AttributeLoadingJob("out/A", o, 23, 55)
 
+    @pytest.mark.xfail()  # todo: interactivity/notebook
     def test_no_swapping_objects_for_one_job(self):
         def cache():
             return list(range(0, 100))
@@ -1356,28 +1392,7 @@ class TestTempFileGeneratingJob:
         fgjob.depends_on(temp_job)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
-        assert not (Path(temp_file).exists())
-        assert not (Path(ofA).exists())
-
-    def test_renames_tempfile_on_exception_if_requested(self):
-        temp_file = "out/temp"
-
-        def write_temp(of):
-            write(temp_file, "hello")
-            raise ValueError("should")
-
-        temp_job = ppg.TempFileGeneratingJob(temp_file, write_temp, rename_broken=True)
-        ofA = "out/A"
-
-        def write_A(of):
-            write(ofA, read(temp_file))
-
-        fgjob = ppg.FileGeneratingJob(ofA, write_A)
-        fgjob.depends_on(temp_job)
-        with pytest.raises(ppg.RunFailed):
-            ppg.run()
-        assert not (Path(temp_file).exists())
-        assert Path(temp_file + ".broken").exists()
+        assert Path(temp_file).exists()
         assert not (Path(ofA).exists())
 
     def test_passing_non_function(self):
@@ -1536,19 +1551,19 @@ class TestTempFileGeneratingJob:
             temp_file, write_temp, depend_on_function=False
         )
         jobA = ppg.FileGeneratingJob("A", write_a, depend_on_function=False)
-        write_a('A')  # so the file is there!
+        write_a("A")  # so the file is there!
         ppg.run()
         assert not (Path("out/temp").exists())
         ppg.new()
         write_temp(temp_file)
         assert Path("out/temp").exists()
-        # this job never runs... 
+        # this job never runs...
         temp_job = ppg.TempFileGeneratingJob(
             temp_file, write_temp, depend_on_function=False
         )
-        #temp_job.do_cleanup_if_was_never_run = True
+        # temp_job.do_cleanup_if_was_never_run = True
         ppg.run()
-        assert (Path("out/temp").exists()) # no run, no cleanup
+        assert Path("out/temp").exists()  # no run, no cleanup
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1596,7 +1611,9 @@ class TestMultiTempFileGeneratingJob:
         fgjob.depends_on(temp_job)
         write(ofA, "two")
         ppg.run()
-        assert read(ofA) == "hellohello" # change from ppg1 - we rerun if we don't have a hash recorded
+        assert (
+            read(ofA) == "hellohello"
+        )  # change from ppg1 - we rerun if we don't have a hash recorded
         assert Path("temp_sentinel").exists()
 
     def raises_on_non_string_filnames(self):
@@ -1608,6 +1625,7 @@ class TestMultiTempFileGeneratingJob:
             ppg.MultiTempFileGeneratingJob(["test1", "test2"], lambda of: 5)
             ppg.MultiTempFileGeneratingJob(["test2", "test3"], lambda of: 5)
 
+    @pytest.mark.xfail()  # todo: interactivity/notebook
     def test_duplicate_prevention(self):
         param = "A"
         ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))

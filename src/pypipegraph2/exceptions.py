@@ -10,7 +10,7 @@ class NotADag(FatalGraphException):
     pass
 
 
-class JobOutputConflict(FatalGraphException):
+class JobOutputConflict(ValueError):
     """Multiple jobs with overlapping (but not identical) outputs were defined"""
 
     pass

@@ -106,11 +106,12 @@ class PyPipeGraph:
                     raise ValueError("endless loop")
                 try:
                     runner = Runner(self, history, event_timeout)
-                    result = runner.run(self.run_id)
+                    result = runner.run(self.run_id, result)
                     self.run_id += 1
                     self.update_history(result, history)
                     break
                 except _RunAgain as e:
+                    result = e.args[0]
                     self.update_history(e.args[0], history)
                     pass
             for job_id, job_state in result.items():
