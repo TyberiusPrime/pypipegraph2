@@ -37,7 +37,7 @@ class TestPruning:
         assert Path("D").read_text() == "D"
         assert not Path("B").exists()
         assert not Path("C").exists()
-        assert c._pruned == b.job_id
+        assert c.prune_reason == b.job_id
 
     def test_tempfile_not_run_on_prune(self):
         a = ppg.TempFileGeneratingJob("A", lambda of: write("A", "A"))
