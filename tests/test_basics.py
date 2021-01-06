@@ -1239,7 +1239,7 @@ class TestPypipegraph2:
         error = ppg.global_pipegraph.last_run_result["A"].error
         assert isinstance(error, ppg.JobContractError)
 
-    def failing_temp_does_not_get_run_twice(self):
+    def test_failing_temp_does_not_get_run_twice(self):
         def a(of):
             counter("a")
             raise ValueError()
@@ -1251,3 +1251,26 @@ class TestPypipegraph2:
             ppg.run()
         assert read("a") == "1"
         assert not Path("B").exists()
+
+    def test_new_default_params(self):
+        ppg.new(cores=50)
+        assert ppg.global_pipegraph.cores == 50
+        ppg.new()
+        assert ppg.global_pipegraph.cores == 50
+        ppg.new(cores=ppg.default)
+        assert ppg.global_pipegraph.cores == ppg.util.CPUs()
+
+
+    def test_two_job_failing(self):
+        def err(of):
+            raise ValueError()
+        ppg.FileGeneratingJob('A', err)
+        ppg.FileGeneratingJob('B', err)
+        ppg.FileGeneratingJob('C', lambda of: write(of,str(of)))
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert len(ppg.global_pipegraph.do_raise) == 1
+        assert ppg.global_pipegraph.last_run_result['A'].error
+        assert ppg.global_pipegraph.last_run_result['B'].error
+        assert not ppg.global_pipegraph.last_run_result['C'].error
+

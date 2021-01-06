@@ -17,11 +17,11 @@ default = object()
 _last_new_arguments = {}
 
 
-def _last_or_default(name, value, default):
+def _last_or_default(name, value, default_value):
     if value is default:
-        result = default
+        result = default_value
     elif value is reuse_last_or_default:
-        result = _last_new_arguments.get(name, default)
+        result = _last_new_arguments.get(name, default_value)
     else:
         result = value
     _last_new_arguments[name] = result
@@ -58,6 +58,7 @@ def new(
             ("run_mode", RunMode.CONSOLE),
         ]
     }
+    print(arguments, run_mode)
     global_pipegraph = PyPipeGraph(**arguments)
     return global_pipegraph
 

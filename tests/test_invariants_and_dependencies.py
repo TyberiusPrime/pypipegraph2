@@ -414,7 +414,8 @@ class TestInvariant:
         ppg.run()
         assert read("out/A") == "A"
         assert read("out/B") == "B"
-        ppg.new()
+        ppg.new(run_mode=ppg.RunMode.CONSOLE)
+        # ppg.new()
 
         def func_c1(of):
             append("out/C", "D")
@@ -443,15 +444,12 @@ class TestInvariant:
 
         mocker.patch("pickle.dumps", new_pickle_dump)
         ki_raised = False
-        try:
+        assert not hasattr(ppg.global_pipegraph, "last_run_result")
+        with pytest.raises(ppg.RunFailed):
             ppg.run()
-        except ppg.RunFailed:
-            pass
-        except KeyboardInterrupt:  # we expect this to be raised
-            ki_raised = True
-            pass
-        if not ki_raised:
-            raise ValueError("KeyboardInterrupt was not raised")
+        assert isinstance(ppg.global_pipegraph.do_raise[0], KeyboardInterrupt)
+        assert len(ppg.global_pipegraph.do_raise) == 2
+        assert hasattr(ppg.global_pipegraph, "last_run_result")
         assert os.path.exists("out/A")  # The file get's written.
         assert read("out/B") == "B"
         assert read("out/C") == "C"
@@ -476,6 +474,19 @@ class TestInvariant:
         assert read("out/B") == "BB"
         assert read("out/C") == "C"  #
         assert read("out/c") == "1"  # c did not get rerun
+
+    def test_sig_int_is_ignored_in_console_mode(self):
+        ppg.new(run_mode=ppg.RunMode.CONSOLE)
+
+        def sigint():
+            import signal
+
+            os.kill(os.getpid(), signal.SIGINT)
+            counter("A")
+
+        job = ppg.DataLoadingJob("A", sigint, lambda x: None)
+        ppg.run()
+        assert read("A") == "1"
 
     def test_input_output_dumping_dies_for_some_reason(self, ppg_per_test, mocker):
         import pickle
@@ -1310,7 +1321,7 @@ class TestDefinitionErrors:
         a = lambda: 55  # noqa:E731
         b = lambda: 66  # noqa:E731
         ppg.FunctionInvariant("a", a)
-        ppg.FunctionInvariant("a", a) # that's ok...
+        ppg.FunctionInvariant("a", a)  # that's ok...
 
         with pytest.raises(ppg.JobRedefinitionError):
             ppg.FunctionInvariant("a", b)
@@ -1320,21 +1331,20 @@ class TestDefinitionErrors:
         j = ppg.FunctionInvariant("a", b)
         assert j.function is b
 
-
     def test_defining_function_and_parameter_invariant_with_same_name(self):
         # you can't really, FunctionInvariants are Prefixed with FI, ParameterInvariant with PI
         a = lambda: 55  # noqa:E731
         ppg.FunctionInvariant("PIa", a)
-        ppg.ParameterInvariant("a", 'b')
+        ppg.ParameterInvariant("a", "b")
 
     def test_defining_function_and_parameter_invariant_with_same_name_reversed(self):
         a = lambda: 55  # noqa:E731
-        ppg.ParameterInvariant("a", 'b')
+        ppg.ParameterInvariant("a", "b")
         ppg.FunctionInvariant("PIa", a)
 
     def test_parameter_invariant_does_not_accept_function(self):
         with pytest.raises(TypeError):
-            ppg.ParameterInvariant('a', lambda: 55)
+            ppg.ParameterInvariant("a", lambda: 55)
 
 
 @pytest.mark.usefixtures("ppg_per_test")

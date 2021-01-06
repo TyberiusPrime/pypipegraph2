@@ -52,7 +52,7 @@ class PyPipeGraph:
         self.history_dir = Path(history_dir)
         self.run_dir = Path(run_dir)
         self.log_level = log_level
-        self.paths = {k: Path(v) for (k, v) in paths} if paths else None
+        #self.paths = {k: Path(v) for (k, v) in paths} if paths else {}
         self.run_mode = run_mode
         self.jobs = {}  # the job objects, by id
         self.job_dag = (
@@ -90,8 +90,7 @@ class PyPipeGraph:
         self.do_raise = []
         try:
             result = None
-            if self.run_mode == RunMode.CONSOLE:
-                self._install_signals()
+            self._install_signals()
             history = self.load_historical()
             max_runs = 5
             while True:
@@ -110,11 +109,7 @@ class PyPipeGraph:
                     pass
             for job_id, job_state in result.items():
                 if job_state.state == JobState.Failed:
-                    if print_failures:
-                        msg = textwrap.indent(str(job_state.error), "\t")
-                        logger.error(f"{job_id} failed.\n {escape_logging(msg)}")
-                        print(f"{job_id} failed.\n {escape_logging(msg)}")
-                    if raise_on_job_error and not self.do_raise:
+                    if raise_on_job_error and not "At least one job failed" in self.do_raise:
                         self.do_raise.append("At least one job failed")
             self.last_run_result = result
             if self.do_raise:
@@ -142,7 +137,14 @@ class PyPipeGraph:
                 for job_id in job_results
             }
         )
-        self.save_historical(new_history)
+        done = False
+        while not done:
+            try:
+                self.save_historical(new_history)
+                done = True
+            except KeyboardInterrupt as e:
+                self.do_raise.append(e) 
+                pass
 
     def _get_history_fn(self):
         fn = Path(sys.argv[0]).name
@@ -267,15 +269,22 @@ class PyPipeGraph:
         """
         logger.trace("_install_signals")
 
-        def hup():  # pragma: no cover
+        def hup(*args, **kwargs):  # pragma: no cover
             logger.debug("user logged off - continuing run")
+        def sigint(*args, **kwargs):
+            logger.info("CTRL-C has been disabled")
 
-        self._old_signal_up = signal.signal(signal.SIGHUP, hup)
+        if self.run_mode is (RunMode.CONSOLE):
+            self._old_signal_hup = signal.signal(signal.SIGHUP, hup)
+        if self.run_mode in (RunMode.CONSOLE, RunMode.NOTEBOOK):
+            self._old_signal_int = signal.signal(signal.SIGINT, sigint)
 
     def _restore_signals(self):
         logger.trace("_restore_signals")
-        if self._old_signal_up:
-            signal.signal(signal.SIGHUP, self._old_signal_up)
+        if hasattr(self, '_old_signal_hup') and self._old_signal_hup:
+            signal.signal(signal.SIGHUP, self._old_signal_hup)
+        if hasattr(self, '_old_signal_int') and self._old_signal_int:
+                signal.signal(signal.SIGINT, self._old_signal_int)
 
     def add(self, job):
 
