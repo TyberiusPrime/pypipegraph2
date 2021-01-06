@@ -9,71 +9,56 @@ from .graph import PyPipeGraph, ALL_CORES
 from .jobs import *  # TODO
 from .exceptions import *  # TODO
 from . import enums
-from .enums import Resources
+from .enums import Resources, RunMode
 
-_last_new_arguments = None
+reuse_last_or_default = object()
+default = object()
+
+_last_new_arguments = {}
+
+
+def _last_or_default(name, value, default):
+    if value is default:
+        result = default
+    elif value is reuse_last_or_default:
+        result = _last_new_arguments.get(name, default)
+    else:
+        result = value
+    _last_new_arguments[name] = result
+    return result
 
 
 def new(
-    cores=None,
-    log_dir=None,
-    history_dir=None,
-    run_dir=None,
-    log_level=None,
-    allow_short_filenames=None,
+    cores=reuse_last_or_default,
+    log_dir=reuse_last_or_default,
+    history_dir=reuse_last_or_default,
+    run_dir=reuse_last_or_default,
+    log_level=reuse_last_or_default,
+    allow_short_filenames=reuse_last_or_default,
+    run_mode=reuse_last_or_default,
 ):
     """create a new pipegraph.
-    If every argument is None, reuse last arguments
+    You may pase reuse_last_or_default to all values
+    to reuse the last value,
+    or default to use the true default
+
     (or load defaults)
     """
-    global _last_new_arguments
-    if (
-        cores is None
-        and log_dir is None
-        and history_dir is None
-        and run_dir is None
-        and log_level is None
-        and allow_short_filenames is None
-    ):
-        if _last_new_arguments is not None:
-            (
-                cores,
-                log_dir,
-                history_dir,
-                run_dir,
-                log_level,
-                allow_short_filenames,
-            ) = _last_new_arguments
-    if cores is None:
-        cores = ALL_CORES
-    if log_dir is None:
-        log_dir = Path(".ppg/logs")
-    if history_dir is None:
-        history_dir = Path(".ppg/history")
-    if run_dir is None:
-        run_dir = Path(".ppg/run")
-    if log_level is None:
-        log_level = logging.INFO
-    if allow_short_filenames is None:
-        allow_short_filenames = False
-
-    _last_new_arguments = (
-        cores,
-        log_dir,
-        history_dir,
-        run_dir,
-        log_level,
-        allow_short_filenames,
-    )
     global global_pipegraph
-    global_pipegraph = PyPipeGraph(
-        cores=cores,
-        log_dir=log_dir,
-        history_dir=history_dir,
-        run_dir=run_dir,
-        log_level=log_level,
-        allow_short_filenames=allow_short_filenames,
-    )
+    l = locals()
+    arguments = {
+        name: _last_or_default(name, l[name], default_arg)
+        for name, default_arg in [
+            ("cores", ALL_CORES),
+            ("log_dir", Path(".ppg/logs")),
+            ("history_dir", Path(".ppg/history")),
+            ("run_dir", Path(".ppg/run")),
+            ("log_level", logging.INFO),
+            ("allow_short_filenames", False),
+            ("run_mode", RunMode.CONSOLE),
+        ]
+    }
+    global_pipegraph = PyPipeGraph(**arguments)
     return global_pipegraph
 
 

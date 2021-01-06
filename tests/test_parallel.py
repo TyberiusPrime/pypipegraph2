@@ -85,3 +85,11 @@ class TestCoreLock:
             t.join()
         assert len(counter) == 4
         assert set(counter) == set([0, 2, 3, 4])
+
+    def test_aquire_0_raise(self):
+        mylock = CoreLock(1)
+        with pytest.raises(ValueError):
+            mylock._acquire(0)
+        with pytest.raises(ValueError):
+            with mylock.using(0):
+                pass

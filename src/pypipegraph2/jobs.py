@@ -1,4 +1,5 @@
 from __future__ import annotations
+import collections
 import tempfile
 import traceback
 import pickle
@@ -15,7 +16,7 @@ from pathlib import Path
 from io import StringIO
 from collections import namedtuple
 from . import hashers, exceptions
-from .enums import JobKind, Resources
+from .enums import JobKind, Resources, RunMode
 from .util import escape_logging
 
 module_type = type(sys)
@@ -27,9 +28,28 @@ DependsOnInvariant = namedtuple("DependsOnInvariant", ["invariant", "self"])
 CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
 
 
+def _dedup_job(cls, job_id):
+    from . import global_pipegraph
+
+    if global_pipegraph is None:
+        raise ValueError("Must instantiate a pipegraph before creating any Jobs")
+    if global_pipegraph.run_mode.is_strict() and job_id in global_pipegraph.jobs:
+        j = global_pipegraph.jobs[job_id]
+        if type(j) != cls:
+            raise exceptions.JobRedefinitionError(
+                f"Redefining job {job_id} with different type - prohibited by RunMode. Was {type(j)}, wants to be {cls}"
+            )
+        return global_pipegraph.jobs[job_id]
+    else:
+        return object.__new__(cls)
+
+
 class Job:
     job_id: int
     historical: Optional[Tuple[str, Dict[str, str]]]
+
+    def __new__(cls, outputs, *args, **kwargs):
+        return _dedup_job(cls, ":::".join(sorted([str(x) for x in outputs])))
 
     def __init__(
         self,
@@ -37,21 +57,38 @@ class Job:
         resources: Resources = Resources.SingleCore,
     ):
         self.use_resources(resources)
-        if isinstance(outputs, str):
-            self.outputs = [outputs]
-            self.mapped_outputs = {}
-        elif isinstance(outputs, dict):
-            self.outputs = outputs.values()
-            self.mapped_outputs = outputs
-        elif isinstance(outputs, list):
+        if isinstance(outputs, list):
             self.outputs = outputs
-            self.mapped_outputs = {}
+            for o in outputs:
+                if not isinstance(o, str):
+                    raise TypeError(f"outputs must all be strings, was {type(o)}")
         else:
             raise TypeError("Invalid output definition.")
-        self.outputs = sorted([str(x) for x in self.outputs])
+        self.outputs = sorted([str(x) for x in outputs])
         self.job_id = ":::".join(self.outputs)
         self.dependency_callbacks = []
+        self._validate()
         self.readd()
+        self._pruned = False
+
+    def __str__(self):
+        return f"{self.__class__}: {getattr(self, 'job_id', '*no_init*')}"
+
+    def __repr__(self):
+        return str(self)
+
+    def _validate(self):
+        from . import global_pipegraph
+
+        if global_pipegraph.run_mode.is_strict():
+            job_id = ":::".join(self.outputs)
+            if (
+                job_id in global_pipegraph.jobs
+                and type(global_pipegraph.jobs[job_id]) != self.__class__
+            ):
+                raise ValueError(
+                    "Redefining job {job_id} with different type {self.__class__}, was {type(global_pipegraph.jobs[job_id])}"
+                )
 
     def readd(self):
         """Readd this job to the current global pipegraph
@@ -97,7 +134,9 @@ class Job:
                 o_job = other_job
                 o_inputs = other_job.outputs
             elif isinstance(other_job, CachedJobTuple):
-                raise TypeError("You passed in a CachedJobTuple - unclear. Pass in either .load or .calc")
+                raise TypeError(
+                    "You passed in a CachedJobTuple - unclear. Pass in either .load or .calc"
+                )
             elif other_job is None:
                 return self
             elif hasattr(other_job, "__call__"):
@@ -159,13 +198,22 @@ class Job:
         self.depends_on(job)
         return DependsOnInvariant(job, self)
 
+    def prune(self):
+        self._pruned = True
+
+    def unprune(self):
+        self._pruned = False
+
 
 class _DownstreamNeedsMeChecker(Job):
     job_kind = JobKind.Invariant
 
+    def __new__(cls, job_to_check):
+        return _dedup_job(cls, f"_DownstreamNeedsMeChecker_{job_to_check.job_id}")
+
     def __init__(self, job_to_check):
         self.job_to_check = job_to_check
-        Job.__init__(self, f"_DownstreamNeedsMeChecker_{job_to_check.job_id}")
+        Job.__init__(self, [f"_DownstreamNeedsMeChecker_{job_to_check.job_id}"])
 
     def output_needed(self, _ignored_runner):
         return True
@@ -188,6 +236,10 @@ class _DownstreamNeedsMeChecker(Job):
 class MultiFileGeneratingJob(Job):
     job_kind = JobKind.Output
 
+    def __new__(cls, files, *args, **kwargs):
+        files = cls._validate_files_argument(files)
+        return Job.__new__(cls, [str(x) for x in files])
+
     def __init__(
         self,
         files: List[Path],  # todo: extend type attribute to allow mapping
@@ -200,6 +252,20 @@ class MultiFileGeneratingJob(Job):
 
         self.generating_function = generating_function
         self.depend_on_function = depend_on_function
+        self.files = self._validate_files_argument(files)
+        if len(self.files) != len(set(self.files)):
+            raise ValueError(
+                "Paths were present multiple times in files argument. Fix your input"
+            )
+        Job.__init__(self, [str(x) for x in self.files], resources)
+        self._single_file = False
+        self.empty_ok = empty_ok
+        self.always_capture_output = always_capture_output
+        self.stdout = "not captured"
+        self.stderr = "not captured"
+
+    @staticmethod
+    def _validate_files_argument(files):
         if not hasattr(files, "__iter__"):
             raise TypeError("files was not iterable")
         if isinstance(files, (str, Path)):
@@ -209,16 +275,9 @@ class MultiFileGeneratingJob(Job):
         for f in files:
             if not isinstance(f, (str, Path)):
                 raise TypeError("Files for (Multi)FileGeneratingJob must be Path/str")
-        self.files = [Path(x).resolve().relative_to(Path('.').absolute()) for x in files]
-        self.files = sorted(self.files)
-        if len(self.files) != len(set(self.files)):
-            raise ValueError("Paths were present multiple times in files argument. Fix your input")
-        Job.__init__(self, self.files, resources)
-        self._single_file = False
-        self.empty_ok = empty_ok
-        self.always_capture_output = always_capture_output
-        self.stdout = "not captured"
-        self.stderr = "not captured"
+        return sorted(
+            [Path(x).resolve().relative_to(Path(".").absolute()) for x in files]
+        )
 
     def readd(self):
         super().readd()
@@ -391,8 +450,6 @@ class MultiFileGeneratingJob(Job):
     def get_input(self):
         if self._single_file:
             return self.files[0]
-        elif self.mapped_outputs:
-            return self.mapped_outputs
         else:
             return self.files
 
@@ -413,6 +470,9 @@ class MultiFileGeneratingJob(Job):
 
 
 class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
+    def __new__(cls, output_filename, *args, **kwargs):
+        return _dedup_job(cls, str(output_filename))
+
     def __init__(
         self,
         output_filename: Union[Path, str],
@@ -435,6 +495,10 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
 
 
 class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
+    def __new__(cls, files, *args, **kwargs):
+        files = [Path(x).resolve().relative_to(Path(".").absolute()) for x in files]
+        return Job.__new__(cls, files)
+
     def __init__(
         self,
         files: List[Path],
@@ -471,6 +535,9 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
 class TempFileGeneratingJob(MultiTempFileGeneratingJob):
     job_kind = JobKind.Temp
 
+    def __new__(cls, output_filename, *args, **kwargs):
+        return _dedup_job(cls, str(output_filename))
+
     def __init__(
         self,
         output_filename: Union[Path, str],
@@ -492,8 +559,11 @@ class _FileCleanupJob(Job):
 
     job_kind = JobKind.Cleanup
 
+    def __new__(cls, parent_job):
+        return _dedup_job(cls, f"CleanUp:{parent_job.job_id}")
+
     def __init__(self, parent_job):
-        Job.__init__(self, ["CleanUp:" + parent_job.job_id], Resources.RunsHere)
+        Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
         self.parent_job = parent_job
 
     def run(self, _ignored_runner, _historical_output):
@@ -532,20 +602,26 @@ class _FileInvariantMixin:
 class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     job_kind = JobKind.Invariant
 
-    def __init__(
-        self, function, name=None
-    ):  # must support the inverse calling with name, function, for compability to pypipegraph
+    def __new__(cls, function, name):
+        name, function = cls._parse_args(function, name)
+        return _dedup_job(cls, name)
+
+    @classmethod
+    def _parse_args(cls, function, name):
         if isinstance(function, (str, Path)):
             name, function = function, name
         name = str(name)
 
-        self.function = function
-        name = (
-            "FunctionInvariant:" + name
-            if name
-            else FunctionInvariant.func_to_name(function)
-        )
+        name = "FI" + name if name else FunctionInvariant.func_to_name(function)
+        return name, function
+
+    def __init__(
+        self, function, name=None
+    ):  # must support the inverse calling with name, function, for compability to pypipegraph
+        name, function = self._parse_args(function, name)
         self.verify_arguments(name, function)
+        self.function = function  # must assign after verify!
+
         self.source_file = self.get_source_file()
         Job.__init__(self, [name], Resources.RunsHere)
 
@@ -932,15 +1008,17 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if hasattr(self, "function") and not FunctionInvariant.functions_equal(
             function, self.function
         ):
-            # TODO: in notebooksNotebook, this is ok.
-            raise exceptions.JobContractError(
-                "FunctionInvariant %s created twice with different functions: \n%s\n%s"
-                % (
-                    job_id,
-                    FunctionInvariant.function_to_str(function),
-                    FunctionInvariant.function_to_str(self.function),
+            from . import global_pipegraph
+
+            if global_pipegraph.run_mode.is_strict():
+                raise exceptions.JobRedefinitionError(
+                    "FunctionInvariant %s created twice with different functions: \n%s\n%s"
+                    % (
+                        job_id,
+                        FunctionInvariant.function_to_str(function),
+                        FunctionInvariant.function_to_str(self.function),
+                    )
                 )
-            )
 
     @staticmethod
     def func_to_name(function):
@@ -985,11 +1063,14 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     job_kind = JobKind.Invariant
 
+    def __new__(cls, file):
+        return _dedup_job(cls, str(Path(file)))
+
     def __init__(self, file):
         from . import global_pipegraph
 
         self.file = Path(file)
-        super().__init__(str(self.file))
+        super().__init__([str(self.file)])
         if len(self.job_id) < 3 and not global_pipegraph.allow_short_filenames:
             raise ValueError(
                 "This is probably not the filename you intend to use: {}.".format(self)
@@ -1000,17 +1081,29 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         return True
 
     def run(self, _runner, historical_output):
+        self.did_hash_last_run = False
         if not self.file.exists():
             raise FileNotFoundError(f"{self.file} did not exist")
         stat = self.file.stat()
         if not historical_output:
+            self.did_hash_last_run = "no history"
             return {self.outputs[0]: self.calculate(self.file, stat)}
         else:
-            if int(stat.st_mtime) == historical_output.get(
-                "mtime", -1
-            ) and stat.st_size == historical_output.get("size", -1):
+            mtime_the_same = int(stat.st_mtime) == historical_output[
+                self.outputs[0]
+            ].get("mtime", -1)
+            size_the_same = stat.st_size == historical_output[self.outputs[0]].get(
+                "size", -1
+            )
+            if mtime_the_same and size_the_same:
                 return historical_output
             else:
+                # logger.info("File changed -> recalc")
+                # logger.info(f"{historical_output}, ")
+                # logger.info(f"mtime: {int(stat.st_mtime)}, size: {stat.st_size}")
+                # logger.info(f"mtime the same: {mtime_the_same}")
+                # logger.info(f"size the same: {size_the_same}")
+                self.did_hash_last_run = True
                 return {self.outputs[0]: self.calculate(self.file, stat)}
 
     @classmethod
@@ -1021,12 +1114,23 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 class ParameterInvariant(_InvariantMixin, Job):
     job_kind = JobKind.Invariant
 
+    def __new__(cls, job_id, *args, **kwargs):
+        if isinstance(job_id, Path):
+            job_id = str(job_id)
+        return _dedup_job(cls, "PI" + job_id)
+
     def __init__(self, job_id, parameters):
         if isinstance(job_id, Path):
             job_id = str(job_id)
         job_id = "PI" + job_id
-        self.parameters = self.freeze(parameters)
-        super().__init__(job_id)
+        parameters = self.freeze(parameters)
+        if hasattr(self, "parameters"):
+            if parameters != self.parameters:
+                raise exceptions.JobRedefinitionError(
+                    f"Parameterinvariant with differing parameters {job_id}, was: {self.parameters}, now: {parameters}"
+                )
+        self.parameters = parameters
+        super().__init__([job_id])
 
     def output_needed(self, _ignored_runner):
         return True
@@ -1042,6 +1146,10 @@ class ParameterInvariant(_InvariantMixin, Job):
         to get a hash value..
         """
 
+        if isinstance(obj, collections.Callable):
+            raise TypeError(
+                "ParamaterInvariants do not store Functions. Use FunctionInvariant for that"
+            )
         try:
             hash(obj)
             return obj
@@ -1064,10 +1172,13 @@ class ParameterInvariant(_InvariantMixin, Job):
 class DataLoadingJob(Job):
     job_kind = JobKind.Loading
 
+    def __new__(cls, job_id, *args, **kwargs):
+        return _dedup_job(cls, job_id)
+
     def __init__(self, job_id, data_callback, depend_on_function=True):
         self.depend_on_function = depend_on_function
         self.callback = data_callback
-        super().__init__(job_id)
+        super().__init__([job_id])
 
     def readd(self):
         super().readd()
@@ -1119,8 +1230,6 @@ def CachedDataLoadingJob(
     cache_job = FileGeneratingJob(
         cache_filename, do_cache, depend_on_function=False, resources=resources
     )
-    if depend_on_function:
-        cache_job.depends_on(FunctionInvariant(cache_filename, calc_callback))
 
     def load():
         try:
@@ -1138,26 +1247,47 @@ def CachedDataLoadingJob(
         depend_on_function=False,
     )
     load_job.depends_on(cache_job)
+    # do this after you have sucessfully created both jobs
     if depend_on_function:
         load_job.depends_on(
             FunctionInvariant("load" + str(cache_filename), load_callback)
         )
+        cache_job.depends_on(FunctionInvariant(cache_filename, calc_callback))
+
     return CachedJobTuple(load_job, cache_job)
 
 
 class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
     job_kind = JobKind.Loading
 
+    def __new__(cls, job_id, *args, **kwargs):
+        return _dedup_job(cls, job_id)
+
     def __init__(
         self, job_id, object, attribute_name, data_callback, depend_on_function=True
     ):
+        from . import global_pipegraph
+
+        if global_pipegraph.run_mode.is_strict():
+            if hasattr(self, "object"):  # inited before
+                if self.object != object:
+                    raise exceptions.JobRedefinitionError(job_id, "object changed")
+                elif self.attribute_name != attribute_name:
+                    raise exceptions.JobRedefinitionError(
+                        job_id, "attribute_name changed"
+                    )
+                elif not FunctionInvariant.functions_equal(
+                    self.callback, data_callback
+                ):
+                    raise exceptions.JobRedefinitionError(job_id, "callback changed")
+
         if not isinstance(attribute_name, str):
             raise ValueError("attribute_name was not a string")
         self.depend_on_function = depend_on_function
         self.object = object
         self.attribute_name = attribute_name
         self.callback = data_callback
-        super().__init__(job_id)
+        super().__init__([job_id])
         self.cleanup_job_class = _AttributeCleanupJob
 
     def readd(self):  # Todo: refactor
@@ -1230,8 +1360,11 @@ class _AttributeCleanupJob(Job):
 
     job_kind = JobKind.Cleanup
 
+    def __new__(cls, parent_job):
+        return _dedup_job(cls, f"CleanUp:{parent_job.job_id}")
+
     def __init__(self, parent_job):
-        Job.__init__(self, ["CleanUp:" + parent_job.job_id], Resources.RunsHere)
+        Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
         self.parent_job = parent_job  # what are we cleaning up?
 
     def run(self, _ignored_runner, _historical_output):
@@ -1256,11 +1389,14 @@ class JobGeneratingJob(Job):
 
     job_kind = JobKind.JobGenerating
 
+    def __new__(cls, job_id, *args, **kwargs):
+        return _dedup_job(cls, job_id)
+
     def __init__(self, job_id, callback, depend_on_function=True):
         self.depend_on_function = depend_on_function
         self.callback = callback
         self.last_run_id = None
-        super().__init__(job_id)
+        super().__init__([job_id])
 
     def readd(self):  # Todo: refactor
         super().readd()
@@ -1331,9 +1467,12 @@ def PlotJob(
     If create_table is set, the third one is a FileGeneratingJob
     writing (output_filename + '.tsv').
     """
+    from . import global_pipegraph
+
     if render_args is None:
         render_args = {}
     output_filename = Path(output_filename)
+
     allowed_suffixes = (".png", ".pdf", ".svg")
     if not (output_filename.suffix in allowed_suffixes):
         raise ValueError(
@@ -1349,7 +1488,10 @@ def PlotJob(
     plot_job = FileGeneratingJob(output_filename, do_plot, depend_on_function=False)
     if depend_on_function:
         plot_job.depends_on(FunctionInvariant(str(output_filename), plot_function))
+    param_job = ParameterInvariant(output_filename, render_args)
+    plot_job.depends_on(param_job)
 
+    cache_filename = Path(cache_dir) / output_filename
     if cache_calc:
 
         def do_cache():
@@ -1372,17 +1514,13 @@ def PlotJob(
                     )
             return df
 
-        cache_filename = Path(cache_dir) / output_filename
         cache_filename.parent.mkdir(exist_ok=True, parents=True)
-        attribute_load_job, attribute_cache_job = CachedAttributeLoadingJob(
+        cache_job = CachedAttributeLoadingJob(
             cache_filename, plot_job, "data_", do_cache, depend_on_function=False
         )
         if depend_on_function:
-            attribute_cache_job.depends_on(
-                FunctionInvariant(cache_filename, calc_function)
-            )
-        plot_job.depends_on(attribute_load_job)
-        cache_job = [attribute_load_job, attribute_cache_job]
+            cache_job.calc.depends_on(FunctionInvariant(cache_filename, calc_function))
+        plot_job.depends_on(cache_job.load)
     else:
         cache_job = None
 
@@ -1406,7 +1544,7 @@ def PlotJob(
             output_filename.with_suffix(output_filename.suffix + ".tsv"), dump_table
         )
         if cache_calc:
-            table_job.depends_on(cache_job)
+            table_job.depends_on(cache_job.load)
     else:
         table_job = None
 
@@ -1422,7 +1560,7 @@ def PlotJob(
 
         j = FileGeneratingJob(output_filename, do_plot_another_plot)
         if cache_calc:
-            j.depends_on(cache_job)
+            j.depends_on(cache_job.load)
         return j
 
     plot_job.add_another_plot = add_another_plot

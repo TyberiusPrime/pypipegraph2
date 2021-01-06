@@ -57,12 +57,12 @@ class CoreLock:
 
     def _release(self, count):
         # logger.info(f"{_thread.get_ident()} release({count}) called")
-        if count == 0:
-            raise ValueError()
+        if count == 0:  # pragma: no cover
+            raise ValueError("Count == 0")
         with self.lock:
             # logger.info(f"{_thread.get_ident()} lock aquired in release")
             self.remaining += count
-            if self.remaining > self.max_cores:
+            if self.remaining > self.max_cores:  # pragma: no cover
                 raise ValueError("Remaining exceeded max_cores")
         # logger.info(f"{_thread.get_ident()} remaning: {self.remaining}")
         with self.condition:
@@ -71,22 +71,3 @@ class CoreLock:
             self.condition.notify_all()
             self.condition.release()
             # logger.info(f"{_thread.get_ident()} done notify condition")
-
-
-if __name__ == "__main__":
-    mylock = CoreLock(1)
-    counter = []
-    threads = []
-
-    def inner(c):
-        with mylock.using(1):
-            counter.append(c)
-
-    for i in range(5):
-        t = threading.Thread(target=inner, args=(i,))
-        threads.append(t)
-        t.start()
-    for t in threads:
-        t.join()
-    assert len(counter) == 5
-    assert set(counter) == set([0, 1, 2, 3, 4])

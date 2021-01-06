@@ -9,7 +9,6 @@ global_test = 0
 
 @pytest.mark.usefixtures("ppg_per_test")
 class TestJobs:
-    @pytest.mark.xfail()  # todo: interactivity/notebook
     def test_assert_singletonicity_of_jobs(self):
         ppg.new()
         of = "out/a"
@@ -20,7 +19,7 @@ class TestJobs:
 
         job = ppg.FileGeneratingJob(of, do_write)
         job2 = ppg.FileGeneratingJob(of, do_write)
-        assert job is job2
+        assert job is job2 # change from ppg1
 
     def test_add_job_twice_is_harmless(self):
         job = ppg.FileGeneratingJob("A", lambda of: 5)
@@ -31,7 +30,6 @@ class TestJobs:
         assert job.job_id in ppg.global_pipegraph.jobs
         assert ppg.global_pipegraph.jobs[job.job_id] is job
 
-    @pytest.mark.xfail()  # todo interactivity/notebook
     def test_redefining_a_jobid_with_different_class_raises(self):
         ppg.new()
         of = "out/a"
@@ -52,7 +50,6 @@ class TestJobs:
         with pytest.raises(TypeError):
             ppg.FileGeneratingJob(1234, lambda of: None)
 
-    @pytest.mark.xfail()  # todo: interactivity/notebook
     def test_equality_is_identity(self):
         def write_func(of):
             def do_write(of):
@@ -264,6 +261,7 @@ class TestFileGeneratingJob:
         )
 
     def test_filegenerating_ok_change_fail_ok(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         of = "A"
         func1 = lambda of: counter("a") and write(of, "A")
         job = ppg.FileGeneratingJob(of, func1)
@@ -431,6 +429,7 @@ class TestFileGeneratingJob:
         assert read(ofA) != read(ofB)
 
     def test_filegenerating_two_jobs_same_file(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         ppg.MultiFileGeneratingJob(
             ["out/A", "out/B"], lambda of: write("out/A", "hello")
         )
@@ -665,13 +664,16 @@ class TestMultiFileGeneratingJob:
             ppg.MultiFileGeneratingJob(["test1", "test2"], lambda of: 5)
             ppg.MultiFileGeneratingJob(["test2", "test3"], lambda of: 5)
 
-    @pytest.mark.xfail()  # todo: interactive
     def test_duplicate_prevention(self):
         param = "A"
         ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))
 
         with pytest.raises(ValueError):
             ppg.MultiFileGeneratingJob(["out/A"], lambda of: write("out/A", param))
+
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))
+        ppg.MultiFileGeneratingJob(["out/A"], lambda of: write("out/A", param))
 
     def test_non_str(self):
         param = "A"
@@ -1174,7 +1176,6 @@ class TestAttributeJob:
         with pytest.raises(TypeError):
             ppg.AttributeLoadingJob(5, o, "a", lambda: 55)
 
-    @pytest.mark.xfail()  # todo: interactivity/notebook
     def test_no_swapping_attributes_for_one_job(self):
         def cache():
             return list(range(0, 100))
@@ -1182,7 +1183,7 @@ class TestAttributeJob:
         o = Dummy()
         ppg.AttributeLoadingJob("out/A", o, "a", cache)
 
-        with pytest.raises(ppg.JobContractError):
+        with pytest.raises(ppg.JobRedefinitionError):
             ppg.AttributeLoadingJob("out/A", o, "b", cache)
 
     def test_raises_on_non_string_attribute_name(self):
@@ -1195,7 +1196,6 @@ class TestAttributeJob:
             o = Dummy()
             ppg.AttributeLoadingJob("out/A", o, 23, 55)
 
-    @pytest.mark.xfail()  # todo: interactivity/notebook
     def test_no_swapping_objects_for_one_job(self):
         def cache():
             return list(range(0, 100))
@@ -1204,7 +1204,7 @@ class TestAttributeJob:
         o2 = Dummy()
         ppg.CachedAttributeLoadingJob("out/A", o, "a", cache)
 
-        with pytest.raises(ppg.JobContractError):
+        with pytest.raises(ppg.JobRedefinitionError):
             ppg.CachedAttributeLoadingJob("out/A", o2, "a", cache)
 
     def test_ignore_code_changes(self, job_trace_log):
@@ -1625,12 +1625,11 @@ class TestMultiTempFileGeneratingJob:
             ppg.MultiTempFileGeneratingJob(["test1", "test2"], lambda of: 5)
             ppg.MultiTempFileGeneratingJob(["test2", "test3"], lambda of: 5)
 
-    @pytest.mark.xfail()  # todo: interactivity/notebook
     def test_duplicate_prevention(self):
         param = "A"
         ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ppg.JobRedefinitionError):
             ppg.MultiTempFileGeneratingJob(["out/A"], lambda of: write("out/A", param))
 
     def test_non_str(self):

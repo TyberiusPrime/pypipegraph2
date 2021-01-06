@@ -142,7 +142,6 @@ if has_pyggplot:  # noqa C901
             assert magic(of).find(b"PNG image") != -1
             assert not os.path.exists("cache/out/test.png")
 
-        @pytest.mark.xfail()  # different behaivour depending on interacitvity
         def test_redefiniton_and_skip_changes_raises(self):
             def calc():
                 return pd.DataFrame(
@@ -154,12 +153,19 @@ if has_pyggplot:  # noqa C901
 
             of = "out/test.png"
             ppg.PlotJob(of, calc, plot)
-            with pytest.raises(ValueError):
-                ppg.PlotJob(of, calc, plot, cache_calc=False)
-            with pytest.raises(ValueError):
-                ppg.PlotJob(of, calc, plot, create_table=False)
-            with pytest.raises(ValueError):
+            ppg.PlotJob(of, calc, plot)
+            with pytest.raises(ppg.JobRedefinitionError):
                 ppg.PlotJob(of, calc, plot, render_args={"something": 55})
+            # does not remove the jobs though
+            ppg.PlotJob(of, calc, plot, cache_calc=False)
+            ppg.PlotJob(of, calc, plot, create_table=False)
+
+            ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+            ppg.PlotJob(of, calc, plot)
+            ppg.PlotJob(of, calc, plot)
+            ppg.PlotJob(of, calc, plot, cache_calc=False)
+            ppg.PlotJob(of, calc, plot, create_table=False)
+            ppg.PlotJob(of, calc, plot, render_args={"something": 55})
 
         def test_pdf(self):
             def calc():

@@ -32,6 +32,7 @@ def CPUs():
                 cpu_count = ncpus
     return cpu_count
 
+
 def job_or_filename(job_or_filename, invariant_class=None):
     """Take a filename, or a job. Return Path(filename), dependency-for-that-file
     ie. either the job, or a invariant_class (default: FileInvariant)"""
@@ -53,3 +54,55 @@ def job_or_filename(job_or_filename, invariant_class=None):
     return filename, deps
 
 
+def assert_uniqueness_of_object(
+    object_with_name_attribute, pipegraph=None, also_check=None
+):
+    """Makes certain there is only one object with this class & .name.
+
+    This is necessary so the pipegraph jobs assign their data only to the
+    objects you're actually working with."""
+    if pipegraph is None:
+        from pypipegraph2 import global_pipegraph
+
+        pipegraph = global_pipegraph
+
+    if object_with_name_attribute.name.find("/") != -1:
+        raise ValueError(
+            "Names must not contain /, it confuses the directory calculations"
+        )
+    if not hasattr(pipegraph, "object_uniquifier"):
+        pipegraph.object_uniquifier = {}
+    typ = object_with_name_attribute.__class__
+    if typ not in pipegraph.object_uniquifier:
+        pipegraph.object_uniquifier[typ] = {}
+    if object_with_name_attribute.name in pipegraph.object_uniquifier[typ]:
+        raise ValueError(
+            "Doublicate object: %s, %s" % (typ, object_with_name_attribute.name)
+        )
+    if also_check:
+        if not isinstance(also_check, list):
+            also_check = [also_check]
+        for other_typ in also_check:
+            if (
+                other_typ in pipegraph.object_uniquifier
+                and object_with_name_attribute.name
+                in pipegraph.object_uniquifier[other_typ]
+            ):
+                raise ValueError(
+                    "Doublicate object: %s, %s"
+                    % (other_typ, object_with_name_attribute.name)
+                )
+    object_with_name_attribute.unique_id = len(pipegraph.object_uniquifier[typ])
+    pipegraph.object_uniquifier[typ][object_with_name_attribute.name] = True
+
+
+def flatten_jobs(j):
+    """Take an arbitrary deeply nested list of lists of jobs
+    and return just the jobs"""
+    from .jobs import Job
+
+    if isinstance(j, Job):
+        yield j
+    else:
+        for sj in j:
+            yield from flatten_jobs(sj)

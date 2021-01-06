@@ -125,7 +125,7 @@ class TestInvariant:
     def test_depends_on_func(self):
         a = ppg.FileGeneratingJob("out/A", lambda of: write("a"))
         b, a_again = a.depends_on_func("a123", lambda: 123)
-        assert b.job_id.startswith("FunctionInvariant:" + a.job_id + "_")
+        assert b.job_id.startswith("FI" + a.job_id + "_")
         assert ppg.global_pipegraph.has_edge(b, a)
         assert a_again is a
 
@@ -144,7 +144,6 @@ class TestInvariant:
         assert ppg.global_pipegraph.has_edge(b.invariant, a)
         assert b.self is a
 
-    @pytest.mark.xfail()  # todo: interactive
     def test_parameter_invariant_twice_different_values(self):
         ppg.ParameterInvariant("a", (1, 2, 3))
         with pytest.raises(ValueError):
@@ -243,7 +242,6 @@ class TestInvariant:
         ppg.run()
         assert read(of) == "shushu"  # job does get rerun
 
-    @pytest.mark.xfail()  # todo: job input renaming
     def test_robust_filechecksum_invariant(self):
         of = "out/B"
 
@@ -810,14 +808,13 @@ class TestFunctionInvariant:
         with pytest.raises(ppg.JobContractError):
             job.depends_on(jobB)
 
-    @pytest.mark.xfail()  # todo: interactive/notebook differences
     def test_raises_on_duplicate_with_different_functions(self):
         def shu():
             return "a"
 
         ppg.FunctionInvariant("A", shu)
         ppg.FunctionInvariant("A", shu)  # ok.
-        with pytest.raises(ppg.JobContractError):
+        with pytest.raises(ppg.JobRedefinitionError):
             ppg.FunctionInvariant("A", lambda: "b")  # raises ValueError
 
         def sha():
@@ -977,97 +974,6 @@ class TestFunctionInvariant:
         assert not ppg.FunctionInvariant.compare_hashes(
             first_value(av), first_value(cv)
         )
-
-    @pytest.mark.xfail
-    def test_invariant_caching(self):
-
-        a = ppg.FunctionInvariant("a", ppg.inside_ppg)
-        old_dis = a.dis_code
-        counter = [0]
-
-        def new_dis(*args, **kwargs):
-            counter[0] += 1
-            return old_dis(*args, **kwargs)
-
-        a.dis_code = new_dis
-        # round 0 - everything needs to be calculated
-        assert len(ppg.util.global_pipegraph.func_hashes) == 0
-        iv1 = a._get_invariant(False, [])
-        assert counter[0] == 1
-        assert len(ppg.util.global_pipegraph.func_hashes) == 1
-        assert len(ppg.util.global_pipegraph.file_hashes) == 0
-
-        # same function again - no new calc
-        iv2 = a._get_invariant(False, [])
-        assert iv1 == iv2
-        assert counter[0] == 1
-
-        # we lost the function hash, and were passed false:
-        ppg.util.global_pipegraph.func_hashes.clear()
-        iv3 = a._get_invariant(False, [])
-        assert iv3 == iv2
-        assert counter[0] == 2
-        assert len(ppg.util.global_pipegraph.func_hashes) == 1
-
-        # we lost the function hash - but were passed an old tuple
-        # with matching file hash
-        ppg.util.global_pipegraph.func_hashes.clear()
-        iv3b = a._get_invariant(iv3, [])
-        assert iv3 is iv3b
-        assert counter[0] == 2
-        assert len(ppg.util.global_pipegraph.func_hashes) == 0
-        ppg.util.global_pipegraph.func_hashes.clear()
-
-        # now let's simulate the file changing
-        faked_iv3 = ("aa",) + iv3[1:]
-        ppg.util.global_pipegraph.func_hashes.clear()
-        with pytest.raises(ppg.NothingChanged) as e:
-            a._get_invariant(faked_iv3, [])
-        iv4 = e.value.new_value
-        assert iv4[2:] == iv3[2:]
-        assert len(ppg.util.global_pipegraph.func_hashes) == 1
-        assert counter[0] == 3
-        assert (
-            len(ppg.util.global_pipegraph.file_hashes) == 0
-        )  # we still used the the function.__code__.co_filename
-
-        # now let's simulate the line no changing.
-        faked_iv3 = (iv3[0],) + (1,) + iv3[2:]
-        ppg.util.global_pipegraph.func_hashes.clear()
-        with pytest.raises(ppg.NothingChanged) as e:
-            a._get_invariant(faked_iv3, [])
-        iv5 = e.value.new_value
-        assert iv5[2:] == iv3[2:]
-        assert len(ppg.util.global_pipegraph.func_hashes) == 1
-        assert counter[0] == 4
-        assert (
-            len(ppg.util.global_pipegraph.file_hashes) == 0
-        )  # we still used the the function.__code__.co_filename
-
-        # and now, going from the old to the new...
-        old = iv1[2] + iv1[3]
-        with pytest.raises(ppg.NothingChanged) as e:
-            a._get_invariant(old, [])
-        assert e.value.new_value == iv1
-
-        # and last but not least let's test the closure based seperation
-        ppg.util.global_pipegraph.func_hashes.clear()
-        ppg.util.global_pipegraph.file_hashes.clear()
-
-        def capture(x):
-            def inner():
-                return 5 + x
-
-            return inner
-
-        b = ppg.FunctionInvariant("x5", capture(5))
-        c = ppg.FunctionInvariant("x10", capture(10))
-        ivb = b._get_invariant(False, [])
-        assert len(ppg.util.global_pipegraph.func_hashes) == 1
-        ivc = c._get_invariant(False, [])
-        # no recalc - reuse the one from the previous function
-        assert len(ppg.util.global_pipegraph.func_hashes) == 1
-        assert ivb[:3] == ivc[:3]
 
     def test_function_invariants_are_equal_if_dis_identical_or_source_identical(self):
         python_version = (3, 99)
@@ -1316,7 +1222,7 @@ class TestDependency:
     def test_invariant_job_depends_on_raises(self):
 
         with pytest.raises(ppg.JobContractError):
-            ppg.jobs._InvariantMixin().depends_on(ppg.Job("B"))
+            ppg.jobs._InvariantMixin().depends_on(ppg.Job(["B"]))
 
     def test_cached_job_depends_on(self):
         class Dummy:
@@ -1324,9 +1230,9 @@ class TestDependency:
 
         o = Dummy()
         jobA = ppg.CachedAttributeLoadingJob("cache/A", o, "a", lambda: 23)
-        jobB = ppg.Job("B")
-        jobC = ppg.Job("C")
-        jobD = ppg.Job("D")
+        jobB = ppg.Job(["B"])
+        jobC = ppg.Job(["C"])
+        jobD = ppg.Job(["D"])
         jobA.calc.depends_on([jobB], jobC, jobD)
         assert not ppg.global_pipegraph.has_edge(jobB, jobA.load)
         assert not ppg.global_pipegraph.has_edge(jobC, jobA.load)
@@ -1385,7 +1291,7 @@ class TestDependency:
 
         def check_function_invariant(of):
             write("out/B", "B")
-            assert "FunctionInvariant:out/B" in ppg.global_pipegraph.jobs
+            assert "FIout/B" in ppg.global_pipegraph.jobs
 
         def gen_deps():
             jobB = ppg.FileGeneratingJob("out/B", check_function_invariant)
@@ -1393,39 +1299,42 @@ class TestDependency:
             return [jobB]
 
         jobA.depends_on(gen_deps)
-        assert "FunctionInvariant:out/B" not in ppg.global_pipegraph.jobs
+        assert "FIout/B" not in ppg.global_pipegraph.jobs
         ppg.run()
         assert read("out/A") == "AB"
 
 
 @pytest.mark.usefixtures("ppg_per_test")
 class TestDefinitionErrors:
-    @pytest.mark.xfail()  # wait for interactive/notebook decision
     def test_defining_function_invariant_twice(self):
         a = lambda: 55  # noqa:E731
         b = lambda: 66  # noqa:E731
         ppg.FunctionInvariant("a", a)
+        ppg.FunctionInvariant("a", a) # that's ok...
 
-        with pytest.raises(ppg.JobContractError):
+        with pytest.raises(ppg.JobRedefinitionError):
             ppg.FunctionInvariant("a", b)
 
-    @pytest.mark.xfail()  # wait for interactive/notebook decision
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        ppg.FunctionInvariant("a", a)
+        j = ppg.FunctionInvariant("a", b)
+        assert j.function is b
+
+
     def test_defining_function_and_parameter_invariant_with_same_name(self):
+        # you can't really, FunctionInvariants are Prefixed with FI, ParameterInvariant with PI
         a = lambda: 55  # noqa:E731
-        b = lambda: 66  # noqa:E731
         ppg.FunctionInvariant("PIa", a)
+        ppg.ParameterInvariant("a", 'b')
 
-        with pytest.raises(ppg.JobContractError):
-            ppg.ParameterInvariant("a", b)
-
-    @pytest.mark.xfail()  # wait for interactive/notebook decision
     def test_defining_function_and_parameter_invariant_with_same_name_reversed(self):
         a = lambda: 55  # noqa:E731
-        b = lambda: 66  # noqa:E731
-        ppg.ParameterInvariant("a", b)
+        ppg.ParameterInvariant("a", 'b')
+        ppg.FunctionInvariant("PIa", a)
 
-        with pytest.raises(ppg.JobContractError):
-            ppg.FunctionInvariant("PIa", a)
+    def test_parameter_invariant_does_not_accept_function(self):
+        with pytest.raises(TypeError):
+            ppg.ParameterInvariant('a', lambda: 55)
 
 
 @pytest.mark.usefixtures("ppg_per_test")

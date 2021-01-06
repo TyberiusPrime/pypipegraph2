@@ -187,35 +187,6 @@ class TestingTheUnexpectedTests:
         # with pytest.raises(ppg.PyPipeGraphError):
 
 
-class TestsNotImplemented:
-    @pytest.mark.xfail
-    def test_temp_jobs_and_gen_jobs(self):
-        # DependencyInjection A creates TempJob B and job C (c is already done)
-        # DependencyInjeciton D (dep on A) creates TempJob B and job E
-        # Now, When A runs, B is created, and not added to the jobs-to-run list
-        # since it is not necessary (with C being done).
-        # now D runs, B would not be required by E, but does not get added to the
-        # run list (since it is not new), and later on, the sanity check crashes.
-
-        # alternativly, if C is not done, execution order is A, B, C. Then cleanup
-        # for B happens, then D is run, the E explodes, because cleanup has been done!
-
-        # now, if A returns B, it get's injected into the dependenies of D,
-        # the exeuction order is correct, but B get's done no matter what because D
-        # now requires it, even if both C and E have already been done.
-
-        # what a conundrum
-        raise NotImplementedError()
-
-    @pytest.mark.xfail
-    def test_cached_job_done_but_gets_invalidated_by_dependency_injection_generated_job(
-        self,
-    ):
-        # very similar to the previous case,
-        # this basically directly get's you into the 'Job execution order territory...'
-        raise NotImplementedError()
-
-
 @pytest.mark.usefixtures("ppg_per_test")
 class TestPathLib:
     def test_multifilegenerating_job_requires_string_filenames(self):

@@ -23,11 +23,6 @@ class ALL_CORES:
     pass
 
 
-def default_run_mode():
-    # TODO
-    return RunMode.INTERACTIVE
-
-
 class PyPipeGraph:
     history_dir: Optional[Path]
     log_dir: Optional[Path]
@@ -41,8 +36,8 @@ class PyPipeGraph:
         history_dir: Path,
         run_dir: Path,
         log_level: int,
+        run_mode: RunMode,
         paths: Optional[Dict[str, Union[Path, str]]] = None,
-        run_mode: RunMode = default_run_mode(),
         allow_short_filenames=False,
     ):
 
@@ -54,12 +49,11 @@ class PyPipeGraph:
             self.log_dir = Path(log_dir)
         else:
             self.log_dir = None
-        self.history_dir = Path(history_dir) 
+        self.history_dir = Path(history_dir)
         self.run_dir = Path(run_dir)
         self.log_level = log_level
         self.paths = {k: Path(v) for (k, v) in paths} if paths else None
         self.run_mode = run_mode
-
         self.jobs = {}  # the job objects, by id
         self.job_dag = (
             networkx.DiGraph()
@@ -96,13 +90,13 @@ class PyPipeGraph:
         self.do_raise = []
         try:
             result = None
-            if self.run_mode == RunMode.INTERACTIVE:
+            if self.run_mode == RunMode.CONSOLE:
                 self._install_signals()
             history = self.load_historical()
             max_runs = 5
             while True:
                 max_runs -= 1
-                if max_runs == 0:
+                if max_runs == 0:  # pragma: no cover
                     raise ValueError("endless loop")
                 try:
                     runner = Runner(self, history, event_timeout)
@@ -129,7 +123,7 @@ class PyPipeGraph:
         finally:
             if print_failures:
                 self._print_failures()
-            if self.run_mode == RunMode.INTERACTIVE:
+            if self.run_mode == RunMode.CONSOLE:
                 self._restore_signals()
             logger.trace("Run is done")
 
@@ -156,8 +150,6 @@ class PyPipeGraph:
 
     def load_historical(self):
         logger.trace("load_historicals")
-        if self.history_dir is None:
-            return
         fn = self._get_history_fn()
         history = {}
         if fn.exists():
@@ -213,8 +205,6 @@ class PyPipeGraph:
 
     def save_historical(self, historical):
         logger.trace("save_historical")
-        if self.history_dir is None:
-            return
         fn = self._get_history_fn()
         raise_keyboard_interrupt = False
         raise_run_failed_internally = False
@@ -311,7 +301,9 @@ class PyPipeGraph:
         if not upstream_job.job_id in self.jobs:
             raise KeyError(f"{upstream_job} not in this graph. Call job.readd() first")
         if not downstream_job.job_id in self.jobs:
-            raise KeyError(f"{downstream_job} not in this graph. Call job.readd() first")
+            raise KeyError(
+                f"{downstream_job} not in this graph. Call job.readd() first"
+            )
 
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)
 

@@ -6,7 +6,7 @@ import pytest
 class TestBuildInCompabilty:
     def test_invariant_build_in_function(self):
         a = ppg.FunctionInvariant("test", sorted).run(None, None)[
-            "FunctionInvariant:test"
+            "FItest"
         ]["source"]
         assert a == "<built-in function sorted>"
 
@@ -14,7 +14,7 @@ class TestBuildInCompabilty:
 @pytest.mark.usefixtures("ppg_per_test")
 class TestCythonCompability:
     def source_via_func_invariant(self, name, func):
-        return ppg.FunctionInvariant(name, func).run(None, None)["FunctionInvariant:a"][
+        return ppg.FunctionInvariant(name, func).run(None, None)["FIa"][
             "source"
         ]
 

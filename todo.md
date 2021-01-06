@@ -3,7 +3,6 @@ Open stuff
 	- magic turn-notebook-cell-into-job-thing
 	- notebook interaction vs early exploding
 	- 
-	- porting my million test cases
 	- robust history storing when the graph dies / is aborted during it's run?
 	
 	- general api polishing
@@ -16,8 +15,6 @@ Open stuff
  
 	- pretty and usable and appending runtime logging.
 	 including runtimes
-	- pruning
--
 
 	- what happens when you run a partial graph somewhere else without access to
 	  the orignal history? The FunctionInvariants clobber everything.
@@ -31,14 +28,15 @@ Open stuff
 		
 		
 	- prebuild jobs
-	- 
+	 
 	- filegenjobs temp output & rename (so that a crashing job doesn't get counted as 'done'),
 	  though I believe that no longer to be an issue, since we don't update the history?
   
-  
-  
-	- jobs overwriting the files of other jobs(!)
-	- multifilegeneratingjob,allow dict as outputd definition
--
+	- jobs overwriting the files of other jobs (without declaring so!)
+	- multifilegeneratingjob,allow dict as output definition (see api polishing)
 
 	- command runner job? kind of a replacement for mbf_externals.ExternalAlgorithm
+	- - investigate inspect.signature to the lambda of: requirement
+	- write test case with our regular object structure
+	- make depend_on_function passable by name only
+	- prevent stalling if a bunch of ALL_CORES jobs hog all the threads, no SINGLE_CORE jobs will be running.

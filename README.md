@@ -53,3 +53,7 @@ Differences to pypipegraph
 	- JobDiedException is now called just 'JobDied'
 	- The various 'FileTimeInvariant/FileChecksumInvariant/RobustFileChecksumInvariant' forwarders have been removed. Use FileInvariant.
 	- MultiFileInvariant is gone. Adding/removing FileInvariants now triggers by itself, no need to stuff multiple into a MultiFileInvariant
+	- Pruning + running will no longer set ._pruned=pruning_job_id on downstream jobs, but .pruned_reason=pruning_job_id. Otherwise you could not unprune() and run again.
+	- ppg.util.global_pipegraph is now ppg.global_pipegraph
+	- Redefining a job in an incompatible way now raises JobRedefinitionError (instead of JobContractError)
+	- Calling the same PlotJob once with cache_calc/create_table = True and once with False no longer triggers an exception, even in strict (RunMode.CONSOLE) mode. The jobs do stick around though.

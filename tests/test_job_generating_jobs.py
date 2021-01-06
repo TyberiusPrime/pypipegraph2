@@ -21,47 +21,6 @@ class TestJobGeneratingJob:
         assert read("out/B") == "B"
         assert read("out/C") == "C"
 
-    @pytest.mark.xfail()
-    def test_raises_if_needs_more_cores_than_we_have(self):
-        def gen():
-            jobA = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))
-            jobA.cores_needed = 20000
-
-        ppg.JobGeneratingJob("genjob", gen)
-        try:
-            ppg.run()
-            raise ValueError("should not be reached")
-        except ppg.RunFailed:
-            pass
-        assert not (Path("out/A").exists())  # since the gen job crashed
-        jobGenerated = ppg.util.global_pipegraph.jobs["out/A"]
-        assert jobGenerated.failed
-        assert jobGenerated.error_reason == "Needed to much memory/cores"
-
-    @pytest.mark.xfail()
-    def test_raises_if_needs_more_ram_than_we_have(self):
-        def gen():
-            jobA = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))
-            jobA.memory_needed = 1024 * 1024 * 1024 * 1024
-
-        ppg.JobGeneratingJob("genjob", gen)
-        try:
-            ppg.run()
-            raise ValueError("should not be reached")
-        except ppg.RunFailed:
-            pass
-        assert not (Path("out/A").exists())  # since the gen job crashed
-        jobGenerated = ppg.util.global_pipegraph.jobs["out/A"]
-        assert jobGenerated.failed
-        assert jobGenerated.error_reason == "Needed to much memory/cores"
-
-    @pytest.mark.xfail()
-    def test_with_memory_needed(self):
-        jobA = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))
-        jobA.memory_needed = 1024
-        ppg.run()
-        assert Path("out/A").exists()  # since the gen job crashed
-
     def test_injecting_multiple_stages(self):
         def gen():
             def genB():

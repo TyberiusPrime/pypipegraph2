@@ -118,6 +118,7 @@ class TestUtils:
             ppg.run()
 
     def test_flatten_jobs(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         j1 = ppg.FileGeneratingJob("A", lambda: "A")
         j2 = ppg.FileGeneratingJob("B", lambda: "B")
         j3 = ppg.FileGeneratingJob("B", lambda: "C")

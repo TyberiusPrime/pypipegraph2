@@ -9,20 +9,6 @@ class JobState(Enum):
     Failed = auto()
     UpstreamFailed = auto()
 
-    def is_terminal(self):
-        return self in (
-            JobState.Executed,
-            JobState.Failed,
-            JobState.UpstreamFailed,
-            JobState.Skipped,
-        )
-
-    def is_failed(self):
-        return self in (
-            JobState.Failed,
-            JobState.UpstreamFailed,
-        )
-
 
 class ValidationState(Enum):
     Unknown = auto()
@@ -41,10 +27,13 @@ class JobKind(Enum):
 
 
 class RunMode(Enum):
-    INTERACTIVE = 1  # certain redefinitions: FatalGraphException, interactive console, ctrl-c does not work
+    CONSOLE = 1  # certain redefinitions: FatalGraphException, interactive console, ctrl-c does not work
     NOTEBOOK = 2  # certain redefinitions: warning, no interactive console (todo: gui), control-c,/abort works TODO
-    NONINTERACTIVE = 3  # such as testing, redefinitions like interactive, but no gui, ctrl-c works TODO
+    NONINTERACTIVE = 3  # such as testing, redefinitions like console, but no gui, ctrl-c works TODO
 
+
+    def is_strict(self):
+        return self is RunMode.CONSOLE or self is RunMode.NONINTERACTIVE
 
 class Resources(Enum):
     SingleCore = "SingleCore"
@@ -63,5 +52,5 @@ class Resources(Enum):
             return max_cores
         elif self is Resources.RunsHere:
             return 1
-        else:
+        else:  # pragma: no cover
             raise ValueError("Not an external Resource with a given number of cores")

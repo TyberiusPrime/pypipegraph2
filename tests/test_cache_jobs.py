@@ -345,7 +345,6 @@ class TestCachedAttributeJob:
         with pytest.raises(TypeError):
             ppg.CachedAttributeLoadingJob(5, o, "a", lambda: 55)
 
-    @pytest.mark.xfail
     def test_no_swapping_attributes_for_one_job(self):
         def cache():
             return list(range(0, 100))
@@ -353,10 +352,12 @@ class TestCachedAttributeJob:
         o = Dummy()
         ppg.CachedAttributeLoadingJob("A", o, "a", cache)
 
-        with pytest.raises(ppg.JobContractError):
+        with pytest.raises(ppg.JobRedefinitionError):
             ppg.CachedAttributeLoadingJob("A", o, "b", cache)
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        ppg.CachedAttributeLoadingJob("A", o, "a", cache)
+        ppg.CachedAttributeLoadingJob("A", o, "b", cache)
 
-    @pytest.mark.xfail
     def test_no_swapping_objects_for_one_job(self):
         def cache():
             return list(range(0, 100))
@@ -364,9 +365,12 @@ class TestCachedAttributeJob:
         o = Dummy()
         o2 = Dummy()
         ppg.CachedAttributeLoadingJob("A", o, "a", cache)
-
-        with pytest.raises(ppg.JobContractError):
+        with pytest.raises(ppg.JobRedefinitionError):
             ppg.CachedAttributeLoadingJob("A", o2, "a", cache)
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        ppg.CachedAttributeLoadingJob("A", o, "a", cache)
+        ppg.CachedAttributeLoadingJob("A", o2, "a", cache)
+
 
     def test_cached_attribute_job_does_not_load_its_preqs_on_cached(self):
         o = Dummy()

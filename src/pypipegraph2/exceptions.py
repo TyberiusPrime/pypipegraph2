@@ -21,6 +21,9 @@ class JobContractError(PPGException):
 class JobDied(PPGException):
     pass
 
+class JobRedefinitionError(ValueError):
+    pass
+
 
 class RunFailed(PPGException):
     pass

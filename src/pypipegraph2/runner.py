@@ -35,7 +35,9 @@ class JobStatus:
 
     @state.setter
     def state(self, value):
-        if self._state is JobState.Failed and value != JobState.Failed:
+        if (
+            self._state is JobState.Failed and value != JobState.Failed
+        ):  # pragma: no cover
             raise ValueError("Can't undo a Failed tag")
         self._state = value
 
@@ -43,7 +45,7 @@ class JobStatus:
         return repr(self)
 
     def __repr__(self):
-        if self.state is JobState.UpstreamFailed:
+        if self.state is JobState.UpstreamFailed:  # pragma: no cover
             return f"JobStatus({self.state} - {self.error})"
         return f"JobStatus({self.state})"
 
@@ -58,7 +60,7 @@ class Runner:
 
         logger.job_trace("Runner.__init__")
         self.event_timeout = event_timeout
-        with _with_changed_global_pipegraph(JobCollector()):
+        with _with_changed_global_pipegraph(JobCollector(job_graph.run_mode)):
             self.job_graph = job_graph
             self.jobs = job_graph.jobs.copy()
             self.job_inputs = job_graph.job_inputs.copy()
@@ -68,7 +70,7 @@ class Runner:
             flat_before = networkx.readwrite.json_graph.node_link_data(
                 job_graph.job_dag
             )
-            self.dag = self.extend_dag(job_graph)
+            self.dag = self.modify_dag(job_graph)
             flat_after = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
             import json
 
@@ -82,8 +84,10 @@ class Runner:
                 ),
             )
 
-            if not networkx.algorithms.is_directed_acyclic_graph(self.dag):
-                raise exceptions.NotADag("Extend_dag error")
+            if not networkx.algorithms.is_directed_acyclic_graph(
+                self.dag
+            ):  # pragma: no cover - defensive
+                raise exceptions.NotADag("modify_dag error")
             self.job_states = {}
 
             for job_id in self.jobs:
@@ -99,10 +103,23 @@ class Runner:
             self.jobs_to_run_que = queue.Queue()
             self.threads = self.start_job_executing_threads()
 
-    def extend_dag(self, job_graph):
+    def modify_dag(self, job_graph):
         from .jobs import _DownstreamNeedsMeChecker
 
+        def _recurse_pruning(job_id, reason):
+            pruned.add(job_id)
+            if not hasattr(self.jobs[job_id], "prune_reason"):
+                self.jobs[job_id].prune_reason = reason
+            for downstream_job_id in dag.successors(job_id):
+                _recurse_pruning(downstream_job_id, reason)
+
         dag = job_graph.job_dag.copy()
+        pruned = set()
+        for job_id in self.jobs:
+            if self.jobs[job_id]._pruned:
+                _recurse_pruning(job_id, job_id)
+        for job_id in pruned:
+            dag.remove_node(job_id)
         known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
         for job_id in reversed(known_job_ids):
             job = self.jobs[job_id]
@@ -231,7 +248,7 @@ class Runner:
         self.jobs_in_flight = 0
         for t in self.threads:
             t.start()
-        todo = len(self.jobs)
+        todo = len(self.dag)
         logger.job_trace(f"jobs: {self.jobs.keys()}")
         logger.job_trace(f"skipped jobs: {skipped_jobs}")
         try:
@@ -246,6 +263,7 @@ class Runner:
                         for job_id in self.job_states:
                             logger.info(f"{job_id}, {self.job_states[job_id].state}")
                         raise exceptions.RunFailedInternally
+                    continue
 
                 logger.job_trace(
                     f"<-handle {ev[0]} {escape_logging(ev[1][0])}, todo: {todo}"
@@ -263,7 +281,7 @@ class Runner:
                     todo -= 1
                 elif ev[0] == "JobUpstreamFailed":
                     todo -= 1
-                else:
+                else:  # pragma: no cover # defensive
                     raise NotImplementedError(ev[0])
                 logger.job_trace(f"<-done - todo: {todo}")
         finally:
@@ -495,26 +513,6 @@ class Runner:
             return False
         return job_class.compare_hashes(old_hash, new_hash)
 
-        if old_hash == new_hash:
-            return True
-        # FileInvariant - ignore
-        if (
-            "hash" in new_hash
-            and "hash" in old_hash
-            and new_hash["hash"] == old_hash["hash"]
-        ):
-            return True
-        # logger.trace(
-        # f"Comparing {old_hash} and {new_hash}".replace("{", "{{").replace("}", "}}")
-        # )
-        return (
-            False  # todo: this needs expanding...depending on what kind of hash it is.
-        )
-
-    def get_job_inputs(self, job_id):
-        return self.job_inputs[job_id]
-        # return networkx.algorithms.dag.ancestors(self.job_graph.job_dag, job.job_id)
-
     def job_has_non_temp_somewhere_downstream(self, job_id):
         for downstream_id in self.dag.neighbors(job_id):
             j = self.jobs[downstream_id]
@@ -564,7 +562,7 @@ class Runner:
                     job.stop_time = time.time()
                     job.run_time = job.stop_time - job.start_time
                     self.push_event("JobSuccess", (job_id, outputs))
-                except SystemExit as e:
+                except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
                     logger.job_trace(
                         "SystemExit in spawned process -> converting to hard exit"
                     )
@@ -582,8 +580,9 @@ class Runner:
 
 
 class JobCollector:
-    def __init__(self):
+    def __init__(self, run_mode):
         self.clear()
+        self.run_mode = run_mode
 
     def add(self, job):
         self.jobs[job] = job
