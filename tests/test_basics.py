@@ -1296,6 +1296,7 @@ class TestPypipegraph2:
         ppg.FileGeneratingJob('A', inner)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
+        # make sure we captured it all
         assert len(ppg.global_pipegraph.last_run_result['A'].error.args[0].args[0]) == should_len
 
 

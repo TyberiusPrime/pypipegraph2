@@ -112,7 +112,7 @@ class TestingTheUnexpectedTests:
         assert not (Path("out/A").exists())
         error = ppg.global_pipegraph.last_run_result["out/A"].error
         assert isinstance(error.args[0], ppg.JobDied)
-        assert error.args[0].args[1] == 5
+        assert error.args[0].args[2] == 5
 
     def test_job_exiting_python_stdout_stderr_logged(self):
         def dies(of):
@@ -131,7 +131,7 @@ class TestingTheUnexpectedTests:
         assert not (Path("out/A").exists())
         error = ppg.global_pipegraph.last_run_result["out/A"].error
         assert isinstance(error.args[0], ppg.JobDied)
-        assert error.args[0].args[1] == 5
+        assert error.args[0].args[2] == 5
         assert fg.stdout == "hello\n"
         assert fg.stderr == "I am stderr\n"
 
@@ -154,7 +154,7 @@ class TestingTheUnexpectedTests:
         assert not (Path("out/A").exists())
         error = ppg.global_pipegraph.last_run_result["out/A"].error
         assert isinstance(error.args[0], ppg.JobDied)
-        assert error.args[0].args[1] == -9
+        assert error.args[0].args[2] == -9
         assert fg.stdout == "hello\n"
         assert fg.stderr == "I am stderr\n"
 

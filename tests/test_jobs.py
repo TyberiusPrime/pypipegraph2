@@ -966,13 +966,16 @@ class TestDataLoadingJob:
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         assert isinstance(
-            ppg.global_pipegraph.last_run_result[jobB.job_id].error.args[0], str
+            ppg.global_pipegraph.last_run_result[jobB.job_id].error.args[0], ppg.exceptions.JobDied
         )
-        print("here ", ppg.global_pipegraph.last_run_result[jobB.job_id].error.args)
+
+        assert isinstance(
+            ppg.global_pipegraph.last_run_result[jobB.job_id].error.args[0].args[0], str
+        )
 
         assert (
             "UnpickableException"
-            in ppg.global_pipegraph.last_run_result[jobB.job_id].error.args[0]
+            in ppg.global_pipegraph.last_run_result[jobB.job_id].error.args[0].args[0]
         )
 
     def test_creating_jobs_in_file_generating_are_ignored(self):

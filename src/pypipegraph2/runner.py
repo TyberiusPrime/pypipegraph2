@@ -1,4 +1,7 @@
 from . import exceptions
+import textwrap
+import sys
+import pickle
 import os
 import queue
 from loguru import logger
@@ -9,11 +12,9 @@ from .util import escape_logging
 from .enums import JobKind, ValidationState, JobState
 from .exceptions import _RunAgain
 from .parallel import CoreLock
+from . import ppg_traceback
 import threading
-from rich import get_console
-import rich.traceback
 from rich.console import Console
-from rich import print as rprint
 
 
 class JobStatus:
@@ -477,6 +478,70 @@ class Runner:
     def handle_job_ready(self, job_id):
         self.jobs_to_run_que.put(job_id)
 
+    def _format_rich_traceback_fallback(self, tb):
+
+
+        def render_locals(frame):
+            out.append("[bold]Locals[/bold]:")
+            scope = frame.locals
+            items = sorted(scope.items())
+            len_longest_key = max((len(x[0]) for x in items))
+            for key, value in items:
+                v = str(value)
+                if len(v) > 1000:
+                    v = v[:1000] + "…"
+                v = textwrap.indent(v, "\t   " + " " * len_longest_key).lstrip()
+                out.append(f"\t{key.rjust(len_longest_key, ' ')} = {v}")
+
+        first_stack = True
+        out = []
+        if tb is None:
+            out = ["# no traceback was captured"]
+        else:
+            for stack in tb.stacks:
+                if not first_stack:
+                    out.append("")
+                    if stack.is_cause:
+                        out.append("The above exception was caused by the following one")
+                first_stack = False
+                exc_value = str(stack.exc_value)
+                if len(exc_value) > 1000:
+                    exc_value = exc_value[:1000] + "…"
+                out.append(f"[bold]Exception[/bold]: [red][bold]{stack.exc_type}[/bold] {exc_value}[/red]")
+                out.append("[bold]Traceback[/bold] (most recent call last):")
+
+                for frame in stack.frames:
+                    out.append(f'{frame.filename}":{frame.lineno}, in {frame.name}')
+                    if frame.filename.startswith("<"):
+                        render_locals(frame)
+                        continue
+                    extra_lines = 3
+                    if frame.source:
+                        code = frame.source
+                        line_range = (
+                            frame.lineno - extra_lines,
+                            frame.lineno + extra_lines,
+                        )
+                        # leading empty lines get filtered from the output
+                        # but to actually show the correct section & highlight
+                        # we need to adjust the line range accordingly.
+                        code = code.split("\n")
+                        for ii, line in zip(
+                            range(*line_range), code[line_range[0] : line_range[1]]
+                        ):
+                            if ii == frame.lineno:
+                                c = "> "
+                            else:
+                                c = "  "
+                            out.append(f"\t{c}{ii} {line}")
+                        if frame.locals:
+                            render_locals(frame)
+                        continue
+                    else:
+                        out.append("# no source available")
+                out.append(f"[bold]Exception[/bold] (again): [red][bold]{stack.exc_type}[/bold] {exc_value}[/red]")
+        return "\n".join(out)
+
     def handle_job_failed(self, job_id, source):
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
@@ -490,14 +555,16 @@ class Runner:
             with open(error_file, "w") as ef:
                 c = Console(file=ef, width=80, record=True)
                 c.print(f"{job_id}\n")
-                c.log(job_state.error.args[1])
+                c.log(self._format_rich_traceback_fallback(job_state.error.args[1]))
+                #ef.write(self._format_rich_traceback_fallback(job_state.error.args[1]))
             logger.error(
-                f"Failed job: {job_id}. Exception logged to {error_file}/.html"
+                f"Failed job: {job_id}. Exception logged to {error_file}"
             )
         else:
             logger.error(f"Failed job: {job_id}")
-        logger.info("out")
-        get_console().log(job_state.error.args[1])
+        logger.error(
+            escape_logging(self._format_rich_traceback_fallback(job_state.error.args[1]))
+        )
         logger.info("out done")
 
     def all_inputs_finished(self, job_id):
@@ -606,11 +673,11 @@ class Runner:
                     if isinstance(e, exceptions.JobError):
                         job_state.error = e
                     else:
+                        exception_type, exception_value, tb = sys.exc_info()
+                        captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
                         job_state.error = exceptions.JobError(
                             e,
-                            rich.traceback.Traceback(
-                                show_locals=True,
-                            ),
+                            captured_tb,
                         )
                     e = job_state.error
                     self.push_event("JobFailed", (job_id, job_id))

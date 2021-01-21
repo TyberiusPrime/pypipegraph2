@@ -53,3 +53,4 @@ tests/run
 .vim_session
 benchmarks/run
 benchmarks/flames.svg
+*/.ppg/*
