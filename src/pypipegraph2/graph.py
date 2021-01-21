@@ -15,9 +15,12 @@ from .runner import Runner, JobState
 from .util import escape_logging, CPUs
 from .enums import RunMode
 from .exceptions import _RunAgain
+from rich.logging import RichHandler
+
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
+logger.configure(handlers=[{"sink":RichHandler(markup=True), "format":"{message}"}])
 
 
 class ALL_CORES:

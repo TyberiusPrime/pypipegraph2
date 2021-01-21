@@ -953,7 +953,7 @@ class TestDataLoadingJob:
             UnpickableException,
         )
 
-    def test_sending_a_non_pickable_exception_file_generating(self):
+    def test_sending_a_non_pickable_exception_file_generating(self, job_trace_log):
         class UnpickableException(Exception):
             def __getstate__(self):
                 raise ValueError("Can't pickle me")

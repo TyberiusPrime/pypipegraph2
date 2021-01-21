@@ -1274,3 +1274,30 @@ class TestPypipegraph2:
         assert ppg.global_pipegraph.last_run_result['B'].error
         assert not ppg.global_pipegraph.last_run_result['C'].error
 
+
+    def test_getting_source_after_chdir(self):
+        def inner(something):
+            return 552341512412
+        import os
+        old = os.getcwd()
+        try:
+            f = ppg.FunctionInvariant('shu', inner)
+            os.chdir('/tmp')
+            assert f.get_source_file().is_absolute()
+            assert '552341512412' in f.get_source_file().read_text()
+        finally:
+            os.chdir(old)
+
+
+    def test_massive_exception(self):
+        should_len = (1024 *1024)
+        def inner(_):
+            raise ValueError("x " * (should_len //2))
+        ppg.FileGeneratingJob('A', inner)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert len(ppg.global_pipegraph.last_run_result['A'].error.args[0].args[0]) == should_len
+
+
+
+

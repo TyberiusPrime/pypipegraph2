@@ -10,6 +10,10 @@ from .enums import JobKind, ValidationState, JobState
 from .exceptions import _RunAgain
 from .parallel import CoreLock
 import threading
+from rich import get_console
+import rich.traceback
+from rich.console import Console
+from rich import print as rprint
 
 
 class JobStatus:
@@ -251,6 +255,7 @@ class Runner:
         todo = len(self.dag)
         logger.job_trace(f"jobs: {self.jobs.keys()}")
         logger.job_trace(f"skipped jobs: {skipped_jobs}")
+        timeout_counter = 0
         try:
             while todo:
                 try:
@@ -268,22 +273,15 @@ class Runner:
                 logger.job_trace(
                     f"<-handle {ev[0]} {escape_logging(ev[1][0])}, todo: {todo}"
                 )
-                if ev[0] == "JobSuccess":
-                    self.handle_job_success(*ev[1])
-                    todo -= 1
-                elif ev[0] == "JobSkipped":
-                    self.handle_job_skipped(*ev[1])
-                    todo -= 1
-                elif ev[0] == "JobReady":
-                    self.handle_job_ready(*ev[1])
-                elif ev[0] == "JobFailed":
-                    self.handle_job_failed(*ev[1])
-                    todo -= 1
-                elif ev[0] == "JobUpstreamFailed":
-                    todo -= 1
-                else:  # pragma: no cover # defensive
-                    raise NotImplementedError(ev[0])
+                todo += self.handle_event(ev)
                 logger.job_trace(f"<-done - todo: {todo}")
+            try:
+                ev = self.events.get_nowait()
+            except queue.Empty:
+                pass
+            else:
+                logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
+                self.handle_event(ev)
         finally:
 
             for t in self.threads:
@@ -302,6 +300,25 @@ class Runner:
             raise _RunAgain(self.job_states)
         logger.job_trace("Left runner.run()")
         return self.job_states
+
+    def handle_event(self, event):
+        todo = 0
+        if event[0] == "JobSuccess":
+            self.handle_job_success(*event[1])
+            todo -= 1
+        elif event[0] == "JobSkipped":
+            self.handle_job_skipped(*event[1])
+            todo -= 1
+        elif event[0] == "JobReady":
+            self.handle_job_ready(*event[1])
+        elif event[0] == "JobFailed":
+            self.handle_job_failed(*event[1])
+            todo -= 1
+        elif event[0] == "JobUpstreamFailed":
+            todo -= 1
+        else:  # pragma: no cover # defensive
+            raise NotImplementedError(event[0])
+        return todo
 
     def handle_job_success(self, job_id, job_outputs):
         job = self.jobs[job_id]
@@ -465,6 +482,23 @@ class Runner:
         job_state = self.job_states[job_id]
         job_state.state = JobState.Failed
         self.fail_downstream_by_outputs(job.outputs, job_id)
+        logger.error(f"failed {job_id}")
+        if self.job_graph.error_dir is not None:
+            error_file = self.job_graph.error_dir / (
+                str(job.job_number) + "_exception.txt"
+            )
+            with open(error_file, "w") as ef:
+                c = Console(file=ef, width=80, record=True)
+                c.print(f"{job_id}\n")
+                c.log(job_state.error.args[1])
+            logger.error(
+                f"Failed job: {job_id}. Exception logged to {error_file}/.html"
+            )
+        else:
+            logger.error(f"Failed job: {job_id}")
+        logger.info("out")
+        get_console().log(job_state.error.args[1])
+        logger.info("out done")
 
     def all_inputs_finished(self, job_id):
         job_state = self.job_states[job_id]
@@ -572,8 +606,13 @@ class Runner:
                     if isinstance(e, exceptions.JobError):
                         job_state.error = e
                     else:
-                        job_state.error = exceptions.JobError(e, traceback.format_exc())
-                    logger.warning(f"Execute {job_id} failed: {escape_logging(e)}")
+                        job_state.error = exceptions.JobError(
+                            e,
+                            rich.traceback.Traceback(
+                                show_locals=True,
+                            ),
+                        )
+                    e = job_state.error
                     self.push_event("JobFailed", (job_id, job_id))
                 finally:
                     self.jobs_in_flight -= 1

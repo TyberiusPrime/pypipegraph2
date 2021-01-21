@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 import collections
 import tempfile
 import traceback
@@ -296,7 +297,6 @@ class MultiFileGeneratingJob(Job):
         ):
             # que = multiprocessing.Queue() # replace by pipe
             logger.job_trace(f"Forking for {self.job_id}")
-            recv, sender = multiprocessing.Pipe(duplex=False)
             # these only get closed by the parent process
             stdout = tempfile.NamedTemporaryFile(
                 mode="w+",
@@ -307,6 +307,11 @@ class MultiFileGeneratingJob(Job):
                 mode="w+",
                 dir=runner.job_graph.run_dir,
                 suffix=f"__{self.job_number}.stderr",
+            )
+            exception_out = tempfile.NamedTemporaryFile(
+                mode="wb+",
+                dir=runner.job_graph.run_dir,
+                suffix=f"__{self.job_number}.exception",
             )
 
             pid = os.fork()
@@ -327,7 +332,6 @@ class MultiFileGeneratingJob(Job):
                         stdout.flush()
                         stderr.flush()
                         # else:
-                        # sender.send((True, "output omitted", "output omitted"))
                         os._exit(0)  # go down hard, do not call atexit and co.
                     except TypeError as e:
                         if hasattr(self.generating_function, "__code__"):  # build ins
@@ -349,17 +353,21 @@ class MultiFileGeneratingJob(Job):
                         sys.stderr = stderr_
                 except Exception as e:
                     try:
-                        tb = traceback.format_exc()
-                        sender.send((e, tb))
+                        # tb = traceback.format_exc()
+                        # exception_type, exception_value, tb = sys.exc_info()
+                        import rich.traceback
+
+                        tb = rich.traceback.Traceback(show_locals=True)
+                        logger.info("Sending back exception")
+                        pickle.dump(tb, exception_out)
+                        pickle.dump(e, exception_out)
+                        exception_out.flush()
                     except Exception as e2:
-                        try:
-                            sender.send((repr(e), tb))
-                        except Exception as e3:
-                            print(
-                                f"FileGeneratingJob done, but send failed: \n{type(e)} {e} - \n {type(e2)} {e2}\n{type(e3)} - {e3}"
-                            )
-                            pass
-                    os._exit(1)
+                        logger.error(
+                            f"FileGeneratingJob done, but saving the exception failed: \n{type(e)} {e} - \n {type(e2)} {e2}\n"
+                        )
+                    finally:
+                        os._exit(1)
             else:
                 logger.info(f"Child pid {pid}")
                 _, waitstatus = os.waitpid(pid, 0)
@@ -370,19 +378,21 @@ class MultiFileGeneratingJob(Job):
                         self.stdout, self.stderr = self._read_stdout_stderr(
                             stdout, stderr
                         )
+                        exception_out.seek(0,0)
 
-                        if recv.poll(1):
-                            (
-                                exception,
-                                tb_str,
-                            ) = recv.recv()
-                            raise exceptions.JobError(exception, tb_str)
-                        else:
+                        tb = None
+                        exception = None
+                        try:
+                            tb = pickle.load(exception_out)
+                            exception = pickle.load(exception_out)
+                        except:
                             logger.error(f"Job died (=exitcode != 0): {self.job_id}")
                             raise exceptions.JobDied(
-                                f"Job {self.job_id} died but did not return an exception object",
+                                f"Job {self.job_id} died but did not return an exception object.",
                                 exitcode,
                             )
+                        else:
+                            raise exceptions.JobError(exception, tb)
                     elif self.always_capture_output:
                         self.stdout, self.stderr = self._read_stdout_stderr(
                             stdout, stderr
