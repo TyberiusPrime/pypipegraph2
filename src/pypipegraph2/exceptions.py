@@ -46,7 +46,7 @@ class JobError(PPGException):
     def __str__(self):
         return (
             ("ppg.JobError:\n")
-            + (f"\tException:{self.args[0]}\n")
-            + (f"\tTraceback: {self.args[1]}\n")
+            + (f"{self.args[0].__class__.__name__}: {self.args[0]}\n")
+            #+ (f"\tTraceback: {self.args[1]}\n")
             + ("")
         )
