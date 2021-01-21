@@ -30,12 +30,14 @@ def _last_or_default(name, value, default_value):
 
 def new(
     cores=reuse_last_or_default,
+    run_mode=reuse_last_or_default,
     log_dir=reuse_last_or_default,
+    error_dir=reuse_last_or_default,
     history_dir=reuse_last_or_default,
     run_dir=reuse_last_or_default,
     log_level=reuse_last_or_default,
     allow_short_filenames=reuse_last_or_default,
-    run_mode=reuse_last_or_default,
+    log_retention=reuse_last_or_default
 ):
     """create a new pipegraph.
     You may pase reuse_last_or_default to all values
@@ -51,14 +53,15 @@ def new(
         for name, default_arg in [
             ("cores", ALL_CORES),
             ("log_dir", Path(".ppg/logs")),
+            ("error_dir", Path(".ppg/errors")),
             ("history_dir", Path(".ppg/history")),
             ("run_dir", Path(".ppg/run")),
             ("log_level", logging.INFO),
             ("allow_short_filenames", False),
             ("run_mode", RunMode.CONSOLE),
+            ('log_retention', 3),
         ]
     }
-    print(arguments, run_mode)
     global_pipegraph = PyPipeGraph(**arguments)
     return global_pipegraph
 

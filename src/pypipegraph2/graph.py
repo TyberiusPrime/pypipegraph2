@@ -1,4 +1,5 @@
 from typing import Optional, Union, Dict
+import shutil
 import collections
 import os
 import textwrap
@@ -33,25 +34,33 @@ class PyPipeGraph:
         self,
         cores: Union[int, ALL_CORES],
         log_dir: Optional[Path],
+        error_dir: Optional[Path],
         history_dir: Path,
         run_dir: Path,
         log_level: int,
         run_mode: RunMode,
         paths: Optional[Dict[str, Union[Path, str]]] = None,
         allow_short_filenames=False,
+        log_retention = None
     ):
 
         if cores is ALL_CORES:
             self.cores = CPUs()
         else:
             self.cores = int(cores)
+        self.time_str = time.strftime('%Y-%m-%d_%H-%M-%S')
         if log_dir:
             self.log_dir = Path(log_dir)
         else:
             self.log_dir = None
+        if error_dir:
+            self.error_dir = error_dir / self.time_str
+        else:
+            self.error_dir = None
         self.history_dir = Path(history_dir)
         self.run_dir = Path(run_dir)
         self.log_level = log_level
+        self.log_retention = log_retention
         #self.paths = {k: Path(v) for (k, v) in paths} if paths else {}
         self.run_mode = run_mode
         self.jobs = {}  # the job objects, by id
@@ -77,14 +86,22 @@ class PyPipeGraph:
             # print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
             pass
         self.fill_dependency_callbacks()
+        if self.error_dir:
+            self.error_dir.mkdir(exist_ok=True, parents=True)
         if self.log_dir:
             self.log_dir.mkdir(exist_ok=True, parents=True)
+            fn = Path(sys.argv[0]).name
             logger.add(
-                self.log_dir / f"ppg_run_{time.time():.0f}.log", level=self.log_level
+                self.log_dir / f"{fn}-{self.time_str}.log", level=self.log_level
             )
+            if self.log_level != 20: #logging.INFO:
+                logger.add(sink=sys.stdout, level=self.log_level)
+            import threading
             logger.info(
-                f"Run is go {id(self)} pid: {os.getpid()}, run_id {self.run_id}"
+                f"Run is go {threading.get_ident()} pid: {os.getpid()}, run_id {self.run_id}"
             )
+            self.cleanup_logs()
+            self.cleanup_errors()
         self.history_dir.mkdir(exist_ok=True, parents=True)
         self.run_dir.mkdir(exist_ok=True, parents=True)
         self.do_raise = []
@@ -116,11 +133,33 @@ class PyPipeGraph:
                 raise exceptions.RunFailed(*self.do_raise)
             return result
         finally:
+            logger.info("Run is done")
             if print_failures:
                 self._print_failures()
-            if self.run_mode == RunMode.CONSOLE:
-                self._restore_signals()
-            logger.trace("Run is done")
+            self._restore_signals()
+
+
+    def cleanup_logs(self):
+        if not self.log_dir or self.log_retention is None:
+            return
+        fn = Path(sys.argv[0]).name
+        pattern = f"{fn}-*.log"
+        files = sorted(self.log_dir.glob(pattern))
+        if len(files) > self.log_retention:
+            remove = files[:-self.log_retention]
+            for f in remove:
+                os.unlink(f)
+
+    def cleanup_errors(self):
+        if not self.error_dir or self.log_retention is None:
+            return
+        err_dirs = sorted([x for x in self.error_dir.parent.glob("*") if x.is_dir()])
+        if len(err_dirs) > self.log_retention:
+            remove = err_dirs[:-self.log_retention]
+            for f in remove:
+                shutil.rmtree(f)
+
+
 
     def update_history(self, job_results, history):
         # we must keep the history of jobs unseen in this run.
@@ -148,14 +187,14 @@ class PyPipeGraph:
 
     def _get_history_fn(self):
         fn = Path(sys.argv[0]).name
-        return self.history_dir / f"ppg_status_{fn}.history"  # don't end on .py
+        return self.history_dir / f"{fn}.ppg_history"  # don't end on .py
 
     def load_historical(self):
         logger.trace("load_historicals")
         fn = self._get_history_fn()
         history = {}
         if fn.exists():
-            logger.debug("Historical existed")
+            logger.job_trace("Historical existed")
             try:
                 with open(fn, "rb") as op:
                     try:
@@ -208,6 +247,8 @@ class PyPipeGraph:
     def save_historical(self, historical):
         logger.trace("save_historical")
         fn = self._get_history_fn()
+        if Path(fn).exists():
+            fn.rename(fn.with_suffix(fn.suffix + '.backup'))
         raise_keyboard_interrupt = False
         raise_run_failed_internally = False
         with open(fn, "wb") as op:
@@ -260,7 +301,7 @@ class PyPipeGraph:
 
     def _print_failures(self):
         logger.trace("print_failures")
-        # TODO
+        # TODO - actually, we kind of already do that inline, don't we.
 
     def _install_signals(self):
         """make sure we don't crash just because the user logged of.
@@ -281,10 +322,13 @@ class PyPipeGraph:
 
     def _restore_signals(self):
         logger.trace("_restore_signals")
-        if hasattr(self, '_old_signal_hup') and self._old_signal_hup:
+        if hasattr(self, '_old_signal_hup'):
             signal.signal(signal.SIGHUP, self._old_signal_hup)
-        if hasattr(self, '_old_signal_int') and self._old_signal_int:
+        if hasattr(self, '_old_signal_int'):
                 signal.signal(signal.SIGINT, self._old_signal_int)
+        else:
+            pass
+            #raise ValueError("WHen does this happen")
 
     def add(self, job):
 
