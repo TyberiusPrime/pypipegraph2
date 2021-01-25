@@ -364,15 +364,63 @@ class Runner:
             for name, hash in job_outputs.items():
                 if name in self.job_inputs[downstream_id]:
                     logger.job_trace(f"\t\t\tHad {name}")
-                    old = downstream_state.historical_input.get(name, None)
-                    new = hash
-                    if not self.compare_history(old, new, job.__class__):
-                        logger.job_trace("\t\t\tinput changed -> invalidate")
-                        downstream_state.validation_state = ValidationState.Invalidated
+                    # old = downstream_state.historical_input.get(name, None)
+                    # new = hash
+                    # if not self.compare_history(old, new, job.__class__):
+                        # logger.job_trace("\t\t\tinput changed -> invalidate")
+                        # downstream_state.validation_state = ValidationState.Invalidated
                     downstream_state.updated_input[name] = hash  # update any way.
                 else:
                     logger.job_trace(f"\t\t\tNot an input {name}")
             if self.all_inputs_finished(downstream_id):
+                old_input = downstream_state.historical_input
+                new_input = downstream_state.updated_input
+                invalidated = False
+                if len(new_input) != len(old_input): # we lost or gained an input -> invalidate
+                    logger.job_trace(f"{downstream_id} No of inputs changed _> invalidated")
+                    invalidated = True
+                else: # same length.
+                    if old_input.keys() == new_input.keys(): # nothing possibly renamed
+                        logger.job_trace(f"{downstream_id} Same set of input keys")
+                        for key, old_hash in old_input.items():
+                            cmp_job = self.jobs[self.outputs_to_job_ids[key]].__class__
+                            if not self.compare_history(old_hash, new_input[key], cmp_job):
+                                logger.job_trace(f"{downstream_id} input {key} changed {escape_logging(old_hash)} {escape_logging(new_input[key])}")
+                                invalidated = True
+                                break
+                    else:
+                        used = set()
+                        logger.job_trace(f"{downstream_id} differing set of keys")
+                        for old_key, old_hash in old_input.items():
+                            if old_key in new_input:
+                                cmp_job = self.jobs[self.outputs_to_job_ids[old_key]].__class__
+                                if not self.compare_history(old_hash, new_input[old_key], cmp_job):
+                                    logger.job_trace(f"{downstream_id} input {old_key} changed")
+                                    invalidated = True
+                                    break
+                            else:
+                                for new_key, new_hash in new_input.items():
+                                    logger.job_trace(f"{downstream_id} matched inputs: {old_key}, {new_key}")
+                                    # we could do this, handling even more cases, but it would expose the compare_histories
+                                    # to possibly comparing jobs that are not the same JobClass.
+                                    # let's not open that particular can of worms
+                                    #if self.compare_history(old_hash, new_hash, downstream_job.__class__):
+                                    if new_hash == old_hash: 
+                                        if new_key in used:   # multiple matches... better safe than sorry
+                                            logger.job_trace(f"{downstream_id} {new_key} used multiple ntimes -> invalidate")
+                                            invalidated = True
+                                        used.add(new_key)
+                                        break # either awy, we found a match for this old_key
+                                    else:
+                                        logger.job_trace(f"{downstream_id} {old_key}, {new_key} invalidated")
+                                        invalidated = True
+                                else: # no match -> invalidate
+                                    logger.job_trace(f"{downstream_id} Could not match {old_key})")
+                                    invalidated = True
+                                    break
+                if invalidated:
+                    downstream_state.validation_state = ValidationState.Invalidated
+
                 logger.job_trace(f"\t\tAll inputs finished {downstream_id}")
                 if (
                     downstream_job.job_kind is JobKind.Temp
@@ -402,51 +450,36 @@ class Runner:
                         self.push_event("JobReady", (downstream_id,), 3)
                     # todo: do I need to do this for loading jobs that are lacking downstream? check me, there is a test case I broke for this...
                 else:
-                    if len(downstream_state.updated_input) < len(
-                        downstream_state.historical_input
-                    ):
-                        logger.job_trace(
-                            f"\t\t\thistorical_input {downstream_state.historical_input.keys()}"
-                        )
-                        logger.job_trace("\t\t\tinput disappeared -> invalidate")
-                        downstream_state.validation_state = ValidationState.Invalidated
-                        if self.job_failed_last_time(downstream_id):
-                            self.push_event("JobFailed", (downstream_id, downstream_id))
-                            self.job_states[downstream_id].error = self.last_job_states[
-                                downstream_id
-                            ].error
-                        else:
-                            self.push_event("JobReady", (downstream_id,), 3)
-                    else:
-                        if downstream_job.job_kind is JobKind.Cleanup:
-                            if (
+                    if downstream_job.job_kind is JobKind.Cleanup:
+                        if (
+                            self.job_states[
+                                downstream_job.parent_job.job_id
+                            ].validation_state
+                            is ValidationState.Invalidated
+                        ):
+                            downstream_state.validation_state = (
+                                ValidationState.Invalidated
+                            )
+                            if self.job_failed_last_time(downstream_id):
+                                self.push_event(
+                                    "JobFailed", (downstream_id, downstream_id)
+                                )
                                 self.job_states[
-                                    downstream_job.parent_job.job_id
-                                ].validation_state
-                                is ValidationState.Invalidated
-                            ):
-                                downstream_state.validation_state = (
-                                    ValidationState.Invalidated
-                                )
-                                if self.job_failed_last_time(downstream_id):
-                                    self.push_event(
-                                        "JobFailed", (downstream_id, downstream_id)
-                                    )
-                                    self.job_states[
-                                        downstream_id
-                                    ].error = self.last_job_states[downstream_id].error
-                                else:
-                                    self.push_event("JobReady", (downstream_id,), 3)
+                                    downstream_id
+                                ].error = self.last_job_states[downstream_id].error
                             else:
-                                downstream_state.validation_state = (
-                                    ValidationState.Validated
-                                )
-                                self.push_event("JobSkipped", (downstream_id,), 3)
+                                self.push_event("JobReady", (downstream_id,), 3)
                         else:
                             downstream_state.validation_state = (
                                 ValidationState.Validated
                             )
                             self.push_event("JobSkipped", (downstream_id,), 3)
+                    else:
+                        downstream_state.validation_state = (
+                            ValidationState.Validated
+                        )
+                        self.push_event("JobSkipped", (downstream_id,), 3)
+
 
     def job_failed_last_time(self, job_id):
         res = (

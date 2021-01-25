@@ -10,14 +10,12 @@ Open stuff
 	- tests depending on partial MultiTempfile output 
 	
 	- interactive stuff
-	-
-	- job renaming support (ie. rename a job, but refind it by it's inputs?)
- 
+	
 	- pretty and usable and appending runtime logging.
 	 including runtimes
 
 	- what happens when you run a partial graph somewhere else without access to
-	  the orignal history? The FunctionInvariants clobber everything.
+	  the original history? The FunctionInvariants clobber everything.
 	  Ok, turn the off, what now?
 	  The FileGeneratingJob.ouput_needed deletes the files.
 	  
@@ -25,6 +23,8 @@ Open stuff
 
 		Can we at least in interactive mode complain when we create a FileGeneratingJob
 	    without history who's file already exists?
+		
+	  or should we simply share the damn status file? 
 		
 		
 	- prebuild jobs
@@ -36,7 +36,11 @@ Open stuff
 	- multifilegeneratingjob,allow dict as output definition (see api polishing)
 
 	- command runner job? kind of a replacement for mbf_externals.ExternalAlgorithm
-	- - investigate inspect.signature to the lambda of: requirement
+	- 
+	- - investigate inspect.signature to the lambda of: requirement, so we can throw right away.
+	- 
 	- write test case with our regular object structure
-	- make depend_on_function passable by name only
+	- 
+	- make depend_on_function passable by name only (what did I want to say with this?)
+	- 
 	- prevent stalling if a bunch of ALL_CORES jobs hog all the threads, no SINGLE_CORE jobs will be running.
