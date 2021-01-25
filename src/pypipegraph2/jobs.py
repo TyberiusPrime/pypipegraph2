@@ -313,107 +313,113 @@ class MultiFileGeneratingJob(Job):
                 suffix=f"__{self.job_number}.exception",
             )
 
-            pid = os.fork()
-            if pid == 0:
-                try:
-                    for x in stdout, stderr, exception_out:
-                        x.delete = False  # that's the parent's job!
-                        x._closer.delete = False  # that's the parent's job!
-
-                    # logger.info(f"tempfilename: {stderr.name}")
-                    stdout_ = sys.stdout
-                    stderr_ = sys.stderr
-                    sys.stdout = stdout
-                    sys.stderr = stderr
+            try:
+                pid = os.fork()
+                if pid == 0:
                     try:
-                        self.generating_function(self.get_input())
-                        stdout.flush()
-                        stderr.flush()
-                        # else:
-                        os._exit(0)  # go down hard, do not call atexit and co.
-                    except TypeError as e:
-                        if hasattr(self.generating_function, "__code__"):  # build ins
-                            func_info = f"{self.generating_function.__code__.co_filename}:{self.generating_function.__code__.co_firstlineno}"
-                        else:
-                            func_info = "unknown"
-                        if "takes 0 positional arguments but 1 was given" in str(e):
-                            raise TypeError(
-                                e.args[0]
-                                + ". You have forgotten to take the output_files as your first parameter."
-                                + f"The function was defined in {func_info}."
-                            )
-                        else:
-                            raise
-                    finally:
-                        stdout.flush()
-                        stderr.flush()
-                        sys.stdout = stdout_
-                        sys.stderr = stderr_
-                except Exception as e:
-                    captured_tb = None # if the capturing fails for any reason...
-                    try:
-                        exception_type, exception_value, tb = sys.exc_info()
-                        captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
-                        pickle.dump(captured_tb, exception_out)
-                        pickle.dump(e, exception_out)
-                        exception_out.flush()
-                    except Exception as e2:
-                        msg = f"FileGeneratingJob raised exception, but saving the exception failed: \n{type(e)} {escape_logging(e)} - \n {type(e2)} {escape_logging(e2)}\n"
-                        # traceback is already dumped
-                        #exception_out.seek(0,0) # might have dumped the traceback already, right?
-                        #pickle.dump(captured_tb, exception_out)
-                        pickle.dump(exceptions.JobDied(repr(e)), exception_out)
-                        exception_out.flush()
-                        raise
-                    finally:
-                        os._exit(1)
-            else:
-                logger.info(f"Child pid {pid}")
-                _, waitstatus = os.waitpid(pid, 0)
-                if os.WIFEXITED(waitstatus):
-                    # normal termination.
-                    exitcode = os.WEXITSTATUS(waitstatus)
-                    if exitcode != 0:
-                        self.stdout, self.stderr = self._read_stdout_stderr(
-                            stdout, stderr
-                        )
-                        exception_out.seek(0, 0)
+                        for x in stdout, stderr, exception_out:
+                            x.delete = False  # that's the parent's job!
+                            x._closer.delete = False  # that's the parent's job!
 
-                        tb = None
-                        exception = None
+                        # logger.info(f"tempfilename: {stderr.name}")
+                        stdout_ = sys.stdout
+                        stderr_ = sys.stderr
+                        sys.stdout = stdout
+                        sys.stderr = stderr
                         try:
-                            tb = pickle.load(exception_out)
-                            exception = pickle.load(exception_out)
-                        except:
-                            logger.error(f"Job died (=exitcode != 0): {self.job_id}")
-                            exception =  exceptions.JobDied(
-                                f"Job {self.job_id} died but did not return an exception object.",
-                                None,
-                                exitcode,
-                            )
+                            self.generating_function(self.get_input())
+                            stdout.flush()
+                            stderr.flush()
+                            # else:
+                            os._exit(0)  # go down hard, do not call atexit and co.
+                        except TypeError as e:
+                            if hasattr(self.generating_function, "__code__"):  # build ins
+                                func_info = f"{self.generating_function.__code__.co_filename}:{self.generating_function.__code__.co_firstlineno}"
+                            else:
+                                func_info = "unknown"
+                            if "takes 0 positional arguments but 1 was given" in str(e):
+                                raise TypeError(
+                                    e.args[0]
+                                    + ". You have forgotten to take the output_files as your first parameter."
+                                    + f"The function was defined in {func_info}."
+                                )
+                            else:
+                                raise
                         finally:
-                            raise exceptions.JobError(exception, tb)
-                    elif self.always_capture_output:
-                        self.stdout, self.stderr = self._read_stdout_stderr(
-                            stdout, stderr
-                        )
+                            stdout.flush()
+                            stderr.flush()
+                            sys.stdout = stdout_
+                            sys.stderr = stderr_
+                    except Exception as e:
+                        captured_tb = None # if the capturing fails for any reason...
+                        try:
+                            exception_type, exception_value, tb = sys.exc_info()
+                            captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
+                            pickle.dump(captured_tb, exception_out)
+                            pickle.dump(e, exception_out)
+                            exception_out.flush()
+                        except Exception as e2:
+                            msg = f"FileGeneratingJob raised exception, but saving the exception failed: \n{type(e)} {escape_logging(e)} - \n {type(e2)} {escape_logging(e2)}\n"
+                            # traceback is already dumped
+                            #exception_out.seek(0,0) # might have dumped the traceback already, right?
+                            #pickle.dump(captured_tb, exception_out)
+                            pickle.dump(exceptions.JobDied(repr(e)), exception_out)
+                            exception_out.flush()
+                            raise
+                        finally:
+                            os._exit(1)
                 else:
-                    if os.WIFSIGNALED(waitstatus):
-                        exitcode = -1 * os.WTERMSIG(waitstatus)
-                        self.stdout, self.stderr = self._read_stdout_stderr(
-                            stdout, stderr
-                        )
-                        # don't bother to retrieve an exception, there won't be anay
-                        logger.error(f"Job killed by signal: {self.job_id}")
-                        raise exceptions.JobDied(
-                            f"Job {self.job_id} was killed", None, exitcode
-                        )
+                    with open("/home/finkernagel/t.txt", 'a') as op:
+                        op.write(f"Child pid {pid}, my_pid {os.getpid()}\n")
+                    logger.info(f"Child pid {pid}")
+                    _, waitstatus = os.waitpid(pid, 0)
+                    if os.WIFEXITED(waitstatus):
+                        # normal termination.
+                        exitcode = os.WEXITSTATUS(waitstatus)
+                        if exitcode != 0:
+                            self.stdout, self.stderr = self._read_stdout_stderr(
+                                stdout, stderr
+                            )
+                            exception_out.seek(0, 0)
 
+                            tb = None
+                            exception = None
+                            try:
+                                tb = pickle.load(exception_out)
+                                exception = pickle.load(exception_out)
+                            except:
+                                logger.error(f"Job died (=exitcode != 0): {self.job_id}")
+                                exception =  exceptions.JobDied(
+                                    f"Job {self.job_id} died but did not return an exception object.",
+                                    None,
+                                    exitcode,
+                                )
+                            finally:
+                                raise exceptions.JobError(exception, tb)
+                        elif self.always_capture_output:
+                            self.stdout, self.stderr = self._read_stdout_stderr(
+                                stdout, stderr
+                            )
                     else:
-                        raise ValueError(
-                            "Process did not exit, did not signal, but is dead?. Figure out and extend, I suppose"
-                        )
+                        if os.WIFSIGNALED(waitstatus):
+                            exitcode = -1 * os.WTERMSIG(waitstatus)
+                            self.stdout, self.stderr = self._read_stdout_stderr(
+                                stdout, stderr
+                            )
+                            # don't bother to retrieve an exception, there won't be anay
+                            logger.error(f"Job killed by signal: {self.job_id}")
+                            raise exceptions.JobDied(
+                                f"Job {self.job_id} was killed", None, exitcode
+                            )
 
+                        else:
+                            raise ValueError(
+                                "Process did not exit, did not signal, but is dead?. Figure out and extend, I suppose"
+                            )
+            finally:
+                stdout.close()  # unlink these soonish.
+                stderr.close()
+                exception_out.close()
         else:
             self.generating_function(self.get_input())
         missing_files = [x for x in self.files if not x.exists()]
