@@ -4,6 +4,7 @@ Open stuff
 	- notebook interaction vs early exploding
 	- 
 	- robust history storing when the graph dies / is aborted during it's run?
+	   - I suppose we could handle this with a log that we reapply later on?
 	
 	- general api polishing
 	 
@@ -27,15 +28,12 @@ Open stuff
 		
 	- prebuild jobs
 	 
-	- filegenjobs temp output & rename (so that a crashing job doesn't get counted as 'done'),
-	  though I believe that no longer to be an issue, since we don't update the history?
   
 	- jobs overwriting the files of other jobs (without declaring so!)
+	- 
 	- multifilegeneratingjob,allow dict as output definition (see api polishing)
 
 	- command runner job? kind of a replacement for mbf_externals.ExternalAlgorithm
-	- 
-	- - investigate inspect.signature to the lambda of: requirement, so we can throw right away.
 	- 
 	- write test case with our regular object structure
 	- 

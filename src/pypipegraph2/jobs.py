@@ -250,7 +250,7 @@ class MultiFileGeneratingJob(Job):
         always_capture_output=True,
     ):
 
-        self.generating_function = generating_function
+        self.generating_function = self._validate_func_argument(generating_function)
         self.depend_on_function = depend_on_function
         self.files = self._validate_files_argument(files)
         if len(self.files) != len(set(self.files)):
@@ -263,6 +263,13 @@ class MultiFileGeneratingJob(Job):
         self.always_capture_output = always_capture_output
         self.stdout = "not captured"
         self.stderr = "not captured"
+
+    @staticmethod
+    def _validate_func_argument(func):
+        sig = inspect.signature(func)
+        if  len(sig.parameters) == 0:
+            raise TypeError("A *FileGeneratingJobs callback function must take at least one parameter: The file(s) to create")
+
 
     @staticmethod
     def _validate_files_argument(files):

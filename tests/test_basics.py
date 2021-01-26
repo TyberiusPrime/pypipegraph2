@@ -1322,6 +1322,26 @@ class TestPypipegraph2:
         with pytest.raises(ValueError):
             a.depends_on_func('open')
 
+    def test_partial_running_job(self):
+        def a(of):
+            counter('A')
+            with open(of,'w') as op:
+                op.write("one\n")
+                raise ValueError()
+                op.write("two\n") # pragma: no cover
+        job = ppg.FileGeneratingJob('a', a)
+        ppg.run(raise_on_job_error=False)
+        assert read('a') == 'one\n'
+        assert read('A') == '1'
+        ppg.run(raise_on_job_error=False)
+        assert read('A') == '2'
+
+    def test_declaring_filegen_with_function_without_parameter_raises_immediatly(self):
+        with pytest.raises(TypeError):
+            ppg.FileGeneratingJob('A', lambda: None)
+
+
+
 
 
 
