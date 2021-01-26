@@ -695,6 +695,7 @@ class Runner:
 
                     job.stop_time = time.time()
                     job.run_time = job.stop_time - job.start_time
+                    self.job_states[job_id].run_time = job.run_time
                     self.push_event("JobSuccess", (job_id, outputs))
                 except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
                     logger.job_trace(

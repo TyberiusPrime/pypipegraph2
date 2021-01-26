@@ -1299,6 +1299,33 @@ class TestPypipegraph2:
         # make sure we captured it all
         assert len(ppg.global_pipegraph.last_run_result['A'].error.args[0].args[0]) == should_len
 
+    def test_depends_on_func(self):
+        a = ppg.FileGeneratingJob('A', lambda of: of.write_text("A"))
+        def inner():
+            return 55
+        f1 = a.depends_on_func('mylambda1', lambda: 55)
+        f2 = a.depends_on_func('inner', inner)
+        f3 = a.depends_on_func(inner)
+        f4 = a.depends_on_func(open) # built in
+        assert isinstance(f1.invariant, ppg.FunctionInvariant)
+        assert isinstance(f2.invariant, ppg.FunctionInvariant)
+        assert isinstance(f3.invariant, ppg.FunctionInvariant)
+        assert isinstance(f4.invariant, ppg.FunctionInvariant)
+        assert f1.self is a
+        assert f2.self is a
+        assert f3.self is a
+        assert f4.self is a
+        assert ppg.global_pipegraph.has_edge(f1.invariant, a)
+        assert ppg.global_pipegraph.has_edge(f2.invariant, a)
+        assert ppg.global_pipegraph.has_edge(f3.invariant, a)
+        assert ppg.global_pipegraph.has_edge(f4.invariant, a)
+        with pytest.raises(ValueError):
+            a.depends_on_func('open')
+
+
+
+
+
 
 
 

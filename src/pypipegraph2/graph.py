@@ -18,9 +18,8 @@ from .exceptions import _RunAgain
 from rich.logging import RichHandler
 
 
-
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
-logger.configure(handlers=[{"sink":RichHandler(markup=True), "format":"{message}"}])
+logger.configure(handlers=[{"sink": RichHandler(markup=True), "format": "{message}"}])
 
 
 class ALL_CORES:
@@ -44,14 +43,14 @@ class PyPipeGraph:
         run_mode: RunMode,
         paths: Optional[Dict[str, Union[Path, str]]] = None,
         allow_short_filenames=False,
-        log_retention = None
+        log_retention=None,
     ):
 
         if cores is ALL_CORES:
             self.cores = CPUs()
         else:
             self.cores = int(cores)
-        self.time_str = time.strftime('%Y-%m-%d_%H-%M-%S')
+        self.time_str = time.strftime("%Y-%m-%d_%H-%M-%S")
         if log_dir:
             self.log_dir = Path(log_dir)
         else:
@@ -64,7 +63,7 @@ class PyPipeGraph:
         self.run_dir = Path(run_dir)
         self.log_level = log_level
         self.log_retention = log_retention
-        #self.paths = {k: Path(v) for (k, v) in paths} if paths else {}
+        # self.paths = {k: Path(v) for (k, v) in paths} if paths else {}
         self.run_mode = run_mode
         self.jobs = {}  # the job objects, by id
         self.job_dag = (
@@ -88,18 +87,18 @@ class PyPipeGraph:
         else:
             # print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
             pass
+        start_time = time.time()
         self.fill_dependency_callbacks()
         if self.error_dir:
             self.error_dir.mkdir(exist_ok=True, parents=True)
         if self.log_dir:
             self.log_dir.mkdir(exist_ok=True, parents=True)
             fn = Path(sys.argv[0]).name
-            logger.add(
-                self.log_dir / f"{fn}-{self.time_str}.log", level=self.log_level
-            )
-            if self.log_level != 20: #logging.INFO:
+            logger.add(self.log_dir / f"{fn}-{self.time_str}.log", level=self.log_level)
+            if self.log_level != 20:  # logging.INFO:
                 logger.add(sink=sys.stdout, level=self.log_level)
             import threading
+
             logger.info(
                 f"Run is go {threading.get_ident()} pid: {os.getpid()}, run_id {self.run_id}"
             )
@@ -122,14 +121,19 @@ class PyPipeGraph:
                     result = runner.run(self.run_id, result)
                     self.run_id += 1
                     self.update_history(result, history)
+                    self.log_runtimes(result, start_time)
                     break
                 except _RunAgain as e:
                     result = e.args[0]
                     self.update_history(e.args[0], history)
+                    self.log_runtimes(result, start_time)
                     pass
             for job_id, job_state in result.items():
                 if job_state.state == JobState.Failed:
-                    if raise_on_job_error and not "At least one job failed" in self.do_raise:
+                    if (
+                        raise_on_job_error
+                        and not "At least one job failed" in self.do_raise
+                    ):
                         self.do_raise.append("At least one job failed")
             self.last_run_result = result
             if self.do_raise:
@@ -141,7 +145,6 @@ class PyPipeGraph:
                 self._print_failures()
             self._restore_signals()
 
-
     def cleanup_logs(self):
         if not self.log_dir or self.log_retention is None:
             return
@@ -149,7 +152,7 @@ class PyPipeGraph:
         pattern = f"{fn}-*.log"
         files = sorted(self.log_dir.glob(pattern))
         if len(files) > self.log_retention:
-            remove = files[:-self.log_retention]
+            remove = files[: -self.log_retention]
             for f in remove:
                 os.unlink(f)
 
@@ -158,11 +161,9 @@ class PyPipeGraph:
             return
         err_dirs = sorted([x for x in self.error_dir.parent.glob("*") if x.is_dir()])
         if len(err_dirs) > self.log_retention:
-            remove = err_dirs[:-self.log_retention]
+            remove = err_dirs[: -self.log_retention]
             for f in remove:
                 shutil.rmtree(f)
-
-
 
     def update_history(self, job_results, history):
         # we must keep the history of jobs unseen in this run.
@@ -185,8 +186,23 @@ class PyPipeGraph:
                 self.save_historical(new_history)
                 done = True
             except KeyboardInterrupt as e:
-                self.do_raise.append(e) 
+                self.do_raise.append(e)
                 pass
+
+    def log_runtimes(self, job_results, run_start_time):
+        if self.log_dir:
+            rt_file = self.log_dir / "runtimes.tsv"
+            lines = []
+            if not rt_file.exists():
+                lines.append("jobid\trun_start_time\truntime_s")
+            for job_id, job_result in job_results.items():
+                if job_result.state is JobState.Executed:
+                    if job_result.run_time >= 1:
+                        lines.append(
+                            f"{job_id}\t{int(run_start_time)}\t{job_result.run_time:.2}"
+                        )
+            with open(rt_file, 'a+') as op:
+                op.write("\n".join(lines))
 
     def _get_history_fn(self):
         fn = Path(sys.argv[0]).name
@@ -251,7 +267,7 @@ class PyPipeGraph:
         logger.trace("save_historical")
         fn = self._get_history_fn()
         if Path(fn).exists():
-            fn.rename(fn.with_suffix(fn.suffix + '.backup'))
+            fn.rename(fn.with_suffix(fn.suffix + ".backup"))
         raise_keyboard_interrupt = False
         raise_run_failed_internally = False
         with open(fn, "wb") as op:
@@ -315,6 +331,7 @@ class PyPipeGraph:
 
         def hup(*args, **kwargs):  # pragma: no cover
             logger.debug("user logged off - continuing run")
+
         def sigint(*args, **kwargs):
             logger.info("CTRL-C has been disabled")
 
@@ -325,13 +342,13 @@ class PyPipeGraph:
 
     def _restore_signals(self):
         logger.trace("_restore_signals")
-        if hasattr(self, '_old_signal_hup'):
+        if hasattr(self, "_old_signal_hup"):
             signal.signal(signal.SIGHUP, self._old_signal_hup)
-        if hasattr(self, '_old_signal_int'):
-                signal.signal(signal.SIGINT, self._old_signal_int)
+        if hasattr(self, "_old_signal_int"):
+            signal.signal(signal.SIGINT, self._old_signal_int)
         else:
             pass
-            #raise ValueError("WHen does this happen")
+            # raise ValueError("WHen does this happen")
 
     def add(self, job):
 

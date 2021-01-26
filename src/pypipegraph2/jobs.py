@@ -369,9 +369,6 @@ class MultiFileGeneratingJob(Job):
                         finally:
                             os._exit(1)
                 else:
-                    with open("/home/finkernagel/t.txt", 'a') as op:
-                        op.write(f"Child pid {pid}, my_pid {os.getpid()}\n")
-                    logger.info(f"Child pid {pid}")
                     _, waitstatus = os.waitpid(pid, 0)
                     if os.WIFEXITED(waitstatus):
                         # normal termination.

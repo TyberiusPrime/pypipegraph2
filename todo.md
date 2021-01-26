@@ -11,8 +11,6 @@ Open stuff
 	
 	- interactive stuff
 	
-	- pretty and usable and appending runtime logging.
-	 including runtimes
 
 	- what happens when you run a partial graph somewhere else without access to
 	  the original history? The FunctionInvariants clobber everything.
@@ -41,6 +39,5 @@ Open stuff
 	- 
 	- write test case with our regular object structure
 	- 
-	- make depend_on_function passable by name only (what did I want to say with this?)
 	- 
 	- prevent stalling if a bunch of ALL_CORES jobs hog all the threads, no SINGLE_CORE jobs will be running.
