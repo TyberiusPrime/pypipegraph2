@@ -192,7 +192,7 @@ class TestPathLib:
     def test_multifilegenerating_job_requires_string_filenames(self):
         import pathlib
 
-        x = lambda: 5  # noqa:E731
+        x = lambda of: 5  # noqa:E731
         ppg.MultiFileGeneratingJob(["a"], x)
         ppg.MultiFileGeneratingJob([pathlib.Path("a")], x)
 
@@ -283,7 +283,7 @@ def test_job_or_filename(ppg_per_test):
     assert a == Path("out/A")
     assert len(dep_a) == 1
     assert isinstance(dep_a[0], ppg.FileInvariant)
-    j = ppg.FileGeneratingJob("out/B", lambda: None)
+    j = ppg.FileGeneratingJob("out/B", lambda of: None)
     b, dep_b = ppg.util.job_or_filename(j)
     assert b == Path("out/B")
     assert dep_b[0] is j
@@ -320,7 +320,7 @@ def test_dataloading_job_changing_cwd(ppg_per_test):
         Path("b").write_text("world")
         return 55
 
-    a = ppg.FileGeneratingJob("a", lambda: Path("a").write_text("hello"))
+    a = ppg.FileGeneratingJob("a", lambda of: of.write_text("hello"))
     b = ppg.DataLoadingJob("b", load)
     a.depends_on(b)
     with pytest.raises(ppg.RunFailed):
@@ -338,7 +338,7 @@ def test_job_generating_job_changing_cwd(ppg_per_test):
         Path("b").write_text("world")
         return 55
 
-    a = ppg.FileGeneratingJob("a", lambda: Path("a").write_text("hello"))
+    a = ppg.FileGeneratingJob("a", lambda of: Path("a").write_text("hello"))
     b = ppg.JobGeneratingJob("b", load)
     a.depends_on(b)
     with pytest.raises(ppg.RunFailed):

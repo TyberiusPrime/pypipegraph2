@@ -7,16 +7,16 @@ from .shared import write
 class TestCycles:
     def test_simple_cycle(self):
         with pytest.raises(ppg.exceptions.NotADag):
-            jobA = ppg.FileGeneratingJob("A", lambda: write("A", "A"))
-            jobB = ppg.FileGeneratingJob("B", lambda: write("B", "A"))
+            jobA = ppg.FileGeneratingJob("A", lambda of: write("A", "A"))
+            jobB = ppg.FileGeneratingJob("B", lambda of: write("B", "A"))
             jobA.depends_on(jobB)
             jobB.depends_on(jobA)
             # ppg.run()
 
     def test_indirect_cicle(self):
-        jobA = ppg.FileGeneratingJob("A", lambda: write("A", "A"))
-        jobB = ppg.FileGeneratingJob("B", lambda: write("B", "A"))
-        jobC = ppg.FileGeneratingJob("C", lambda: write("C", "A"))
+        jobA = ppg.FileGeneratingJob("A", lambda of: write("A", "A"))
+        jobB = ppg.FileGeneratingJob("B", lambda of: write("B", "A"))
+        jobC = ppg.FileGeneratingJob("C", lambda of: write("C", "A"))
         jobC.depends_on(jobB)
         jobB.depends_on(jobA)
         jobA.depends_on(jobC)
@@ -29,7 +29,7 @@ class TestCycles:
         # this raises
         jobs = []
         for x in range(0, max_depth - 1):
-            j = ppg.FileGeneratingJob(str(x), lambda: write(str(x), str(x)))
+            j = ppg.FileGeneratingJob(str(x), lambda of: write(str(x), str(x)))
             if jobs:
                 j.depends_on(jobs[-1])
             jobs.append(j)
@@ -41,7 +41,7 @@ class TestCycles:
         ppg.new()
         jobs = []
         for x in range(0, max_depth + 100):
-            j = ppg.FileGeneratingJob(str(x), lambda: write(str(x), str(x)))
+            j = ppg.FileGeneratingJob(str(x), lambda of: write(str(x), str(x)))
             if jobs:
                 j.depends_on(jobs[-1])
             jobs.append(j)

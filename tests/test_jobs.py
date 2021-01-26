@@ -871,7 +871,7 @@ class TestDataLoadingJob:
         o = Dummy()
         of = "out/A"
 
-        def write():
+        def write(of):
             write(of, o.a)
 
         def load():
@@ -1110,7 +1110,8 @@ class TestAttributeJob:
         fgjob = ppg.FileGeneratingJob(of, do_write).depends_on(job)
         of2 = "out/B"
 
-        def later_write():
+        def later_write(of2):
+            raise ValueError()
             write(of2, o.a)
 
         # might be pure luck that this job runs after the cleanup

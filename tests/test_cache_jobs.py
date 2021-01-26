@@ -330,7 +330,7 @@ class TestCachedAttributeJob:
         jobA, cache_job = ppg.CachedAttributeLoadingJob(
             "A", o, "shu", lambda: write("out/A", "shu")
         )
-        jobB = ppg.FileGeneratingJob("B", lambda: write("out/B", "shu"))
+        jobB = ppg.FileGeneratingJob("B", lambda of: write("out/B", "shu"))
         assert jobA.depends_on(jobB) is jobA
 
     def test_passing_non_function(self):

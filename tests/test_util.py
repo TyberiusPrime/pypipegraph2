@@ -119,9 +119,9 @@ class TestUtils:
 
     def test_flatten_jobs(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
-        j1 = ppg.FileGeneratingJob("A", lambda: "A")
-        j2 = ppg.FileGeneratingJob("B", lambda: "B")
-        j3 = ppg.FileGeneratingJob("B", lambda: "C")
+        j1 = ppg.FileGeneratingJob("A", lambda of: "A")
+        j2 = ppg.FileGeneratingJob("B", lambda of: "B")
+        j3 = ppg.FileGeneratingJob("B", lambda of: "C")
         res = [j1, [j2, [j3, j1]]]
         # no dedup on this.
         assert list(ppg.util.flatten_jobs(res)) == [j1, j2, j3, j1]

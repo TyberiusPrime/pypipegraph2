@@ -143,6 +143,8 @@ class Job:
                 self.dependency_callbacks.append(other_job)
                 return self
             else:
+                if isinstance(other_job, Path):
+                    other_job = str(other_job)
                 o_job = global_pipegraph.jobs[
                     global_pipegraph.outputs_to_job_ids[other_job]
                 ]
@@ -237,7 +239,7 @@ class MultiFileGeneratingJob(Job):
     job_kind = JobKind.Output
 
     def __new__(cls, files, *args, **kwargs):
-        files = cls._validate_files_argument(files)
+        files = cls._validate_files_argument(files)[0]
         return Job.__new__(cls, [str(x) for x in files])
 
     def __init__(
@@ -252,7 +254,7 @@ class MultiFileGeneratingJob(Job):
 
         self.generating_function = self._validate_func_argument(generating_function)
         self.depend_on_function = depend_on_function
-        self.files = self._validate_files_argument(files)
+        self.files, self.lookup = self._validate_files_argument(files)
         if len(self.files) != len(set(self.files)):
             raise ValueError(
                 "Paths were present multiple times in files argument. Fix your input"
@@ -264,27 +266,42 @@ class MultiFileGeneratingJob(Job):
         self.stdout = "not captured"
         self.stderr = "not captured"
 
+    def __getitem__(self, key):
+        if not self.lookup:
+            raise ValueError(f"{self.job_id} has no lookup dictionary - files was not a dict")
+        return self.lookup[key]
+
     @staticmethod
     def _validate_func_argument(func):
         sig = inspect.signature(func)
         if  len(sig.parameters) == 0:
             raise TypeError("A *FileGeneratingJobs callback function must take at least one parameter: The file(s) to create")
+        return func
 
 
     @staticmethod
     def _validate_files_argument(files):
         if not hasattr(files, "__iter__"):
             raise TypeError("files was not iterable")
-        if isinstance(files, (str, Path)):
-            raise TypeError(
-                "files must not be a single string or Path, but an iterable"
-            )
+        if isinstance(files, (str, Path)):                                                                           
+            raise TypeError(                                                                                         
+                "files must not be a single string or Path, but an iterable"                                         
+            )                                                                                                        
+        if isinstance(files, dict):                                                                                  
+            lookup = list(files.keys())                                                                              
+            org_files = list(files.values())                                                                         
+            files = org_files
+        else:
+            lookup = None
         for f in files:
             if not isinstance(f, (str, Path)):
                 raise TypeError("Files for (Multi)FileGeneratingJob must be Path/str")
+        abs_files = [Path(x).resolve().relative_to(Path(".").absolute()) for x in files]
+        if lookup:
+            lookup = {lookup[ii]: abs_files[ii] for ii in range(len(lookup))}
         return sorted(
-            [Path(x).resolve().relative_to(Path(".").absolute()) for x in files]
-        )
+            abs_files
+        ), lookup
 
     def readd(self):
         super().readd()
@@ -471,7 +488,10 @@ class MultiFileGeneratingJob(Job):
         if self._single_file:
             return self.files[0]
         else:
-            return self.files
+            if self.lookup:
+                return self.lookup
+            else:
+                return self.files
 
     def output_needed(self, runner):
         for fn in self.files:

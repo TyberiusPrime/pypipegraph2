@@ -1205,7 +1205,7 @@ class TestPypipegraph2:
         assert seen == set(["0", "1", "2"])
 
     def test_failing_jobs_and_downstreams(self):
-        def do_a():
+        def do_a(of):
             raise ValueError()
 
         a = ppg.FileGeneratingJob("A", do_a)
@@ -1339,6 +1339,17 @@ class TestPypipegraph2:
     def test_declaring_filegen_with_function_without_parameter_raises_immediatly(self):
         with pytest.raises(TypeError):
             ppg.FileGeneratingJob('A', lambda: None)
+
+    def test_multi_file_generating_job_with_dict_file_definition(self):
+        def ab(files):
+            files['a'].write_text('A')
+            files['b'].write_text('A')
+        a = ppg.MultiFileGeneratingJob({'a': 'A', 'b': 'B'}, ab)
+        b = ppg.FileGeneratingJob('c', lambda of: of.write_text(a['a'].read_text()))
+        b.depends_on(a['a'])
+        ppg.run()
+
+
 
 
 

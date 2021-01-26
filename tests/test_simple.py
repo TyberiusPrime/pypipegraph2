@@ -27,7 +27,7 @@ class TestSimple:
             ppg.FileGeneratingJob("A", lambda: None)
 
     def test_using_after_destruction(self):
-        a = ppg.FileGeneratingJob("A", lambda: None)
+        a = ppg.FileGeneratingJob("A", lambda of: None)
         destroy_global_pipegraph()
         with pytest.raises(ValueError):
             a.readd()
