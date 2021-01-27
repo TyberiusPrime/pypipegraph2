@@ -14,7 +14,7 @@ class TestPypipegraph2:
         ppg.run()
         assert Path("A").read_text() == "Done"
 
-    def test_very_simple_chain(self):
+    def test_very_simple_chain(self, job_trace_log):
         assert not Path("A").exists()
         assert not Path("B").exists()
         jobA = ppg.FileGeneratingJob("A", lambda of: of.write_text("AAA"))

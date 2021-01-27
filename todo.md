@@ -8,7 +8,6 @@ Open stuff
 	
 	- general api polishing
 	 
-	- tests depending on partial MultiTempfile output 
 	
 	- interactive stuff
 	
@@ -30,11 +29,14 @@ Open stuff
 	 
   
 	- jobs overwriting the files of other jobs (without declaring so!)
+	  a hard problem, with little payoff?
 	- 
-
 	- command runner job? kind of a replacement for mbf_externals.ExternalAlgorithm
-	- 
+	 
 	- write test case with our regular object structure
-	- 
-	- 
+	 
+	 
 	- prevent stalling if a bunch of ALL_CORES jobs hog all the threads, no SINGLE_CORE jobs will be running.
+
+	-ppg1 compability layer
+	
