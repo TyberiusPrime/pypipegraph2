@@ -209,7 +209,6 @@ class Runner:
         def is_initial(job_id):
             return (
                 not self.job_inputs[job_id]
-                # and not self.jobs[job_id].is_temp_job() # what is wrong with starting with a temp job?
                 and self.jobs[job_id].output_needed(self)
                 and not self.job_failed_last_time(job_id)
             )
@@ -218,7 +217,6 @@ class Runner:
             return (
                 (
                     not self.job_inputs[job_id]
-                    # and not self.jobs[job_id].is_temp_job()
                     and not self.jobs[job_id].output_needed(self)
                 )
                 # or self.job_states[job_id].state == JobState.Failed
@@ -230,7 +228,6 @@ class Runner:
         initial_job_ids = [x for x in job_ids_topological if is_initial(x)]
         # for job_id in job_ids_topological:
         # logger.info(f"{job_id} - inputs - {escape_logging(self.job_inputs[job_id])}")
-        # logger.info(f"{job_id} - istemp - {self.jobs[job_id].is_temp_job()}")
         # logger.info(f"{job_id} - outputneeded - {self.jobs[job_id].output_needed(self)}")
         # if not initial_job_ids:
         # if self.jobs:
@@ -381,11 +378,13 @@ class Runner:
                     old_input
                 ):  # we lost or gained an input -> invalidate
                     logger.job_trace(
-                        f"{downstream_id} No of inputs changed _> invalidated"
+                        f"{downstream_id} No of inputs changed _> invalidated {len(new_input)}, {len(old_input)}"
                     )
                     invalidated = True
                 else:  # same length.
-                    if old_input.keys() == new_input.keys():  # nothing possibly renamed
+                    if set(old_input.keys()) == set(
+                        new_input.keys()
+                    ):  # nothing possibly renamed
                         logger.job_trace(f"{downstream_id} Same set of input keys")
                         for key, old_hash in old_input.items():
                             cmp_job = self.jobs[self.outputs_to_job_ids[key]].__class__
@@ -398,10 +397,12 @@ class Runner:
                                 invalidated = True
                                 break
                     else:
-                        used = set()
                         logger.job_trace(f"{downstream_id} differing set of keys")
                         for old_key, old_hash in old_input.items():
                             if old_key in new_input:
+                                logger.job_trace(
+                                    f"key in both old/new {old_key} {escape_logging(old_hash)} {escape_logging(new_input[old_key])}"
+                                )
                                 cmp_job = self.jobs[
                                     self.outputs_to_job_ids[old_key]
                                 ].__class__
@@ -414,33 +415,19 @@ class Runner:
                                     invalidated = True
                                     break
                             else:
-                                for new_key, new_hash in new_input.items():
-                                    logger.job_trace(
-                                        f"{downstream_id} matched inputs: {old_key}, {new_key}"
-                                    )
-                                    # we could do this, handling even more cases, but it would expose the compare_histories
-                                    # to possibly comparing jobs that are not the same JobClass.
-                                    # let's not open that particular can of worms
-                                    # if self.compare_history(old_hash, new_hash, downstream_job.__class__):
-                                    if new_hash == old_hash:
-                                        if (
-                                            new_key in used
-                                        ):  # multiple matches... better safe than sorry
-                                            logger.job_trace(
-                                                f"{downstream_id} {new_key} used multiple ntimes -> invalidate"
-                                            )
-                                            invalidated = True
-                                        used.add(new_key)
-                                        break  # either awy, we found a match for this old_key
-                                    #else:  # this made no sense
-                                        #logger.job_trace(
-                                            #f"{downstream_id} {old_key}, {new_key} invalidated"
-                                        #)
-                                        #invalidated = True
-                                else:  # no match -> invalidate
-                                    logger.job_trace(
-                                        f"{downstream_id} Could not match {old_key})"
-                                    )
+                                # we compare on identity here. Changing file names and hashing methods at once,
+                                # what happens if you change the job class as well... better to stay on the easy side
+                                count = dict_values_count(new_input, old_hash)
+                                if count:
+                                    if count > 1:
+                                        logger.job_trace(
+                                            f"{downstream_id} {old_key} mapped to multiple possible replacement hashes. Invalidating to be better safe than sorry"
+                                        )
+                                        invalidated = True
+                                        break
+                                    # else:
+                                    # pass # we found a match
+                                else:  # no match found
                                     invalidated = True
                                     break
                         logger.job_trace(f"{downstream_id} invalidated: {invalidated}")
@@ -452,29 +439,20 @@ class Runner:
                     downstream_job.job_kind is JobKind.Temp
                     and downstream_state.validation_state is ValidationState.Invalidated
                 ):
-                    logger.job_trace(f"{downstream_id} was Temp")
                     if self.job_has_non_temp_somewhere_downstream(downstream_id):
-                        if self.job_failed_last_time(downstream_id):
-                            self.push_event("JobFailed", (downstream_id, downstream_id))
-                            self.job_states[downstream_id].error = self.last_job_states[
-                                downstream_id
-                            ].error
-                        else:
-                            self.push_event("JobReady", (downstream_id,), 3)
+                        self._ready_or_failed(downstream_id)
                     else:
-                        self.push_event("JobSkipped", (downstream_id,), 3)
+                        # I actually don't think we ever visit this case
+                        # even a temp job without downstreams has a cleanup job associated, right?
+                        raise NotImplementedError(
+                            "Did not expect to go down this case"
+                        )  # pragma: no cover
+                        # self.push_event("JobSkipped", (downstream_id,), 3)
                 elif (
                     downstream_state.validation_state is ValidationState.Invalidated
                     or downstream_job.output_needed(self)
                 ):
-                    if self.job_failed_last_time(downstream_id):
-                        self.push_event("JobFailed", (downstream_id, downstream_id))
-                        self.job_states[downstream_id].error = self.last_job_states[
-                            downstream_id
-                        ].error
-                    else:
-                        self.push_event("JobReady", (downstream_id,), 3)
-                    # todo: do I need to do this for loading jobs that are lacking downstream? check me, there is a test case I broke for this...
+                    self._ready_or_failed(downstream_id)
                 else:
                     if downstream_job.job_kind is JobKind.Cleanup:
                         if (
@@ -486,15 +464,7 @@ class Runner:
                             downstream_state.validation_state = (
                                 ValidationState.Invalidated
                             )
-                            if self.job_failed_last_time(downstream_id):
-                                self.push_event(
-                                    "JobFailed", (downstream_id, downstream_id)
-                                )
-                                self.job_states[
-                                    downstream_id
-                                ].error = self.last_job_states[downstream_id].error
-                            else:
-                                self.push_event("JobReady", (downstream_id,), 3)
+                            self._ready_or_failed(downstream_id)
                         else:
                             downstream_state.validation_state = (
                                 ValidationState.Validated
@@ -503,6 +473,14 @@ class Runner:
                     else:
                         downstream_state.validation_state = ValidationState.Validated
                         self.push_event("JobSkipped", (downstream_id,), 3)
+
+    def _ready_or_failed(self, job_id):
+
+        if self.job_failed_last_time(job_id):
+            self.push_event("JobFailed", (job_id, job_id))
+            self.job_states[job_id].error = self.last_job_states[job_id].error
+        else:
+            self.push_event("JobReady", (job_id,), 3)
 
     def job_failed_last_time(self, job_id):
         res = (
@@ -557,9 +535,7 @@ class Runner:
                 if not first_stack:
                     out.append("")
                     if stack.is_cause:
-                        out.append(
-                            "The above exception was caused by the following one"
-                        )
+                        out.append("The above exception cause to the following one")
                 first_stack = False
                 exc_value = str(stack.exc_value)
                 if len(exc_value) > 1000:
@@ -571,9 +547,9 @@ class Runner:
 
                 for frame in stack.frames:
                     out.append(f'{frame.filename}":{frame.lineno}, in {frame.name}')
-                    if frame.filename.startswith("<"):
-                        render_locals(frame)
-                        continue
+                    # if frame.filename.startswith("<"): # pragma: no cover # - interactive, I suppose
+                        # render_locals(frame)
+                        # continue
                     extra_lines = 3
                     if frame.source:
                         code = frame.source
@@ -588,7 +564,7 @@ class Runner:
                         for ii, line in zip(
                             range(*line_range), code[line_range[0] : line_range[1]]
                         ):
-                            if ii == frame.lineno:
+                            if ii == frame.lineno - 1:
                                 c = "> "
                             else:
                                 c = "  "
@@ -598,8 +574,10 @@ class Runner:
                         continue
                     else:
                         out.append("# no source available")
+                        if frame.locals:
+                            render_locals(frame)
                 out.append(
-                    f"[bold]Exception[/bold] (again): [red][bold]{stack.exc_type}[/bold] {exc_value}[/red]"
+                    f"[bold]Exception[/bold] (repeated from above): [red][bold]{stack.exc_type}[/bold] {exc_value}[/red]"
                 )
         return "\n".join(out)
 
@@ -615,7 +593,7 @@ class Runner:
                     str(job.job_number) + "_exception.txt"
                 )
                 with open(error_file, "w") as ef:
-                    c = Console(file=ef, width=80, record=True)
+                    c = Console(file=ef, record=True)
                     c.print(f"{job_id}\n")
                     c.log(self._format_rich_traceback_fallback(job_state.error.args[1]))
                     # ef.write(self._format_rich_traceback_fallback(job_state.error.args[1]))
@@ -646,7 +624,7 @@ class Runner:
     def push_event(self, event, args, indent=0):
         with self.event_lock:
             logger.opt(depth=1).log(
-                'JobTrace', "\t" * indent + f"->push {event} {args[0]}"
+                "JobTrace", "\t" * indent + f"->push {event} {args[0]}"
             )
             self.events.put((event, args))
 
@@ -671,8 +649,8 @@ class Runner:
             self.fail_downstream(node, source)
 
     def compare_history(self, old_hash, new_hash, job_class):
-        if old_hash is None:
-            return False
+        # if old_hash is None:
+            # return False
         return job_class.compare_hashes(old_hash, new_hash)
 
     def job_has_non_temp_somewhere_downstream(self, job_id):
@@ -683,7 +661,7 @@ class Runner:
             else:
                 if self.job_has_non_temp_somewhere_downstream(downstream_id):
                     return True
-        return False
+        return False  # pragma: no cover - apperantly we never call this with a job with no downstreams
 
     def start_job_executing_threads(self):
         for ii in range(self.job_graph.cores):
@@ -705,7 +683,7 @@ class Runner:
                 break
             job = self.jobs[job_id]
             c = job.resources.to_number(self.core_lock.max_cores)
-            logger.info(
+            logger.job_trace(
                 f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {self.jobs_in_flight}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
             )
             if c > 1:
@@ -724,9 +702,9 @@ class Runner:
                     )
                     self.start_another_thread()
 
-            logger.info(f"wait for {job_id}")
+            logger.job_trace(f"wait for {job_id}")
             with self.core_lock.using(c):
-                logger.info(f"Go {job_id}")
+                logger.job_trace(f"Go {job_id}")
                 job_state = self.job_states[job_id]
                 try:
                     logger.job_trace(f"\tExecuting {job_id}")
@@ -765,13 +743,14 @@ class Runner:
                     e = job_state.error
                     self.push_event("JobFailed", (job_id, job_id))
                 finally:
-                    logger.info(f"end {job_id}")
+                    logger.job_trace(f"end {job_id}")
                     self.jobs_in_flight -= 1
                     if c > 1:
                         self.jobs_all_cores_in_flight -= 1
 
 
 class JobCollector:
+    """only in place during the dag modification step of Runner"""
     def __init__(self, run_mode):
         self.clear()
         self.run_mode = run_mode
@@ -779,9 +758,14 @@ class JobCollector:
     def add(self, job):
         self.jobs[job] = job
 
-    def add_edge(self, upstream_id, downstream_id):
-        self.edges.add((upstream_id, downstream_id))
-
     def clear(self):
         self.jobs = {}
         self.edges = set()
+
+
+def dict_values_count(a_dict, count_this):
+    counter = 0
+    for value in a_dict.values():
+        if value == count_this:
+            counter += 1
+    return counter

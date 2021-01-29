@@ -184,6 +184,12 @@ class TestInvariant:
             read(of) == "shu"
         )  # job does not get rerun - filetime invariant is now filechecksum invariant...
 
+    def test_file_did_not_exist(self):
+        ppg.FileInvariant('shu')
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert 'did not exist' in str(ppg.global_pipegraph.last_run_result['shu'].error)
+
     def test_filechecksum_dependency_raises_on_too_short_a_filename(self):
         ppg.global_pipegraph.allow_short_filenames = False
         with pytest.raises(ValueError):
@@ -799,6 +805,7 @@ class TestFunctionInvariant:
 
     def test_passing_none_as_function_is_ok(self, create_out_dir):
         job = ppg.FunctionInvariant("out/a", None)
+        str(job)
         jobB = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))
         jobB.depends_on(job)
         ppg.run()
@@ -1000,6 +1007,21 @@ class TestFunctionInvariant:
         assert not ppg.FunctionInvariant.compare_hashes(
             a, c, python_version
         )  # different dis, same source
+
+    def test_source_file_mtime_change_without_hash_change(self):
+        import sys
+        def inner():
+            pass
+        python_version = tuple(sys.version_info)[:2]  # we only care about major.minor
+
+        a = ppg.FunctionInvariant('a',inner)
+        calc = a.run(None, None)
+        changed = calc.copy()
+        changed['FIa']['source_file']['mtime'] = -1
+        changed['FIa']['source_file']['dis'] = 'find me'
+        calc2 = a.run(None, changed)
+        assert(calc2['FIa']['source_file']['dis'] == 'find me')
+
 
 
 @pytest.mark.usefixtures("create_out_dir")

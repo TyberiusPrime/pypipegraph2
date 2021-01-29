@@ -8,6 +8,7 @@ import pickle
 import signal
 import networkx
 import time
+import datetime
 from pathlib import Path
 from loguru import logger
 from . import exceptions
@@ -20,6 +21,8 @@ from rich.logging import RichHandler
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
 logger.configure(handlers=[{"sink": RichHandler(markup=True), "format": "{message}"}])
+
+time_format = "%Y-%m-%d_%H-%M-%S"
 
 
 class ALL_CORES:
@@ -50,13 +53,12 @@ class PyPipeGraph:
             self.cores = CPUs()
         else:
             self.cores = int(cores)
-        self.time_str = time.strftime("%Y-%m-%d_%H-%M-%S")
         if log_dir:
             self.log_dir = Path(log_dir)
         else:
             self.log_dir = None
         if error_dir:
-            self.error_dir = error_dir / self.time_str
+            self.error_dir = error_dir
         else:
             self.error_dir = None
         self.history_dir = Path(history_dir)
@@ -81,6 +83,7 @@ class PyPipeGraph:
     def run(
         self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5
     ) -> Dict[str, JobState]:
+        self.time_str = datetime.datetime.now().strftime(time_format)
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
             print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
             raise exceptions.NotADag()
@@ -90,20 +93,20 @@ class PyPipeGraph:
         start_time = time.time()
         self.fill_dependency_callbacks()
         if self.error_dir:
-            self.error_dir.mkdir(exist_ok=True, parents=True)
+            (self.error_dir / self.time_str).mkdir(exist_ok=True, parents=True)
         if self.log_dir:
             self.log_dir.mkdir(exist_ok=True, parents=True)
             fn = Path(sys.argv[0]).name
             logger.add(self.log_dir / f"{fn}-{self.time_str}.log", level=self.log_level)
             if self.log_level != 20:  # logging.INFO:
-                logger.add(sink=sys.stdout, level=self.log_level)
+                logger.add(sink=sys.stdout, level=self.log_level)  # pragma: no cover
             import threading
 
             logger.info(
                 f"Run is go {threading.get_ident()} pid: {os.getpid()}, run_id {self.run_id}"
             )
-            self.cleanup_logs()
-            self.cleanup_errors()
+        self.cleanup_logs()
+        self.cleanup_errors()
         self.history_dir.mkdir(exist_ok=True, parents=True)
         self.run_dir.mkdir(exist_ok=True, parents=True)
         self.do_raise = []
@@ -151,6 +154,8 @@ class PyPipeGraph:
         fn = Path(sys.argv[0]).name
         pattern = f"{fn}-*.log"
         files = sorted(self.log_dir.glob(pattern))
+        print(self.time_str)
+        print("files", files)
         if len(files) > self.log_retention:
             remove = files[: -self.log_retention]
             for f in remove:
@@ -159,7 +164,9 @@ class PyPipeGraph:
     def cleanup_errors(self):
         if not self.error_dir or self.log_retention is None:
             return
-        err_dirs = sorted([x for x in self.error_dir.parent.glob("*") if x.is_dir()])
+        err_dirs = sorted(
+            [x for x in (self.error_dir / self.time_str).parent.glob("*") if x.is_dir()]
+        )
         if len(err_dirs) > self.log_retention:
             remove = err_dirs[: -self.log_retention]
             for f in remove:
@@ -201,7 +208,7 @@ class PyPipeGraph:
                         lines.append(
                             f"{job_id}\t{int(run_start_time)}\t{job_result.run_time:.2}"
                         )
-            with open(rt_file, 'a+') as op:
+            with open(rt_file, "a+") as op:
                 op.write("\n".join(lines))
 
     def _get_history_fn(self):
@@ -381,4 +388,12 @@ class PyPipeGraph:
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)
 
     def has_edge(self, upstream_job, downstream_job):
-        return self.job_dag.has_edge(upstream_job.job_id, downstream_job.job_id)
+        if not isinstance(upstream_job, str):
+            upstream_job_id = upstream_job.job_id
+        else:
+            upstream_job_id = upstream_job
+        if not isinstance(downstream_job, str):
+            downstream_job_id = downstream_job.job_id
+        else:
+            downstream_job_id = downstream_job
+        return self.job_dag.has_edge(upstream_job_id, downstream_job_id)

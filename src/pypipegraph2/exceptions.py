@@ -44,10 +44,7 @@ class _RunAgain(PPGException):
 
 class JobError(PPGException):
     def __init__(self, *args):
-        if args and args[0].__class__.__name__ == 'Trace':
-            import traceback
-            raise ValueError(traceback.format_stack())
-        super().__init__(*args)
+       super().__init__(*args)
 
     def __str__(self):
         return (

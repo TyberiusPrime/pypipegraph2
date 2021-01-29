@@ -417,9 +417,7 @@ class TestPypipegraph2:
 
     def test_tempfile_triggered_by_invalidating_tempfile(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "A",
-            lambda of: of.write_text("A" + counter("a")),
-            depend_on_function=False,
+            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -441,9 +439,7 @@ class TestPypipegraph2:
 
     def test_last_invalidated_tempfile_isolation(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "A",
-            lambda of: of.write_text("A" + counter("a")),
-            depend_on_function=False,
+            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -467,9 +463,7 @@ class TestPypipegraph2:
 
     def test_depending_on_two_temp_jobs_but_only_one_invalidated(self):
         jobA = ppg.TempFileGeneratingJob(
-            "A",
-            lambda of: of.write_text("A" + counter("a")),
-            depend_on_function=False,
+            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -953,6 +947,7 @@ class TestPypipegraph2:
 
     def test_attribute_loading_job(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+
         class TestRecv:
             def __init__(self):
                 self.job = ppg.AttributeLoadingJob(
@@ -984,6 +979,7 @@ class TestPypipegraph2:
 
     def test_cached_attribute_loading_job(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+
         class TestRecv:
             def __init__(self):
                 self.job = ppg.CachedAttributeLoadingJob(
@@ -1023,16 +1019,25 @@ class TestPypipegraph2:
     def test_job_generating(self):
         def inner():  # don't keep it inside, or the FunctionInvariant will trigger each time.
             counter("a")
-            ppg.FileGeneratingJob("B", lambda of: counter("b") and of.write_text("B"))
+            b = ppg.FileGeneratingJob(
+                "B", lambda of: counter("b") and of.write_text("B")
+            )
+            c = ppg.FileGeneratingJob(
+                "C", lambda of: counter("c") and of.write_text("C" + read("B"))
+            )
+            c.depends_on(b)
 
         def gen():
             return ppg.JobGeneratingJob("A", inner)
 
         gen()
         ppg.run()
+        assert ppg.global_pipegraph.has_edge("B", "C")
         assert Path("a").read_text() == "1"
         assert Path("b").read_text() == "1"
+        assert Path("c").read_text() == "1"
         assert Path("B").read_text() == "B"
+        assert Path("C").read_text() == "CB"
 
         # no rerun
         ppg.new()
@@ -1040,14 +1045,18 @@ class TestPypipegraph2:
         ppg.run()
         assert Path("a").read_text() == "2"
         assert Path("b").read_text() == "1"
+        assert Path("c").read_text() == "1"
         assert Path("B").read_text() == "B"
+        assert Path("C").read_text() == "CB"
         ppg.new()
         jobA = gen()
         jobA.depends_on(ppg.ParameterInvariant("PA", "a"))
         ppg.run()
         assert Path("a").read_text() == "3"
         assert Path("b").read_text() == "1"  # this does not mean that B get's rerun.
+        assert Path("c").read_text() == "1"
         assert Path("B").read_text() == "B"
+        assert Path("C").read_text() == "CB"
 
         ppg.new()
         Path("B").unlink()
@@ -1056,7 +1065,9 @@ class TestPypipegraph2:
         ppg.run()
         assert Path("a").read_text() == "4"  # a runs once per ppg.run()
         assert Path("b").read_text() == "2"  # must rerun b, since file B is missing
+        assert Path("c").read_text() == "1"  # but this one is insulated
         assert Path("B").exists()
+        assert Path("C").read_text() == "CB"
 
         ppg.new()
         gen()
@@ -1065,7 +1076,9 @@ class TestPypipegraph2:
             Path("a").read_text() == "5"
         )  # still no rerun - input to A didn't change!
         assert Path("b").read_text() == "2"  # this does not mean that B get's rerun.
+        assert Path("c").read_text() == "1"  # this does not mean that B get's rerun.
         assert Path("B").read_text() == "B"
+        assert Path("C").read_text() == "CB"
 
     def test_job_generating_generated_fails_rerun(self):
         local_counter = [0]
@@ -1260,53 +1273,60 @@ class TestPypipegraph2:
         ppg.new(cores=ppg.default)
         assert ppg.global_pipegraph.cores == ppg.util.CPUs()
 
-
     def test_two_job_failing(self):
         def err(of):
             raise ValueError()
-        ppg.FileGeneratingJob('A', err)
-        ppg.FileGeneratingJob('B', err)
-        ppg.FileGeneratingJob('C', lambda of: write(of,str(of)))
+
+        ppg.FileGeneratingJob("A", err)
+        ppg.FileGeneratingJob("B", err)
+        ppg.FileGeneratingJob("C", lambda of: write(of, str(of)))
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         assert len(ppg.global_pipegraph.do_raise) == 1
-        assert ppg.global_pipegraph.last_run_result['A'].error
-        assert ppg.global_pipegraph.last_run_result['B'].error
-        assert not ppg.global_pipegraph.last_run_result['C'].error
-
+        assert ppg.global_pipegraph.last_run_result["A"].error
+        assert ppg.global_pipegraph.last_run_result["B"].error
+        assert not ppg.global_pipegraph.last_run_result["C"].error
 
     def test_getting_source_after_chdir(self):
         def inner(something):
             return 552341512412
+
         import os
+
         old = os.getcwd()
         try:
-            f = ppg.FunctionInvariant('shu', inner)
-            os.chdir('/tmp')
+            f = ppg.FunctionInvariant("shu", inner)
+            os.chdir("/tmp")
             assert f.get_source_file().is_absolute()
-            assert '552341512412' in f.get_source_file().read_text()
+            assert "552341512412" in f.get_source_file().read_text()
         finally:
             os.chdir(old)
 
-
     def test_massive_exception(self):
-        should_len = (1024 *1024)
+        should_len = 1024 * 1024
+
         def inner(_):
-            raise ValueError("x " * (should_len //2))
-        ppg.FileGeneratingJob('A', inner)
+            raise ValueError("x " * (should_len // 2))
+
+        ppg.FileGeneratingJob("A", inner)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         # make sure we captured it all
-        assert len(ppg.global_pipegraph.last_run_result['A'].error.args[0].args[0]) == should_len
+        assert (
+            len(ppg.global_pipegraph.last_run_result["A"].error.args[0].args[0])
+            == should_len
+        )
 
     def test_depends_on_func(self):
-        a = ppg.FileGeneratingJob('A', lambda of: of.write_text("A"))
+        a = ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
+
         def inner():
             return 55
-        f1 = a.depends_on_func('mylambda1', lambda: 55)
-        f2 = a.depends_on_func('inner', inner)
+
+        f1 = a.depends_on_func("mylambda1", lambda: 55)
+        f2 = a.depends_on_func("inner", inner)
         f3 = a.depends_on_func(inner)
-        f4 = a.depends_on_func(open) # built in
+        f4 = a.depends_on_func(open)  # built in
         assert isinstance(f1.invariant, ppg.FunctionInvariant)
         assert isinstance(f2.invariant, ppg.FunctionInvariant)
         assert isinstance(f3.invariant, ppg.FunctionInvariant)
@@ -1320,42 +1340,316 @@ class TestPypipegraph2:
         assert ppg.global_pipegraph.has_edge(f3.invariant, a)
         assert ppg.global_pipegraph.has_edge(f4.invariant, a)
         with pytest.raises(ValueError):
-            a.depends_on_func('open')
+            a.depends_on_func("open")
 
     def test_partial_running_job(self):
         def a(of):
-            counter('A')
-            with open(of,'w') as op:
+            counter("A")
+            with open(of, "w") as op:
                 op.write("one\n")
                 raise ValueError()
-                op.write("two\n") # pragma: no cover
-        job = ppg.FileGeneratingJob('a', a)
+                op.write("two\n")  # pragma: no cover
+
+        job = ppg.FileGeneratingJob("a", a)
         ppg.run(raise_on_job_error=False)
-        assert read('a') == 'one\n'
-        assert read('A') == '1'
+        assert read("a") == "one\n"
+        assert read("A") == "1"
         ppg.run(raise_on_job_error=False)
-        assert read('A') == '2'
+        assert read("A") == "2"
 
     def test_declaring_filegen_with_function_without_parameter_raises_immediatly(self):
         with pytest.raises(TypeError):
-            ppg.FileGeneratingJob('A', lambda: None)
+            ppg.FileGeneratingJob("A", lambda: None)
 
     def test_multi_file_generating_job_with_dict_file_definition(self):
         def ab(files):
-            files['a'].write_text('A')
-            files['b'].write_text('A')
-        a = ppg.MultiFileGeneratingJob({'a': 'A', 'b': 'B'}, ab)
-        b = ppg.FileGeneratingJob('c', lambda of: of.write_text(a['a'].read_text()))
-        b.depends_on(a['a'])
+            files["a"].write_text("A")
+            files["b"].write_text("A")
+
+        a = ppg.MultiFileGeneratingJob({"a": "A", "b": "B"}, ab)
+        b = ppg.FileGeneratingJob("c", lambda of: of.write_text(a["a"].read_text()))
+        b.depends_on(a["a"])
+        ppg.run()
+        with pytest.raises(ValueError):
+            d = ppg.MultiFileGeneratingJob(["d"], lambda of: None)
+            d["shu"]
+
+    def test_no_error_dir(self):
+        ppg.new(error_dir=None)
+        try:
+            ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
+
+            def b(of):
+                raise ValueError()
+
+            ppg.FileGeneratingJob("B", b)
+            with pytest.raises(ppg.RunFailed):
+                ppg.run()
+        finally:
+            del ppg._last_new_arguments["error_dir"]  # reset to default
+
+    def test_no_logs(self):
+        ppg.new(log_dir=None)
+        try:
+            ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
+
+            def b(of):
+                raise ValueError()
+
+            ppg.FileGeneratingJob("B", b)
+            with pytest.raises(ppg.RunFailed):
+                ppg.run()
+        finally:
+            del ppg._last_new_arguments["log_dir"]  # reset to default
+
+    def test_log_retention(self):
+        old_timeformat = ppg.graph.time_format
+        try:
+            ppg.graph.time_format = (
+                "%Y-%m-%d_%H-%M-%S-%f"  # we need subsecond resolution for this test.
+            )
+            ppg.new(log_retention=1)
+            ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
+            assert len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 0
+            ppg.run()
+            assert (
+                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 1 + 1
+            )  # runtimes
+            ppg.run()
+            assert (
+                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 1 + 1
+            )  # runtimes
+            ppg.new(log_retention=2)
+            ppg.run()
+            prior = list(ppg.global_pipegraph.log_dir.glob("*"))
+            assert (
+                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 2 + 1
+            )  # runtimes
+            # no new.. still new log file please
+            ppg.run()
+            after = list(ppg.global_pipegraph.log_dir.glob("*"))
+            assert (
+                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 2 + 1
+            )  # runtimes
+            assert set([x.name for x in prior]) != set([x.name for x in after])
+
+        finally:
+            del ppg._last_new_arguments["log_retention"]
+            ppg.graph.time_format = old_timeformat
+
+    def test_nested_exception_traceback(self):
+        def a():
+            try:
+                raise ValueError()
+            except ValueError as e:
+                raise KeyError() from e
+
+        ppg.DataLoadingJob("a", a)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        e = (ppg.global_pipegraph.error_dir / "0_exception.txt").read_text()
+        assert "KeyError" in e
+        assert "ValueError" in e
+        assert e.index("ValueError") < e.index("KeyError")
+        assert "cause" in e
+
+    def test_renaming_input_while_invalidating_other(self):
+        a = ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
+        b = ppg.FileGeneratingJob("B", lambda of: of.write_text("B"))
+
+        def C(of):
+            counter("C")
+            of.write_text(a.files[0].read_text() + b.files[0].read_text())
+
+        c = ppg.FileGeneratingJob(
+            "c", C, depend_on_function=False
+        )  # otherwise renaming the input job will trigger already.
+        c.depends_on(a, b)
+        ppg.run()
+        assert read("C") == "1"
+        assert read("c") == "AB"
+        ppg.new()
+        a = ppg.FileGeneratingJob("A1", lambda of: of.write_text("A"))
+        b = ppg.FileGeneratingJob("B", lambda of: of.write_text("B"))
+        c = ppg.FileGeneratingJob("c", C, depend_on_function=False)
+        c.depends_on(a, b)
+        ppg.run()  # no rerun, changed name detection.
+        assert read("C") == "1"
+        assert read("c") == "AB"
+        ppg.new()
+        a = ppg.FileGeneratingJob("A2", lambda of: of.write_text("A"))
+        b = ppg.FileGeneratingJob("B", lambda of: of.write_text("B2"))
+        c = ppg.FileGeneratingJob("c", C, depend_on_function=False)
+        c.depends_on(a, b)
+        ppg.run()  # rerun, not because of the name change, but because b2 changed
+        assert read("C") == "2"
+        assert read("c") == "AB2"
+
+    def test_renaming_maps_to_muliple(self, job_trace_log):
+        a = ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
+        b = ppg.FileGeneratingJob("B", lambda of: of.write_text("A"))
+        d = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text("c"))
+        d.depends_on(a, b)
+        ppg.run()
+        assert read("c") == "1"
+        ppg.new()
+        a = ppg.FileGeneratingJob("A1", lambda of: of.write_text("A"))
+        b = ppg.FileGeneratingJob("B", lambda of: of.write_text("A"))
+        d = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text("c"))
+        d.depends_on(a, b)
+
+        ppg.run()
+        assert read("c") == "2"
+
+    def test_chained_failing_temps(self):
+        def a(of):
+            of.write_text("A")
+
+        def b(of):
+            of.write_text(Path("A").read_text())
+            raise ValueError()
+
+        def c(of):
+            of.write_text(Path("B").read_text())
+
+        a = ppg.TempFileGeneratingJob("A", a)
+        b = ppg.TempFileGeneratingJob("B", b)
+        c = ppg.FileGeneratingJob("C", c)
+        d = ppg.JobGeneratingJob(
+            "D",
+            lambda: counter("D")
+            and ppg.FileGeneratingJob("E", lambda of: of.write_text("E")),
+        )
+        b.depends_on(a)
+        c.depends_on(b)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert read("D") == "1"
+
+    def test_chained_failing_temps_no_downstream(self):
+        def a(of):
+            raise ValueError()
+            of.write_text("A")
+
+        def b(of):
+            of.write_text(Path("A").read_text())
+
+        def c(of):
+            of.write_text(Path("B").read_text())
+
+        a = ppg.TempFileGeneratingJob("A", a)
+        b = ppg.TempFileGeneratingJob("B", b)
+        c = ppg.TempFileGeneratingJob("C", c)
+        d = ppg.JobGeneratingJob(
+            "D",
+            lambda: counter("D")
+            and ppg.FileGeneratingJob("E", lambda of: of.write_text("E")),
+        )
+        b.depends_on(a)
+        c.depends_on(b)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert read("D") == "1"
+
+    def test_no_source_traceback(self):
+        def a():
+            import pandas
+
+            df = pandas.DataFrame()
+            df["shu"]
+
+        ppg.DataLoadingJob("a", a)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        e = (ppg.global_pipegraph.error_dir / "0_exception.txt").read_text()
+        assert "# no source available" in e
+        assert "KeyError" in e
+
+    def test_redefining_with_different_type(self):
+        a = ppg.FileGeneratingJob("a", lambda of: of.write_text(str(of)))
+        with pytest.raises(ValueError):
+            ppg.JobGeneratingJob("a", lambda: None)
+
+    def test_file_gen_job_running_here(self):
+        tracker = []
+
+        def a(of):
+            of.write_text("a")
+            tracker.append("a")
+
+        ppg.FileGeneratingJob("a", a, resources=ppg.Resources.RunsHere)
+        ppg.run()
+        assert read("a") == "a"
+        assert len(tracker) == 1
+
+    def test_unlink_on_invalidation(self):
+        Path("a").write_text("shu")
+
+        def inner(of):
+            assert not of.exists()
+            of.write_text("a")
+
+        a = ppg.FileGeneratingJob("a", inner)
+        ppg.run()
+        ppg.new()
+
+        def inner(of):
+            assert not of.exists()
+            of.write_text("b")
+
+        a = ppg.FileGeneratingJob("a", inner)
         ppg.run()
 
+    def test_func_equals_none(self):
+        a = ppg.FileGeneratingJob("a", lambda of: of.write_text(str(of)), depend_on_function=False)
+        a.depends_on(ppg.FunctionInvariant('myFunc', None))
+        ppg.run()
+        ppg.run()
+        ppg.FunctionInvariant('myFunc', None) # that one is ok, not a redef
+        with pytest.raises(ppg.JobRedefinitionError):
+            ppg.FunctionInvariant('myFunc', lambda: 5)
+        with pytest.raises(ppg.JobRedefinitionError):
+            ppg.FunctionInvariant('myFunc', open)
+        ppg.FunctionInvariant('build', open)
+        with pytest.raises(ppg.JobRedefinitionError):
+            ppg.FunctionInvariant('build', lambda: 5)
+        l = lambda: 5
+        ppg.FunctionInvariant('lamb', l)
+        ppg.FunctionInvariant('lamb', l)
+        with pytest.raises(ppg.JobRedefinitionError):
+            ppg.FunctionInvariant('build', open)
 
 
 
+    def test_funcinvariant_mixing_function_types_none(self, job_trace_log):
+        a = ppg.FileGeneratingJob("A", lambda of: counter('a') and of.write_text(str(of)), depend_on_function=False)
+        a.depends_on(ppg.FunctionInvariant('myFunc', None))
+        ppg.run()
+        ppg.run()
+        assert read('a') == '1'
 
+        ppg.new()
+        a = ppg.FileGeneratingJob("A", lambda of: counter('a') and of.write_text(str(of)), depend_on_function=False)
+        a.depends_on(ppg.FunctionInvariant('myFunc', open))
+        ppg.run()
+        assert read('a') == '2'
+        ppg.run()
+        assert read('a') == '2'
 
+        ppg.new()
+        a = ppg.FileGeneratingJob("A", lambda of: counter('a') and of.write_text(str(of)), depend_on_function=False)
+        a.depends_on(ppg.FunctionInvariant('myFunc', lambda: 55))
+        ppg.run()
+        ppg.run()
+        assert read('a') == '3'
 
-
+        ppg.new()
+        a = ppg.FileGeneratingJob("A", lambda of: counter('a') and of.write_text(str(of)), depend_on_function=False)
+        a.depends_on(ppg.FunctionInvariant('myFunc', open))
+        ppg.run()
+        assert read('a') == '4'
+        ppg.run()
+        assert read('a') == '4'
 
 
 

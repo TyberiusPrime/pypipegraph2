@@ -62,7 +62,7 @@ class Job:
             for o in outputs:
                 if not isinstance(o, str):
                     raise TypeError(f"outputs must all be strings, was {type(o)}")
-        else:
+        else:  # pragma: no cover
             raise TypeError("Invalid output definition.")
         self.outputs = sorted([str(x) for x in outputs])
         self.job_id = ":::".join(self.outputs)
@@ -78,17 +78,7 @@ class Job:
         return str(self)
 
     def _validate(self):
-        from . import global_pipegraph
-
-        if global_pipegraph.run_mode.is_strict():
-            job_id = ":::".join(self.outputs)
-            if (
-                job_id in global_pipegraph.jobs
-                and type(global_pipegraph.jobs[job_id]) != self.__class__
-            ):
-                raise ValueError(
-                    "Redefining job {job_id} with different type {self.__class__}, was {type(global_pipegraph.jobs[job_id])}"
-                )
+        pass
 
     def readd(self):
         """Readd this job to the current global pipegraph
@@ -163,15 +153,8 @@ class Job:
                 self.depends_on(o)
         return self
 
-    def is_temp_job(self):
-        return False
-
     def output_needed(self, _ignored_runner):
         return False
-
-    def invalidated(self):  # pragma: no cover
-        """Inputs changed - nuke outputs etc"""
-        pass
 
     @classmethod
     def compare_hashes(cls, old_hash, new_hash):
@@ -232,7 +215,7 @@ class _DownstreamNeedsMeChecker(Job):
             return False
         if new_hash == "IgnorePlease":
             return True
-        raise NotImplementedError("Should not be reached")
+        raise NotImplementedError("Should not be reached")  # pragma: no cover
 
 
 class MultiFileGeneratingJob(Job):
@@ -268,28 +251,31 @@ class MultiFileGeneratingJob(Job):
 
     def __getitem__(self, key):
         if not self.lookup:
-            raise ValueError(f"{self.job_id} has no lookup dictionary - files was not a dict")
+            raise ValueError(
+                f"{self.job_id} has no lookup dictionary - files was not a dict"
+            )
         return self.lookup[key]
 
     @staticmethod
     def _validate_func_argument(func):
         sig = inspect.signature(func)
-        if  len(sig.parameters) == 0:
-            raise TypeError("A *FileGeneratingJobs callback function must take at least one parameter: The file(s) to create")
+        if len(sig.parameters) == 0:
+            raise TypeError(
+                "A *FileGeneratingJobs callback function must take at least one parameter: The file(s) to create"
+            )
         return func
-
 
     @staticmethod
     def _validate_files_argument(files):
         if not hasattr(files, "__iter__"):
             raise TypeError("files was not iterable")
-        if isinstance(files, (str, Path)):                                                                           
-            raise TypeError(                                                                                         
-                "files must not be a single string or Path, but an iterable"                                         
-            )                                                                                                        
-        if isinstance(files, dict):                                                                                  
-            lookup = list(files.keys())                                                                              
-            org_files = list(files.values())                                                                         
+        if isinstance(files, (str, Path)):
+            raise TypeError(
+                "files must not be a single string or Path, but an iterable"
+            )
+        if isinstance(files, dict):
+            lookup = list(files.keys())
+            org_files = list(files.values())
             files = org_files
         else:
             lookup = None
@@ -299,9 +285,7 @@ class MultiFileGeneratingJob(Job):
         abs_files = [Path(x).resolve().relative_to(Path(".").absolute()) for x in files]
         if lookup:
             lookup = {lookup[ii]: abs_files[ii] for ii in range(len(lookup))}
-        return sorted(
-            abs_files
-        ), lookup
+        return sorted(abs_files), lookup
 
     def readd(self):
         super().readd()
@@ -313,6 +297,7 @@ class MultiFileGeneratingJob(Job):
         for fn in self.files:  # we rebuild anyway!
             if fn.exists():
                 fn.unlink()
+        input = self.get_input()
         if self.resources in (
             Resources.SingleCore,
             Resources.AllCores,
@@ -339,7 +324,9 @@ class MultiFileGeneratingJob(Job):
 
             try:
                 pid = os.fork()
-                if pid == 0:
+                if (
+                    pid == 0
+                ):  # pragma: no cover - coverage doesn't see this, since the spawned job os._exits()
                     try:
                         for x in stdout, stderr, exception_out:
                             x.delete = False  # that's the parent's job!
@@ -351,13 +338,15 @@ class MultiFileGeneratingJob(Job):
                         sys.stdout = stdout
                         sys.stderr = stderr
                         try:
-                            self.generating_function(self.get_input())
+                            self.generating_function(input)
                             stdout.flush()
                             stderr.flush()
                             # else:
                             os._exit(0)  # go down hard, do not call atexit and co.
                         except TypeError as e:
-                            if hasattr(self.generating_function, "__code__"):  # build ins
+                            if hasattr(
+                                self.generating_function, "__code__"
+                            ):  # build ins
                                 func_info = f"{self.generating_function.__code__.co_filename}:{self.generating_function.__code__.co_firstlineno}"
                             else:
                                 func_info = "unknown"
@@ -375,18 +364,20 @@ class MultiFileGeneratingJob(Job):
                             sys.stdout = stdout_
                             sys.stderr = stderr_
                     except Exception as e:
-                        captured_tb = None # if the capturing fails for any reason...
+                        captured_tb = None  # if the capturing fails for any reason...
                         try:
                             exception_type, exception_value, tb = sys.exc_info()
-                            captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
+                            captured_tb = ppg_traceback.Trace(
+                                exception_type, exception_value, tb
+                            )
                             pickle.dump(captured_tb, exception_out)
                             pickle.dump(e, exception_out)
                             exception_out.flush()
                         except Exception as e2:
                             msg = f"FileGeneratingJob raised exception, but saving the exception failed: \n{type(e)} {escape_logging(e)} - \n {type(e2)} {escape_logging(e2)}\n"
                             # traceback is already dumped
-                            #exception_out.seek(0,0) # might have dumped the traceback already, right?
-                            #pickle.dump(captured_tb, exception_out)
+                            # exception_out.seek(0,0) # might have dumped the traceback already, right?
+                            # pickle.dump(captured_tb, exception_out)
                             pickle.dump(exceptions.JobDied(repr(e)), exception_out)
                             exception_out.flush()
                             raise
@@ -409,8 +400,10 @@ class MultiFileGeneratingJob(Job):
                                 tb = pickle.load(exception_out)
                                 exception = pickle.load(exception_out)
                             except:
-                                logger.error(f"Job died (=exitcode != 0): {self.job_id}")
-                                exception =  exceptions.JobDied(
+                                logger.error(
+                                    f"Job died (=exitcode != 0): {self.job_id}"
+                                )
+                                exception = exceptions.JobDied(
                                     f"Job {self.job_id} died but did not return an exception object.",
                                     None,
                                     exitcode,
@@ -434,7 +427,7 @@ class MultiFileGeneratingJob(Job):
                             )
 
                         else:
-                            raise ValueError(
+                            raise NotImplementedError(  # pragma: no cover - purely defensive
                                 "Process did not exit, did not signal, but is dead?. Figure out and extend, I suppose"
                             )
             finally:
@@ -442,7 +435,7 @@ class MultiFileGeneratingJob(Job):
                 stderr.close()
                 exception_out.close()
         else:
-            self.generating_function(self.get_input())
+            self.generating_function(input)
         missing_files = [x for x in self.files if not x.exists()]
         if missing_files:
             raise exceptions.JobContractError(
@@ -503,11 +496,6 @@ class MultiFileGeneratingJob(Job):
                 return True
         False
 
-    def invalidated(self):
-        for fn in self.files:
-            logger.job_trace(f"unlinking {fn}")
-            fn.unlink()
-
 
 class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
     def __new__(cls, output_filename, *args, **kwargs):
@@ -553,9 +541,6 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
 
         self.cleanup_job_class = _FileCleanupJob
 
-    def is_temp_job(self):
-        return True
-
     def output_needed(
         self, runner
     ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
@@ -564,12 +549,6 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
             if job.output_needed(runner):
                 return True
         return False
-
-    def output_exists(self):
-        for fn in self.files:
-            if not fn.exists():
-                return False
-        return True
 
 
 class TempFileGeneratingJob(MultiTempFileGeneratingJob):
@@ -642,7 +621,7 @@ class _FileInvariantMixin:
 class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     job_kind = JobKind.Invariant
 
-    def __new__(cls, function, name):
+    def __new__(cls, function, name=None):
         name, function = cls._parse_args(function, name)
         return _dedup_job(cls, name)
 
@@ -650,9 +629,8 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     def _parse_args(cls, function, name):
         if isinstance(function, (str, Path)):
             name, function = function, name
-        name = str(name)
 
-        name = "FI" + name if name else FunctionInvariant.func_to_name(function)
+        name = "FI" + (str(name) if name else FunctionInvariant.func_to_name(function))
         return name, function
 
     def __init__(
@@ -692,14 +670,14 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                         # the file did not change at all
                         file_unchanged = True
                         new_file_hash = historical_output["source_file"]
-                else:
-                    new_file_hash = self.calculate(sf, stat)
-                    if ("source_file" in historical_output) and (
-                        new_file_hash["hash"]
-                        == historical_output["source_file"]["hash"]
-                    ):
-                        file_unchanged = True
-                        new_file_hash = historical_output["source_file"]
+                    else:
+                        new_file_hash = self.calculate(sf, stat)
+                        if (
+                            new_file_hash["hash"]
+                            == historical_output["source_file"]["hash"]
+                        ):
+                            file_unchanged = True
+                            new_file_hash = historical_output["source_file"]
             if not new_file_hash:
                 new_file_hash = self.calculate(sf, stat)
 
@@ -723,7 +701,10 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                     self.get_dis(self.function),
                 )  # returns (('',),) for cython functions? better to handel it ourselves
             else:
-                dis = ""
+                if self.function is None:
+                    dis = "None"
+                else:
+                    dis = ""
 
         if is_python_func:
             closure = self.extract_closure(
@@ -742,24 +723,24 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     @classmethod
     def compare_hashes(cls, old_hash, new_hash, python_version=python_version):
         if python_version in new_hash and python_version in old_hash:
-            return new_hash[python_version] == old_hash[python_version]
-        else:  # missing one python version, did the source change?
+            res = new_hash[python_version] == old_hash[python_version]
+            logger.job_trace(f"Comparing based on bytecode: result {res}")
+            return res
+        else:  # pragma: no cover
+            # missing one python version, did the source change?
             # should we compare Closures here as well? todo
-            return new_hash["source"] == old_hash["source"]
+            res = new_hash["source"] == old_hash["source"]
+            logger.job_trace(f"Comparing based on source: result {res}")
+            return res
 
     def get_source_file(self):
         if self.is_python_function(self.function):
-            try:
-                sf = inspect.getsourcefile(self.function)
-                if (
-                    sf == sys.argv[0]
-                ):  # at least python 3.8 does not have this absolute.
-                    # might change with 3.9? https://bugs.python.org/issue20443
-                    return non_chdired_path / sf
-                else:
-                    return Path(sf)
-            except TypeError:
-                pass
+            sf = inspect.getsourcefile(self.function)
+            if sf == sys.argv[0]:  # at least python 3.8 does not have this absolute.
+                # might change with 3.9? https://bugs.python.org/issue20443
+                return non_chdired_path / sf  # pragma: no cover
+            else:
+                return Path(sf)
         return None
 
     @staticmethod
@@ -795,10 +776,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if function.__doc__:
             for prefix in ['"""', "'''", '"', "'"]:
                 if prefix + function.__doc__ + prefix in source:
-                    source = source.replace(
-                        prefix + function.__doc__ + prefix,
-                        "",
-                    )
+                    source = source.replace(prefix + function.__doc__ + prefix, "",)
         return source
 
     @classmethod
@@ -837,29 +815,26 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             else:
                 return False
         else:
-            return ~(hasattr(b, "__code__") and hasattr(b, "__closure__"))
+            return False
+            # return ~(hasattr(b, "__code__") and hasattr(b, "__closure__"))
 
     @staticmethod
     def function_to_str(func):
         if str(func).startswith("<built-in function"):
             return "%s" % func
-        elif hasattr(func, "im_func") and (
-            "cyfunction" in repr(func.im_func)
-            or ("<built-in function" in repr(func.im_func))
-        ):
+        elif (
+            hasattr(func, "im_func")
+            and (
+                "cyfunction" in repr(func.im_func)
+                or ("<built-in function" in repr(func.im_func))
+            )
+        ) or ("<cyfunction " in str(func)):
             return "%s %i" % FunctionInvariant.get_cython_filename_and_line_no(func)
         else:
             return "%s %i" % (
                 func.__code__.co_filename if func else "None",
                 func.__code__.co_firstlineno if func else 0,
             )
-
-    @classmethod
-    def _hash_function(cls, function):
-        key = id(function.__code__)
-        new_source, new_funchash = cls._get_func_hash(key, function)
-        new_closure = cls.extract_closure(function)
-        return new_source, new_funchash, new_closure
 
     @staticmethod
     def extract_closure(function):
@@ -937,7 +912,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             res = res.replace(function.__qualname__, "<func name ommited>")
         # beginning with  version 3.7, this piece of code is obsolete,
         # since dis does depth descend by itself way.
-        if version_info < (3, 7):
+        if version_info < (3, 7):  # pragma: no cover
             for ii, constant in enumerate(code.co_consts):
                 if hasattr(constant, "co_code"):
                     res += "inner no %i" % ii
@@ -965,31 +940,25 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         op.close()
 
         # extract the function at hand, minus doc string
-        remaining_lines = d[line_no - 1 :]  # lines start couting at 1
-        first_line = remaining_lines[0]
-        first_line_indent = len(first_line) - len(first_line.lstrip())
-        start_tags = '"""', "'''"
-        start_tag = False
-        for st in start_tags:
-            if first_line.strip().startswith(st):
-                start_tag = st
+        head = d[line_no - 1]
+        text = "\n".join(d[line_no:])
+        import re
+
+        match = re.match("([ \t]*)(\"\"\"|'''|[^ \t]+)", text)
+        if match.groups()[1] in ("'''", '"""'):  # starts with a doc string...
+            search = match.groups()[1]
+            text = text[text.find(search, text.find(search) + 3) + 3 :]
+            # now eat up including the new line after the docstring
+            text = text[text.find("\n") + 1 :]
+        text = text.split("\n")
+        first_line_indent = len(head) - len(head.lstrip())
+        body = []
+        for line in text:
+            indent = len(line) - len(line.lstrip())
+            if indent <= first_line_indent:
                 break
-        if start_tag:  # there is a docstring
-            text = "\n".join(remaining_lines).strip()
-            text = text[3:]  # cut of initial ###
-            text = text[text.find(start_tag) + 3 :]
-            remaining_lines = text.split("\n")
-        last_line = len(remaining_lines)
-        for ii, line in enumerate(remaining_lines):
-            if ii == 0:
-                continue
-            line_strip = line.strip()
-            if line_strip:
-                indent = len(line) - len(line.lstrip())
-                if indent <= first_line_indent:
-                    last_line = ii
-                    break
-        return "\n".join(remaining_lines[:last_line])
+            body.append(line)
+        return head + "\n" + "\n".join(body)
 
     def get_cython_filename_and_line_no(cython_func):
         pattern = re.compile(r'.* file "(?P<file_name>.*)", line (?P<line>\d*)>')
@@ -1063,10 +1032,14 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     @staticmethod
     def func_to_name(function):
         """Automatically derive a name for a function"""
+        if function is None:
+            raise TypeError(
+                "Can not derive a function name for FunctionInvariant(None)"
+            )
         name = function.__qualname__
-        if name == "<lambda>":
-            raise ValueError(
-                "Could not automatically generate a function name for a lambda, pass a name please"
+        if "<lambda>" in name:
+            raise TypeError(
+                "Could not automatically derive a function name for a lambda, pass a name please"
             )
         return name
 
@@ -1075,7 +1048,8 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             hasattr(self, "function")
             and self.function
             and hasattr(self.function, "__code__")
-        ):  # during creating, __str__ migth be called by a debug function before function is set...
+        ):  # pragma: no cover
+            # during creating, __str__ migth be called by a debug function before function is set...
             return "%s (job_id=%s,id=%s\n Function: %s:%s)" % (
                 self.__class__.__name__,
                 self.job_id,
@@ -1244,15 +1218,6 @@ class DataLoadingJob(Job):
         # option a) separate into calculate and store, so that we always have the actual value?
         # that's of course an API change compared to the pypipegraph. Hm.
 
-    def _output_needed(
-        self, runner
-    ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
-        for downstream_id in runner.dag.neighbors(self.job_id):
-            job = runner.jobs[downstream_id]
-            if job.output_needed(runner):
-                return True
-        return False
-
 
 def CachedDataLoadingJob(
     cache_filename,
@@ -1263,7 +1228,7 @@ def CachedDataLoadingJob(
 ):
     cache_filename = Path(cache_filename)
 
-    def do_cache(output_filename):
+    def do_cache(output_filename):  # pragma: no cover - spawned job
         with open(output_filename, "wb") as op:
             pickle.dump(calc_callback(), op, pickle.HIGHEST_PROTOCOL)
 
@@ -1282,9 +1247,7 @@ def CachedDataLoadingJob(
             )
 
     load_job = DataLoadingJob(
-        "load" + str(cache_filename),
-        load,
-        depend_on_function=False,
+        "load" + str(cache_filename), load, depend_on_function=False,
     )
     load_job.depends_on(cache_job)
     # do this after you have sucessfully created both jobs
@@ -1318,6 +1281,13 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
                     )
                 elif not FunctionInvariant.functions_equal(
                     self.callback, data_callback
+                ) or (
+                    hasattr(
+                        self.callback, "inner_callback"
+                    )  # CachedAttributeLoadingJob
+                    and not FunctionInvariant.functions_equal(
+                        self.callback.inner_callback, data_callback.inner_callback
+                    )
                 ):
                     raise exceptions.JobRedefinitionError(job_id, "callback changed")
 
@@ -1342,15 +1312,6 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
         }  # so the downstream get's invalidated
 
-    def _output_needed(
-        self, runner
-    ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
-        for downstream_id in runner.dag.neighbors(self.job_id):
-            job = runner.jobs[downstream_id]
-            if job.output_needed(runner):
-                return True
-        return False
-
 
 def CachedAttributeLoadingJob(
     cache_filename,
@@ -1362,7 +1323,7 @@ def CachedAttributeLoadingJob(
 ):
     cache_filename = Path(cache_filename)
 
-    def do_cache(output_filename):
+    def do_cache(output_filename):  # pragma: no cover
         with open(output_filename, "wb") as op:
             pickle.dump(data_callback(), op, pickle.HIGHEST_PROTOCOL)
 
@@ -1380,6 +1341,8 @@ def CachedAttributeLoadingJob(
             raise pickle.UnpicklingError(
                 f"Unpickling error in file {cache_filename}", e
             )
+
+    load.inner_callback = data_callback
 
     load_job = AttributeLoadingJob(
         "load" + str(cache_filename),
@@ -1462,11 +1425,16 @@ class JobGeneratingJob(Job):
         }  # so the downstream get's invalidated
 
 
-def _save_plot(plot, output_filename, plot_render_args):
-    if not hasattr(plot, "render") and not hasattr(plot, "save"):
+def _save_plot(
+    plot, output_filename, plot_render_args
+):  # pragma: no cover - this happens in spawned jobs
+    if (
+        not hasattr(plot, "render")
+        and not hasattr(plot, "save")
+        and not hasattr(plot, "save_fig")
+    ):
         raise exceptions.JobContractError(
-            "%s.plot_function did not return a plot object (needs to have as render or save function"
-            % (output_filename)
+            f"{output_filename}.plot_function did not return a plot object (needs to have as render/save/save_fig function)"
         )
     if hasattr(plot, "pd"):  # dppd special..
         plot = plot.pd
@@ -1481,7 +1449,9 @@ def _save_plot(plot, output_filename, plot_render_args):
         plot.render(output_filename, **render_args)
     elif hasattr(plot, "save"):
         plot.save(output_filename, **render_args)
-    else:
+    elif hasattr(plot, "savefig"):
+        plot.savefig(output_filename, **render_args)
+    else:  # pragma: no cover
         raise NotImplementedError("Don't know how to handle this plotjob")
 
 
@@ -1519,7 +1489,7 @@ def PlotJob(
             f"Don't know how to create a {output_filename.suffix} file, must end on one of {allowed_suffixes}."
         )
 
-    def do_plot(output_filename):
+    def do_plot(output_filename):  # pragma: no cover - runs in spawned job
         if not hasattr(plot_job, "data_"):
             plot_job.data_ = calc_function()
         plot = plot_function(plot_job.data_)
@@ -1534,7 +1504,7 @@ def PlotJob(
     cache_filename = Path(cache_dir) / output_filename
     if cache_calc:
 
-        def do_cache():
+        def do_cache():  # pragma: no cover - runs in spawned job
             import pandas as pd
 
             Path(output_filename.parent).mkdir(exist_ok=True, parents=True)
@@ -1566,7 +1536,7 @@ def PlotJob(
 
     if create_table:
 
-        def dump_table(output_filename):
+        def dump_table(output_filename):  # pragma: no cover - runs in spawned job
             import pandas as pd
 
             if not hasattr(plot_job, "data_"):
@@ -1588,11 +1558,11 @@ def PlotJob(
     else:
         table_job = None
 
-    def add_another_plot(output_filename, plot_function, render_args={}):
+    def add_another_plot(output_filename, plot_function, render_args=None):
         if render_args is None:
             render_args = {}
 
-        def do_plot_another_plot(output_filename):
+        def do_plot_another_plot(output_filename):  # pragma: no cover
             if not hasattr(plot_job, "data_"):
                 plot_job.data_ = calc_function()
             plot = plot_function(plot_job.data_)

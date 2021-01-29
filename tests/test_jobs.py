@@ -19,7 +19,7 @@ class TestJobs:
 
         job = ppg.FileGeneratingJob(of, do_write)
         job2 = ppg.FileGeneratingJob(of, do_write)
-        assert job is job2 # change from ppg1
+        assert job is job2  # change from ppg1
 
     def test_add_job_twice_is_harmless(self):
         job = ppg.FileGeneratingJob("A", lambda of: 5)
@@ -49,6 +49,17 @@ class TestJobs:
     def test_raises_on_non_str_job_id(self):
         with pytest.raises(TypeError):
             ppg.FileGeneratingJob(1234, lambda of: None)
+
+    def test_auto_name(self):
+        def inner():
+            pass
+        a = ppg.FunctionInvariant(inner)
+        assert a.job_id == 'FITestJobs.test_auto_name.<locals>.inner'
+        with pytest.raises(TypeError):
+            ppg.FunctionInvariant(lambda: 55)
+        with pytest.raises(TypeError):
+            ppg.FunctionInvariant(None)
+
 
     def test_equality_is_identity(self):
         def write_func(of):
@@ -464,7 +475,7 @@ class TestFileGeneratingJob:
             write(sentinel, "done")
 
         job = ppg.FileGeneratingJob(of, do_write, empty_ok=True)
-        dep = ppg.ParameterInvariant("my_params", (1,))
+        dep = ppg.ParameterInvariant("my_params", {1,})
         job.depends_on(dep)
         ppg.run()
         assert Path(of).exists()
@@ -966,7 +977,8 @@ class TestDataLoadingJob:
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         assert isinstance(
-            ppg.global_pipegraph.last_run_result[jobB.job_id].error.args[0], ppg.exceptions.JobDied
+            ppg.global_pipegraph.last_run_result[jobB.job_id].error.args[0],
+            ppg.exceptions.JobDied,
         )
 
         assert isinstance(
@@ -1080,12 +1092,16 @@ class TestAttributeJob:
             write(tf, "hello")
             return "shu"
 
-        ppg.AttributeLoadingJob("load_dummy_shu", o, "a", load, depend_on_function=False)
+        ppg.AttributeLoadingJob(
+            "load_dummy_shu", o, "a", load, depend_on_function=False
+        )
         ppg.run()
         assert not (hasattr(o, "a"))
         assert not (Path(tf).exists())
 
-    def test_attribute_loading_does_run_without_dependency_if_invalidated(self, job_trace_log):
+    def test_attribute_loading_does_run_without_dependency_if_invalidated(
+        self, job_trace_log
+    ):
         o = Dummy()
         tf = "out/testfile"
 
@@ -1095,9 +1111,8 @@ class TestAttributeJob:
 
         ppg.AttributeLoadingJob("load_dummy_shu", o, "a", load)
         ppg.run()
-        assert (Path(tf).exists())
+        assert Path(tf).exists()
         assert not (hasattr(o, "a"))
-
 
     def test_attribute_disappears_after_direct_dependency(self):
         o = Dummy()
@@ -1120,7 +1135,6 @@ class TestAttributeJob:
             ppg.run()
         assert read(of) == "shu"
         assert not (Path(of2).exists())
-
 
     def ppg1_test_attribute_disappears_after_direct_dependencies(self):
         """I can't get tihs test to run in ppg2 - the cleanup does happen,
@@ -1211,6 +1225,28 @@ class TestAttributeJob:
         with pytest.raises(ppg.JobRedefinitionError):
             ppg.CachedAttributeLoadingJob("out/A", o2, "a", cache)
 
+    def test_no_swapping_callbacks(self):
+
+        o = Dummy()
+        ppg.AttributeLoadingJob("out/A", o, "a", lambda: 55, depend_on_function=False)
+
+        with pytest.raises(ppg.JobRedefinitionError):
+            ppg.AttributeLoadingJob(
+                "out/A", o, "a", lambda: 55 + 1, depend_on_function=False
+            )
+
+    def test_no_swapping_callbacks_cached(self):
+
+        o = Dummy()
+        ppg.CachedAttributeLoadingJob(
+            "out/A", o, "a", lambda: 55, depend_on_function=False
+        )
+
+        with pytest.raises(ppg.JobRedefinitionError):
+            ppg.CachedAttributeLoadingJob(
+                "out/A", o, "a", lambda: 55 + 1, depend_on_function=False
+            )
+
     def test_ignore_code_changes(self, job_trace_log):
         def a():
             append("out/Aa", "A")
@@ -1253,7 +1289,6 @@ class TestTempFileGeneratingJob:
             write(temp_file, "hello")
 
         temp_job = ppg.TempFileGeneratingJob(temp_file, write_temp)
-        assert temp_job.is_temp_job
         ofA = "out/A"
 
         def write_A(of):
@@ -1581,7 +1616,6 @@ class TestMultiTempFileGeneratingJob:
                 write(temp_file, "hello")
 
         temp_job = ppg.MultiTempFileGeneratingJob(temp_files, write_temp)
-        assert temp_job.is_temp_job
         ofA = "out/A"
 
         def write_A(of):
@@ -1605,7 +1639,6 @@ class TestMultiTempFileGeneratingJob:
         temp_job = ppg.MultiTempFileGeneratingJob(
             temp_files, write_temp, depend_on_function=False
         )
-        assert temp_job.is_temp_job
         ofA = "out/A"
 
         def write_A(of):

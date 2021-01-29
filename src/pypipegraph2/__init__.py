@@ -40,7 +40,7 @@ def new(
     log_retention=reuse_last_or_default
 ):
     """create a new pipegraph.
-    You may pase reuse_last_or_default to all values
+    You may pass reuse_last_or_default to all values
     to reuse the last value,
     or default to use the true default
 

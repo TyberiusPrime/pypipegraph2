@@ -38,6 +38,7 @@ class TestPruning:
         assert not Path("B").exists()
         assert not Path("C").exists()
         assert c.prune_reason == b.job_id
+        ppg.run()  # just so we recurse_prune again.
 
     def test_tempfile_not_run_on_prune(self):
         a = ppg.TempFileGeneratingJob("A", lambda of: write("A", "A"))
@@ -60,3 +61,15 @@ class TestPruning:
         assert Path("C").exists()
         assert Path("C").read_text() == "CA"
         assert not Path("A").exists()
+
+    def test_basic_prune_unprune(self, job_trace_log):
+        ppg.FileGeneratingJob("A", lambda of: write("A", "A"))
+        b = ppg.FileGeneratingJob("B", lambda of: write("B", "B"))
+        b.prune()
+        ppg.run()
+        assert Path("A").read_text() == "A"
+        assert not Path("B").exists()
+        b.unprune()
+        ppg.run()
+        assert Path("A").read_text() == "A"
+        assert read('B') == 'B'

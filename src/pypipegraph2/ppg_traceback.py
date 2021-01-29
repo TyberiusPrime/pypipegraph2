@@ -73,18 +73,17 @@ class Trace:
                     if (
                         inspect.getsourcefile(frame_summary) == sys.argv[0]
                     ):  # current script, not absolute
-                        filename = os.path.join(_load_cwd, sys.argv[0])
+                        filename = os.path.join(_load_cwd, sys.argv[0])  # pragma: no cover
                     else:
                         filename = inspect.getabsfile(frame_summary)
-                except:
+                except:  # pragma: no cover
                     filename = frame_summary.f_code.co_filename
                     if filename and not filename.startswith("<"):
                         filename = os.path.abspath(filename) if filename else "?"
                 try:
                     with open(filename, "rb") as op:
                         source = op.read().decode("utf-8", errors="replace")
-
-                except:
+                except: # pragma: no cover
                     source = ""
                 frame = Frame(
                     filename=filename,
@@ -103,22 +102,11 @@ class Trace:
                 exc_value = cause
                 traceback = cause.__traceback__
                 if traceback:
-                    is_cause = True
+                    is_cause = not getattr(exc_value, "__suppress_context__", False)
+                    stack.is_cause = is_cause
                     continue
 
-            cause = exc_value.__context__
-            if (
-                cause
-                and cause.__traceback__
-                and not getattr(exc_value, "__suppress_context__", False)
-            ):
-                exc_type = cause.__class__
-                exc_value = cause
-                traceback = cause.__traceback__
-                if traceback:
-                    is_cause = False
-                    continue
             # No cover, code is reached but coverage doesn't recognize it.
             break  # pragma: no cover
 
-        self.stacks = stacks
+        self.stacks = stacks[::-1]
