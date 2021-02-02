@@ -748,7 +748,9 @@ class TestPypipegraph2:
             ppg.jobs.FileGeneratingJob = old_fg
 
     def test_changing_mtime_triggers_recalc_of_hash(self):
-        import datetime, time, os
+        import datetime
+        import time
+        import os
 
         write("A", "hello")
         fi = ppg.FileInvariant("A")
@@ -772,7 +774,9 @@ class TestPypipegraph2:
         assert read("B") == "hello"
 
     def test_same_mtime_same_size_leads_to_false_negative(self):
-        import datetime, time, os
+        import datetime
+        import time
+        import os
 
         write("A", "hello")
         date = datetime.datetime(
@@ -1601,56 +1605,68 @@ class TestPypipegraph2:
         ppg.run()
 
     def test_func_equals_none(self):
-        a = ppg.FileGeneratingJob("a", lambda of: of.write_text(str(of)), depend_on_function=False)
-        a.depends_on(ppg.FunctionInvariant('myFunc', None))
+        a = ppg.FileGeneratingJob(
+            "a", lambda of: of.write_text(str(of)), depend_on_function=False
+        )
+        a.depends_on(ppg.FunctionInvariant("myFunc", None))
         ppg.run()
         ppg.run()
-        ppg.FunctionInvariant('myFunc', None) # that one is ok, not a redef
+        ppg.FunctionInvariant("myFunc", None)  # that one is ok, not a redef
         with pytest.raises(ppg.JobRedefinitionError):
-            ppg.FunctionInvariant('myFunc', lambda: 5)
+            ppg.FunctionInvariant("myFunc", lambda: 5)
         with pytest.raises(ppg.JobRedefinitionError):
-            ppg.FunctionInvariant('myFunc', open)
-        ppg.FunctionInvariant('build', open)
+            ppg.FunctionInvariant("myFunc", open)
+        ppg.FunctionInvariant("build", open)
         with pytest.raises(ppg.JobRedefinitionError):
-            ppg.FunctionInvariant('build', lambda: 5)
-        l = lambda: 5
-        ppg.FunctionInvariant('lamb', l)
-        ppg.FunctionInvariant('lamb', l)
+            ppg.FunctionInvariant("build", lambda: 5)
+        ll = lambda: 5  # noqa:E731
+        ppg.FunctionInvariant("lamb", ll)
+        ppg.FunctionInvariant("lamb", ll)
         with pytest.raises(ppg.JobRedefinitionError):
-            ppg.FunctionInvariant('build', open)
-
-
+            ppg.FunctionInvariant("build", open)
 
     def test_funcinvariant_mixing_function_types_none(self, job_trace_log):
-        a = ppg.FileGeneratingJob("A", lambda of: counter('a') and of.write_text(str(of)), depend_on_function=False)
-        a.depends_on(ppg.FunctionInvariant('myFunc', None))
+        a = ppg.FileGeneratingJob(
+            "A",
+            lambda of: counter("a") and of.write_text(str(of)),
+            depend_on_function=False,
+        )
+        a.depends_on(ppg.FunctionInvariant("myFunc", None))
         ppg.run()
         ppg.run()
-        assert read('a') == '1'
+        assert read("a") == "1"
 
         ppg.new()
-        a = ppg.FileGeneratingJob("A", lambda of: counter('a') and of.write_text(str(of)), depend_on_function=False)
-        a.depends_on(ppg.FunctionInvariant('myFunc', open))
+        a = ppg.FileGeneratingJob(
+            "A",
+            lambda of: counter("a") and of.write_text(str(of)),
+            depend_on_function=False,
+        )
+        a.depends_on(ppg.FunctionInvariant("myFunc", open))
         ppg.run()
-        assert read('a') == '2'
+        assert read("a") == "2"
         ppg.run()
-        assert read('a') == '2'
+        assert read("a") == "2"
 
         ppg.new()
-        a = ppg.FileGeneratingJob("A", lambda of: counter('a') and of.write_text(str(of)), depend_on_function=False)
-        a.depends_on(ppg.FunctionInvariant('myFunc', lambda: 55))
+        a = ppg.FileGeneratingJob(
+            "A",
+            lambda of: counter("a") and of.write_text(str(of)),
+            depend_on_function=False,
+        )
+        a.depends_on(ppg.FunctionInvariant("myFunc", lambda: 55))
         ppg.run()
         ppg.run()
-        assert read('a') == '3'
+        assert read("a") == "3"
 
         ppg.new()
-        a = ppg.FileGeneratingJob("A", lambda of: counter('a') and of.write_text(str(of)), depend_on_function=False)
-        a.depends_on(ppg.FunctionInvariant('myFunc', open))
+        a = ppg.FileGeneratingJob(
+            "A",
+            lambda of: counter("a") and of.write_text(str(of)),
+            depend_on_function=False,
+        )
+        a.depends_on(ppg.FunctionInvariant("myFunc", open))
         ppg.run()
-        assert read('a') == '4'
+        assert read("a") == "4"
         ppg.run()
-        assert read('a') == '4'
-
-
-
-
+        assert read("a") == "4"

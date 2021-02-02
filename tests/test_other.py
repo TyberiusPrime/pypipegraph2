@@ -5,16 +5,14 @@ import sys
 import pytest
 import pypipegraph2 as ppg
 from pathlib import Path
-from .shared import write, read, append, Dummy
+from .shared import write, read, Dummy
 
 
 @pytest.mark.usefixtures("ppg_per_test", "create_out_dir")
 class TestResourceCoordinator:
     def test_jobs_that_need_all_cores_are_spawned_one_by_one(self, job_trace_log):
         # we'll determine this by the start respective end times..
-        ppg.new(
-            cores=3,
-        )
+        ppg.new(cores=3,)
 
         def a(of):
             write(of, "A")
@@ -49,9 +47,7 @@ class TestResourceCoordinator:
 
     def test_jobs_concurrent_jobs_run_concurrently(self):
         # we'll determine this by the start respective end times..
-        ppg.new(
-            cores=2,
-        )
+        ppg.new(cores=2,)
         jobA = ppg.FileGeneratingJob(
             "out/A", lambda of: write(of, "A"), resources=ppg.Resources.AllCores
         )
@@ -100,12 +96,11 @@ class TestingTheUnexpectedTests:
         def dies(of):
             import sys
             from loguru import logger
-            from loguru import logger
 
             logger.info("Now terminating child python")
             sys.exit(5)
 
-        fg = ppg.FileGeneratingJob("out/A", dies)
+        ppg.FileGeneratingJob("out/A", dies)
         with pytest.raises(ppg.RunFailed):
             # ppg.util.global_pipegraph.rc.timeout = 1
             ppg.run()
@@ -220,7 +215,7 @@ class TestPathLib:
         def mf(ofs):
             ofs[0].write_text("cc" + read("g"))
             ofs[1].write_text("dd" + read("h") + dd.attr)
-            ofs[2].write_text("ee" + read("i") + read("j") + read('k'))
+            ofs[2].write_text("ee" + read("i") + read("j") + read("k"))
 
         c = ppg.MultiFileGeneratingJob([pathlib.Path("c"), "d", pathlib.Path("e")], mf)
         c.depends_on(b)
@@ -294,7 +289,7 @@ def test_job_or_filename(ppg_per_test):
     assert not dep_c
 
 
-@pytest.mark.xfail() # todo
+@pytest.mark.xfail()  # todo
 def test_interactive_import(ppg_per_test):
     # just so at least the import part of interactive is under coverage
     import pypipegraph2.interactive  # noqa:F401
@@ -325,7 +320,9 @@ def test_dataloading_job_changing_cwd(ppg_per_test):
     a.depends_on(b)
     with pytest.raises(ppg.RunFailed):
         ppg.run()
-    assert isinstance(ppg.global_pipegraph.last_run_result['b'].error.args[0], ppg.JobContractError)
+    assert isinstance(
+        ppg.global_pipegraph.last_run_result["b"].error.args[0], ppg.JobContractError
+    )
 
 
 def test_job_generating_job_changing_cwd(ppg_per_test):
@@ -343,4 +340,6 @@ def test_job_generating_job_changing_cwd(ppg_per_test):
     a.depends_on(b)
     with pytest.raises(ppg.RunFailed):
         ppg.run()
-    assert isinstance(ppg.global_pipegraph.last_run_result['b'].error.args[0], ppg.JobContractError)
+    assert isinstance(
+        ppg.global_pipegraph.last_run_result["b"].error.args[0], ppg.JobContractError
+    )

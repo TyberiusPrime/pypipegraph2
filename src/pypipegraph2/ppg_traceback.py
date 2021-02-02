@@ -10,7 +10,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 """
 from types import TracebackType
-from typing import Callable, Dict, Iterable, List, Optional, Type
+from typing import Dict, List, Type
 from traceback import walk_tb
 import inspect
 import sys
@@ -26,7 +26,7 @@ class Frame:
     lineno: int
     name: str
     locals: Dict[str, str]
-    source: str 
+    source: str
 
 
 @dataclass
@@ -73,17 +73,19 @@ class Trace:
                     if (
                         inspect.getsourcefile(frame_summary) == sys.argv[0]
                     ):  # current script, not absolute
-                        filename = os.path.join(_load_cwd, sys.argv[0])  # pragma: no cover
+                        filename = os.path.join(
+                            _load_cwd, sys.argv[0]
+                        )  # pragma: no cover
                     else:
                         filename = inspect.getabsfile(frame_summary)
-                except:  # pragma: no cover
+                except Exception:  # pragma: no cover
                     filename = frame_summary.f_code.co_filename
                     if filename and not filename.startswith("<"):
                         filename = os.path.abspath(filename) if filename else "?"
                 try:
                     with open(filename, "rb") as op:
                         source = op.read().decode("utf-8", errors="replace")
-                except: # pragma: no cover
+                except Exception:  # pragma: no cover
                     source = ""
                 frame = Frame(
                     filename=filename,

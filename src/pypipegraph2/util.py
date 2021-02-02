@@ -39,7 +39,7 @@ def job_or_filename(job_or_filename, invariant_class=None):
     from .jobs import Job, FileInvariant
     from pathlib import Path
 
-    if invariant_class is None: #pragma: no cover
+    if invariant_class is None:  # pragma: no cover
         invariant_class = FileInvariant
 
     if isinstance(job_or_filename, Job):
@@ -61,7 +61,7 @@ def assert_uniqueness_of_object(
 
     This is necessary so the pipegraph jobs assign their data only to the
     objects you're actually working with."""
-    if pipegraph is None: #pragma: no branch
+    if pipegraph is None:  # pragma: no branch
         from pypipegraph2 import global_pipegraph
 
         pipegraph = global_pipegraph

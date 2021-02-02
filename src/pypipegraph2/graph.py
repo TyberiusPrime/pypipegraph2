@@ -2,7 +2,6 @@ from typing import Optional, Union, Dict
 import shutil
 import collections
 import os
-import textwrap
 import sys
 import pickle
 import signal
@@ -13,7 +12,7 @@ from pathlib import Path
 from loguru import logger
 from . import exceptions
 from .runner import Runner, JobState
-from .util import escape_logging, CPUs
+from .util import CPUs
 from .enums import RunMode
 from .exceptions import _RunAgain
 from rich.logging import RichHandler
@@ -86,8 +85,11 @@ class PyPipeGraph:
         return self._run(print_failures, raise_on_job_error, event_timeout, None)
 
     def _run(
-        self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5,
-        focus_on_these_jobs=None
+        self,
+        print_failures: bool = True,
+        raise_on_job_error=True,
+        event_timeout=5,
+        focus_on_these_jobs=None,
     ) -> Dict[str, JobState]:
         self.time_str = datetime.datetime.now().strftime(time_format)
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
@@ -157,8 +159,9 @@ class PyPipeGraph:
     def run_for_these(self, jobs):
         if not isinstance(jobs, list):
             jobs = [jobs]
-        return self._run(print_failures=True, raise_on_job_error=True, focus_on_these_jobs=jobs)
-
+        return self._run(
+            print_failures=True, raise_on_job_error=True, focus_on_these_jobs=jobs
+        )
 
     def cleanup_logs(self):
         if not self.log_dir or self.log_retention is None:

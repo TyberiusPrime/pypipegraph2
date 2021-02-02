@@ -3,7 +3,6 @@
 # prevent all single cores to run from in parallel
 import pypipegraph2 as ppg
 import time
-import pandas as pd
 from pathlib import Path
 import logging
 import os

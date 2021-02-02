@@ -72,4 +72,4 @@ class TestPruning:
         b.unprune()
         ppg.run()
         assert Path("A").read_text() == "A"
-        assert read('B') == 'B'
+        assert read("B") == "B"

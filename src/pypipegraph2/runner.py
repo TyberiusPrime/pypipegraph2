@@ -1,15 +1,13 @@
 from . import exceptions
 import textwrap
 import sys
-import pickle
 import os
 import queue
 from loguru import logger
 import time
-import traceback
 import networkx
 from .util import escape_logging
-from .enums import JobKind, ValidationState, JobState, Resources
+from .enums import JobKind, ValidationState, JobState
 from .exceptions import _RunAgain
 from .parallel import CoreLock
 from . import ppg_traceback
@@ -133,7 +131,7 @@ class Runner:
         if focus_on_these_jobs:
             # prune all jobs,
             # then unprune this one and it's predecessors
-            pruned = set(dag.nodes) # prune all...
+            pruned = set(dag.nodes)  # prune all...
             for job in focus_on_these_jobs:
                 _recurse_unpruning(job.job_id)
         else:
@@ -273,7 +271,6 @@ class Runner:
         todo = len(self.dag)
         logger.job_trace(f"jobs: {self.jobs.keys()}")
         logger.job_trace(f"skipped jobs: {skipped_jobs}")
-        timeout_counter = 0
         try:
             while todo:
                 try:
@@ -372,8 +369,6 @@ class Runner:
         )
 
     def inform_downstreams_of_outputs(self, job_id, job_outputs):
-        job = self.jobs[job_id]
-
         for downstream_id in self.dag.successors(job_id):
             logger.job_trace(f"\t\tDownstream {downstream_id}")
             downstream_state = self.job_states[downstream_id]
@@ -567,8 +562,8 @@ class Runner:
                 for frame in stack.frames:
                     out.append(f'{frame.filename}":{frame.lineno}, in {frame.name}')
                     # if frame.filename.startswith("<"): # pragma: no cover # - interactive, I suppose
-                        # render_locals(frame)
-                        # continue
+                    # render_locals(frame)
+                    # continue
                     extra_lines = 3
                     if frame.source:
                         code = frame.source
@@ -669,7 +664,7 @@ class Runner:
 
     def compare_history(self, old_hash, new_hash, job_class):
         # if old_hash is None:
-            # return False
+        # return False
         return job_class.compare_hashes(old_hash, new_hash)
 
     def job_has_non_temp_somewhere_downstream(self, job_id):
@@ -770,6 +765,7 @@ class Runner:
 
 class JobCollector:
     """only in place during the dag modification step of Runner"""
+
     def __init__(self, run_mode):
         self.clear()
         self.run_mode = run_mode

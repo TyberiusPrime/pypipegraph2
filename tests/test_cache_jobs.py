@@ -371,7 +371,6 @@ class TestCachedAttributeJob:
         ppg.CachedAttributeLoadingJob("A", o, "a", cache)
         ppg.CachedAttributeLoadingJob("A", o2, "a", cache)
 
-
     def test_cached_attribute_job_does_not_load_its_preqs_on_cached(self):
         o = Dummy()
 

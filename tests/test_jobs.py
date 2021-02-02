@@ -53,13 +53,13 @@ class TestJobs:
     def test_auto_name(self):
         def inner():
             pass
+
         a = ppg.FunctionInvariant(inner)
-        assert a.job_id == 'FITestJobs.test_auto_name.<locals>.inner'
+        assert a.job_id == "FITestJobs.test_auto_name.<locals>.inner"
         with pytest.raises(TypeError):
             ppg.FunctionInvariant(lambda: 55)
         with pytest.raises(TypeError):
             ppg.FunctionInvariant(None)
-
 
     def test_equality_is_identity(self):
         def write_func(of):
@@ -274,7 +274,7 @@ class TestFileGeneratingJob:
     def test_filegenerating_ok_change_fail_ok(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         of = "A"
-        func1 = lambda of: counter("a") and write(of, "A")
+        func1 = lambda of: counter("a") and write(of, "A")  # noqa: E731
         job = ppg.FileGeneratingJob(of, func1)
         ppg.run()
         assert read("a") == "1"
@@ -475,7 +475,7 @@ class TestFileGeneratingJob:
             write(sentinel, "done")
 
         job = ppg.FileGeneratingJob(of, do_write, empty_ok=True)
-        dep = ppg.ParameterInvariant("my_params", {1,})
+        dep = ppg.ParameterInvariant("my_params", {1,},)
         job.depends_on(dep)
         ppg.run()
         assert Path(of).exists()
@@ -1138,7 +1138,7 @@ class TestAttributeJob:
 
     def ppg1_test_attribute_disappears_after_direct_dependencies(self):
         """I can't get tihs test to run in ppg2 - the cleanup does happen,
-        but this can't show it. It is now a job, so 
+        but this can't show it. It is now a job, so
         it 's not a given that it runs before B or C
         (actually, I believe test_attribute_disappears_after_direct_dependency
         only works by sheer accident as well?)

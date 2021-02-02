@@ -64,9 +64,12 @@ def ppg_per_test(request):
                 os.chdir(target_path)
                 first[0] = True
 
-            g = ppg.new(cores=1, 
-                        #log_level=5,
-                        allow_short_filenames=True, run_mode=ppg.RunMode.NONINTERACTIVE)
+            g = ppg.new(
+                cores=1,
+                # log_level=5,
+                allow_short_filenames=True,
+                run_mode=ppg.RunMode.NONINTERACTIVE,
+            )
             g.new = np
             return g
 

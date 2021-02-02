@@ -31,12 +31,12 @@ def b():
         return 1"""
         assert actual == should
 
-        f = ppg.FunctionInvariant("a", func)  # not a redefinition
+        ppg.FunctionInvariant("a", func)  # not a redefinition
         with pytest.raises(ppg.JobRedefinitionError):
             ppg.FunctionInvariant("a", func2)  # cython vs cython
         with pytest.raises(ppg.JobRedefinitionError):
             ppg.FunctionInvariant("a", lambda: 1)  # cython vs python
-        f2 = ppg.FunctionInvariant("b", lambda: 45)
+        ppg.FunctionInvariant("b", lambda: 45)
         with pytest.raises(ppg.JobRedefinitionError):
             ppg.FunctionInvariant("b", func2)  # python vs cython
 

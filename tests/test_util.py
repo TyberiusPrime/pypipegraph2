@@ -15,7 +15,6 @@ class TestUtils:
         with pytest.raises(ValueError):
             Dummy("shu")
 
-
     def test_assert_uniqueness_ok(self):
         class Dummy:
             def __init__(self, name):
@@ -27,7 +26,6 @@ class TestUtils:
 
         with pytest.raises(ValueError):
             Dummy("shu")
-
 
     def test_assert_uniqueness_ok_multi_classes(self):
         class Dummy:
@@ -46,7 +44,6 @@ class TestUtils:
         with pytest.raises(ValueError):
             Dummy("shu")
 
-
     def test_assert_uniqueness_raises_slashes(self):
         class Dummy:
             def __init__(self, name):
@@ -57,7 +54,6 @@ class TestUtils:
 
         with pytest.raises(ValueError):
             Dummy("shu/sha")
-
 
     def test_assert_uniqueness_raises_also_check(self):
         class Dummy:
@@ -74,7 +70,6 @@ class TestUtils:
 
         with pytest.raises(ValueError):
             Dummy2("shu")
-
 
     def test_assert_uniqueness_raises_also_check_no_instance_of_second_class(self):
         class Dummy:
@@ -94,7 +89,6 @@ class TestUtils:
         with pytest.raises(ValueError):
             Dummy2("shu")
 
-
     def test_assert_uniqueness_raises_also_check_list(self):
         class Dummy:
             def __init__(self, name):
@@ -110,7 +104,6 @@ class TestUtils:
 
         with pytest.raises(ValueError):
             Dummy2("shu")
-
 
     def test_exception_on_run_without_previous_new_pipegraph(self):
         ppg.global_pipegraph = None

@@ -1,7 +1,4 @@
 from threading import Lock, Condition
-import threading
-
-# from loguru import logger
 
 
 class _CoreLockContextManager:

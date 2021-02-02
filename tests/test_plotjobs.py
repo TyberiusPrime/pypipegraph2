@@ -134,12 +134,15 @@ if has_pyggplot:  # noqa C901
                 p.width = 5
                 p.height = 2
                 return p
+
             p = ppg.FileGeneratingJob("A", prep_job)
 
             # this tests the correct dependency setting on skip_caching
             Path("out").mkdir()
             of = "out/test.png"
-            p2, c2, t2 = ppg.PlotJob(of, calc, plot, cache_calc=False, render_args={'width': 2, 'height': 4})
+            p2, c2, t2 = ppg.PlotJob(
+                of, calc, plot, cache_calc=False, render_args={"width": 2, "height": 4}
+            )
             p2.depends_on(p)
             t2.depends_on(
                 p
@@ -264,7 +267,7 @@ if has_pyggplot:  # noqa C901
                 append("out/plot", "B")
                 return dp(df).p9().add_point("Y", "X")
 
-            job = ppg.PlotJob(of, calc, plot2, depend_on_function=False)
+            ppg.PlotJob(of, calc, plot2, depend_on_function=False)
             ppg.run()
             assert magic(of).find(b"PNG image") != -1
             assert read("out/calc") == "A"
@@ -333,7 +336,7 @@ if has_pyggplot:  # noqa C901
                     {"X": list(range(0, 100)), "Y": list(range(50, 150))}
                 )
 
-            job = ppg.PlotJob(of, calc2, plot, depend_on_function=False)
+            ppg.PlotJob(of, calc2, plot, depend_on_function=False)
             ppg.run()
             assert magic(of).find(b"PNG image") != -1
             assert read("out/calc") == "A"
@@ -368,7 +371,7 @@ if has_pyggplot:  # noqa C901
                 return None
 
             of = "out/test.png"
-            job = ppg.PlotJob(of, calc, plot)
+            ppg.PlotJob(of, calc, plot)
             with pytest.raises(ppg.RunFailed):
                 ppg.run()
             print(type(ppg.global_pipegraph.last_run_result[of].error))
@@ -376,7 +379,9 @@ if has_pyggplot:  # noqa C901
             assert isinstance(
                 ppg.global_pipegraph.last_run_result[of].error, ppg.JobError
             )
-            assert 'did not return a plot object' in str(ppg.global_pipegraph.last_run_result[of].error)
+            assert "did not return a plot object" in str(
+                ppg.global_pipegraph.last_run_result[of].error
+            )
 
         def test_passing_non_function_for_calc(self):
             def inner():
@@ -450,7 +455,6 @@ if has_pyggplot:  # noqa C901
             )
 
         def test_matplotlib(self):
-            import matplotlib
             import matplotlib.pyplot as plt
             import numpy as np
 
@@ -461,8 +465,10 @@ if has_pyggplot:  # noqa C901
             fig, ax = plt.subplots()
             ax.plot(t, s)
 
-            ax.set(xlabel='time (s)', ylabel='voltage (mV)',
-                   title='About as simple as it gets, folks')
+            ax.set(
+                xlabel="time (s)",
+                ylabel="voltage (mV)",
+                title="About as simple as it gets, folks",
+            )
             ax.grid()
             return fig
-

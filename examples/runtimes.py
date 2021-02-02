@@ -1,7 +1,6 @@
 # demonstrate runtime logging
 import pypipegraph2 as ppg
 import time
-import pandas as pd
 from pathlib import Path
 import os
 import shutil

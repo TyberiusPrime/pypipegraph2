@@ -1,9 +1,7 @@
 from __future__ import annotations
-import time
 import collections
 import tempfile
 import pickle
-import multiprocessing
 import os
 import dis
 import re
@@ -199,7 +197,7 @@ class Job:
         global_pipegraph.run_for_these(self)
         return self._call_result()
 
-    def _call_result(self): # pragma: no cover
+    def _call_result(self):  # pragma: no cover
         return None
 
 
@@ -387,11 +385,11 @@ class MultiFileGeneratingJob(Job):
                             pickle.dump(e, exception_out)
                             exception_out.flush()
                         except Exception as e2:
-                            msg = f"FileGeneratingJob raised exception, but saving the exception failed: \n{type(e)} {escape_logging(e)} - \n {type(e2)} {escape_logging(e2)}\n"
+                            # msg = f"FileGeneratingJob raised exception, but saving the exception failed: \n{type(e)} {escape_logging(e)} - \n {type(e2)} {escape_logging(e2)}\n"
                             # traceback is already dumped
                             # exception_out.seek(0,0) # might have dumped the traceback already, right?
                             # pickle.dump(captured_tb, exception_out)
-                            pickle.dump(exceptions.JobDied(repr(e)), exception_out)
+                            pickle.dump(exceptions.JobDied(repr(e), repr(e2)), exception_out)
                             exception_out.flush()
                             raise
                         finally:
@@ -412,7 +410,7 @@ class MultiFileGeneratingJob(Job):
                             try:
                                 tb = pickle.load(exception_out)
                                 exception = pickle.load(exception_out)
-                            except:
+                            except Exception:
                                 logger.error(
                                     f"Job died (=exitcode != 0): {self.job_id}"
                                 )
@@ -1496,8 +1494,6 @@ def PlotJob(
     If create_table is set, the third one is a FileGeneratingJob
     writing (output_filename + '.tsv').
     """
-    from . import global_pipegraph
-
     if render_args is None:
         render_args = {}
     output_filename = Path(output_filename)

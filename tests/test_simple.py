@@ -32,7 +32,6 @@ class TestSimple:
         with pytest.raises(ValueError):
             a.readd()
 
-
     def test_run_pipegraph_without_pipegraph_raises(self):
         destroy_global_pipegraph()
         with pytest.raises(ValueError):
