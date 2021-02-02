@@ -1,5 +1,6 @@
 Open stuff
 	- magic turn-notebook-cell-into-job-thing
+	- 
 	- notebook interaction vs early exploding
 	- 
 	- robust history storing when the graph dies / is aborted during it's run?
@@ -21,7 +22,7 @@ Open stuff
 		Can we at least in interactive mode complain when we create a FileGeneratingJob
 	    without history who's file already exists?
 		
-	  or should we simply share the damn status file? 
+	  or should we simply share the status file? 
 		
 		
 	- prebuild jobs

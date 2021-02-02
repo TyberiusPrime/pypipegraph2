@@ -7,12 +7,16 @@ from loguru import logger
 import time
 import networkx
 from .util import escape_logging
-from .enums import JobKind, ValidationState, JobState
-from .exceptions import _RunAgain
-from .parallel import CoreLock
+from .enums import JobKind, ValidationState, JobState, RunMode
+from .exceptions import _RunAgain, _TerminateThread
+from .parallel import CoreLock, async_raise
+from threading import Thread
 from . import ppg_traceback
 import threading
+from .util import console
 from rich.console import Console
+from rich.live import Live
+from rich.text import Text
 
 
 class JobStatus:
@@ -28,7 +32,7 @@ class JobStatus:
         self.updated_output = {}
 
         self.start_time = -1
-        self.run_time = -1
+        self.run_time = -1.0
 
         self.error = None
 
@@ -214,6 +218,7 @@ class Runner:
 
         logger.job_trace("Runner.__run__")
 
+        self.aborted = False
         self.output_hashes = {}
         self.new_history = {}  # what are the job outputs this time.
         self.run_id = (
@@ -271,10 +276,15 @@ class Runner:
         todo = len(self.dag)
         logger.job_trace(f"jobs: {self.jobs.keys()}")
         logger.job_trace(f"skipped jobs: {skipped_jobs}")
+        self.jobs_done = 0
+        self.report_status()
         try:
             while todo:
                 try:
                     ev = self.events.get(timeout=self.event_timeout)
+                    if ev[0] == "AbortRun":
+                        logger.info("Aborting run on external request")
+                        break
                 except queue.Empty:
                     # long time, no event.
                     if not self.jobs_in_flight:
@@ -288,24 +298,36 @@ class Runner:
                 logger.job_trace(
                     f"<-handle {ev[0]} {escape_logging(ev[1][0])}, todo: {todo}"
                 )
-                todo += self.handle_event(ev)
+                d = self.handle_event(ev)
+                todo += d
+                self.jobs_done -= d
+                self.report_status()
                 logger.job_trace(f"<-done - todo: {todo}")
-            try:
-                ev = self.events.get_nowait()
-            except queue.Empty:
-                pass
+            if not self.aborted:
+                try:
+                    ev = self.events.get_nowait()
+                except queue.Empty:
+                    pass
+                else:
+                    logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
+                    self.handle_event(ev)
             else:
-                logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
-                self.handle_event(ev)
+                for t in self.threads:
+                    logger.job_trace(
+                        f"Asking thread to terminate at next Python call {time.time() - self.abort_time}"
+                    )
+                    async_raise(t.ident, KeyboardInterrupt)
         finally:
+            logger.job_trace("Joining threads")
 
             for t in self.threads:
                 self.jobs_to_run_que.put(ExitNow)
-            logger.job_trace("Joining threads")
             for t in self.threads:
                 t.join()
+            if hasattr(self, "_status"):
+                self._status.stop()
 
-        if len(global_pipegraph.jobs) != job_count:
+        if len(global_pipegraph.jobs) != job_count and not self.aborted:
             logger.job_trace(
                 f"created new jobs. _RunAgain issued {len(global_pipegraph.jobs)} != {job_count}"
             )
@@ -315,6 +337,32 @@ class Runner:
             raise _RunAgain(self.job_states)
         logger.job_trace("Left runner.run()")
         return self.job_states
+
+    def report_status(self):
+        if self.job_graph.run_mode is RunMode.CONSOLE:
+            if not hasattr(self, "_status"):
+                import rich.status
+
+                self._status = console.status("Working")
+                self._status.start()
+                ##self._console = Console()
+                # self._live = Live(transient=True, console=console, auto_refresh=False, redirect_stdout=False, redirect_stderr=False)
+                # self._live.start()
+            self._status.update(
+                status=f"[red]Progress[/red] {self.jobs_done} / {len(self.dag)}"
+            )
+            ##self._live.update(text)
+            # self._live.refresh()
+            # sys.stderr.write(f"[red]Progress[/red] {self.jobs_done} / {len(self.dag)}\r")
+            # sys.stderr.flush()
+            # self._live.console.print('[blue]h[/blue]ello')
+            # print("report status")
+
+    def abort(self):
+        """Kill all running jobs and leave runner"""
+        self.aborted = True
+        self.abort_time = time.time()
+        self.push_event("AbortRun", (False,))
 
     def handle_event(self, event):
         todo = 0
@@ -338,6 +386,7 @@ class Runner:
     def handle_job_success(self, job_id, job_outputs):
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
+        logger.info(f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]")
         # record our success
         logger.job_trace(f"\t{escape_logging(str(job_outputs)[:500])}...")
         if set(job_outputs.keys()) != set(job.outputs):
@@ -527,18 +576,25 @@ class Runner:
         logger.job_trace(f"putting {job_id}")
         self.jobs_to_run_que.put(job_id)
 
-    def _format_rich_traceback_fallback(self, tb):
-        def render_locals(frame):
-            out.append("[bold]Locals[/bold]:")
-            scope = frame.locals
-            items = sorted(scope.items())
-            len_longest_key = max((len(x[0]) for x in items))
-            for key, value in items:
-                v = str(value)
-                if len(v) > 1000:
-                    v = v[:1000] + "…"
-                v = textwrap.indent(v, "\t   " + " " * len_longest_key).lstrip()
-                out.append(f"\t{key.rjust(len_longest_key, ' ')} = {v}")
+    def _format_rich_traceback_fallback(self, tb, include_locals):
+        if include_locals:
+
+            def render_locals(frame):
+                out.append("[bold]Locals[/bold]:")
+                scope = frame.locals
+                items = sorted(scope.items())
+                len_longest_key = max((len(x[0]) for x in items))
+                for key, value in items:
+                    v = str(value)
+                    if len(v) > 1000:
+                        v = v[:1000] + "…"
+                    v = textwrap.indent(v, "\t   " + " " * len_longest_key).lstrip()
+                    out.append(f"\t{key.rjust(len_longest_key, ' ')} = {v}")
+
+        else:
+
+            def render_locals(frame):
+                pass
 
         first_stack = True
         out = []
@@ -600,7 +656,7 @@ class Runner:
         job_state = self.job_states[job_id]
         job_state.state = JobState.Failed
         self.fail_downstream_by_outputs(job.outputs, job_id)
-        logger.error(f"failed {job_id}")
+        # logger.error(f"Failed {job_id}")
         if not self.job_failed_last_time(job_id):
             if self.job_graph.error_dir is not None:
                 error_file = self.job_graph.error_dir / (
@@ -609,14 +665,20 @@ class Runner:
                 with open(error_file, "w") as ef:
                     c = Console(file=ef, record=True)
                     c.print(f"{job_id}\n")
-                    c.log(self._format_rich_traceback_fallback(job_state.error.args[1]))
+                    c.log(
+                        self._format_rich_traceback_fallback(
+                            job_state.error.args[1], True
+                        )
+                    )
                     # ef.write(self._format_rich_traceback_fallback(job_state.error.args[1]))
-                logger.error(f"Failed job: {job_id}. Exception logged to {error_file}")
+                logger.error(
+                    f"Failed after {job_state.run_time:.2}s: [bold]{job_id}[/bold]. Exception (incl. locals) logged to {error_file}"
+                )
             else:
                 logger.error(f"Failed job: {job_id}")
             logger.error(
                 escape_logging(
-                    self._format_rich_traceback_fallback(job_state.error.args[1])
+                    self._format_rich_traceback_fallback(job_state.error.args[1], False)
                 )
             )
 
@@ -682,85 +744,88 @@ class Runner:
             self.start_another_thread()
 
     def start_another_thread(self):
-        t = threading.Thread(target=self.executing_thread)
+        t = Thread(target=self.executing_thread)
         self.threads.append(t)
         t.start()
 
     def executing_thread(self):
         my_pid = os.getpid()
         cwd = os.getcwd()
-        while True:
-            job_id = self.jobs_to_run_que.get()
-            self.jobs_in_flight += 1
-            logger.job_trace(f"Executing thread, got {job_id}")
-            if job_id is ExitNow:
-                break
-            job = self.jobs[job_id]
-            c = job.resources.to_number(self.core_lock.max_cores)
-            logger.job_trace(
-                f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {self.jobs_in_flight}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
-            )
-            if c > 1:
-                # we could stall all SingleCores/RunsHere by having all_cores blocking all but one thread (which executes another all_core).
-                # if we detect that situation, we spawn another one.
-                self.jobs_all_cores_in_flight += 1
-                if (
-                    self.jobs_all_cores_in_flight >= len(self.threads)
-                    and len(self.threads)
-                    <= self.job_graph.cores
-                    * 5  # at one point, we either have to let threads die again, or live with
-                    # the wasted time b y stalling.
-                ):
-                    logger.job_trace(
-                        "All threads blocked by Multi core jobs - starting another one"
-                    )
-                    self.start_another_thread()
+        try:
+            while True:
+                job_id = self.jobs_to_run_que.get()
+                self.jobs_in_flight += 1
+                logger.job_trace(f"Executing thread, got {job_id}")
+                if job_id is ExitNow:
+                    break
+                job = self.jobs[job_id]
+                c = job.resources.to_number(self.core_lock.max_cores)
+                logger.job_trace(
+                    f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {self.jobs_in_flight}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
+                )
+                if c > 1:
+                    # we could stall all SingleCores/RunsHere by having all_cores blocking all but one thread (which executes another all_core).
+                    # if we detect that situation, we spawn another one.
+                    self.jobs_all_cores_in_flight += 1
+                    if (
+                        self.jobs_all_cores_in_flight >= len(self.threads)
+                        and len(self.threads)
+                        <= self.job_graph.cores
+                        * 5  # at one point, we either have to let threads die again, or live with
+                        # the wasted time b y stalling.
+                    ):
+                        logger.job_trace(
+                            "All threads blocked by Multi core jobs - starting another one"
+                        )
+                        self.start_another_thread()
 
-            logger.job_trace(f"wait for {job_id}")
-            with self.core_lock.using(c):
-                logger.job_trace(f"Go {job_id}")
-                job_state = self.job_states[job_id]
-                try:
-                    logger.job_trace(f"\tExecuting {job_id}")
-                    job.start_time = time.time()
-                    outputs = job.run(self, job_state.historical_output)
-                    if os.getcwd() != cwd:
-                        os.chdir(
-                            cwd
-                        )  # restore and hope we can recover enough to actually print the exception, I suppose.
-                        logger.error(
-                            f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
+                logger.job_trace(f"wait for {job_id}")
+                with self.core_lock.using(c):
+                    logger.job_trace(f"Go {job_id}")
+                    job_state = self.job_states[job_id]
+                    try:
+                        logger.job_trace(f"\tExecuting {job_id}")
+                        job.start_time = time.time()
+                        outputs = job.run(self, job_state.historical_output)
+                        if os.getcwd() != cwd:
+                            os.chdir(
+                                cwd
+                            )  # restore and hope we can recover enough to actually print the exception, I suppose.
+                            logger.error(
+                                f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
+                            )
+                            raise exceptions.JobContractError(
+                                f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
+                            )
+                        self.push_event("JobSuccess", (job_id, outputs))
+                    except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
+                        logger.job_trace(
+                            "SystemExit in spawned process -> converting to hard exit"
                         )
-                        raise exceptions.JobContractError(
-                            f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
-                        )
-
-                    job.stop_time = time.time()
-                    job.run_time = job.stop_time - job.start_time
-                    self.job_states[job_id].run_time = job.run_time
-                    self.push_event("JobSuccess", (job_id, outputs))
-                except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
-                    logger.job_trace(
-                        "SystemExit in spawned process -> converting to hard exit"
-                    )
-                    if os.getpid() != my_pid:
-                        os._exit(e.args[0])
-                except Exception as e:
-                    if isinstance(e, exceptions.JobError):
-                        job_state.error = e
-                    else:
-                        exception_type, exception_value, tb = sys.exc_info()
-                        captured_tb = ppg_traceback.Trace(
-                            exception_type, exception_value, tb
-                        )
-                        job_state.error = exceptions.JobError(e, captured_tb,)
-                    e = job_state.error
-                    self.push_event("JobFailed", (job_id, job_id))
-                finally:
-                    logger.job_trace(f"end {job_id}")
-                    self.jobs_in_flight -= 1
-                    if c > 1:
-                        self.jobs_all_cores_in_flight -= 1
+                        if os.getpid() != my_pid:
+                            os._exit(e.args[0])
+                    except Exception as e:
+                        if isinstance(e, exceptions.JobError):
+                            job_state.error = e
+                        else:
+                            exception_type, exception_value, tb = sys.exc_info()
+                            captured_tb = ppg_traceback.Trace(
+                                exception_type, exception_value, tb
+                            )
+                            job_state.error = exceptions.JobError(e, captured_tb,)
+                        e = job_state.error
+                        self.push_event("JobFailed", (job_id, job_id))
+                    finally:
+                        job.stop_time = time.time()
+                        job.run_time = job.stop_time - job.start_time
+                        self.job_states[job_id].run_time = job.run_time
+                        logger.job_trace(f"end {job_id}")
+                        self.jobs_in_flight -= 1
+                        if c > 1:
+                            self.jobs_all_cores_in_flight -= 1
+        except (KeyboardInterrupt, SystemExit):
+            logger.info(f"Keyboard Interrupt received {time.time() - self.abort_time}")
+            pass
 
 
 class JobCollector:

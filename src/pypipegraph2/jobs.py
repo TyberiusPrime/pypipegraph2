@@ -1,4 +1,6 @@
 from __future__ import annotations
+import signal
+import time
 import collections
 import tempfile
 import pickle
@@ -333,12 +335,16 @@ class MultiFileGeneratingJob(Job):
                 suffix=f"__{self.job_number}.exception",
             )
 
+            def aborted(sig, stack):
+                raise KeyboardInterrupt()
+
             try:
                 pid = os.fork()
                 if (
                     pid == 0
                 ):  # pragma: no cover - coverage doesn't see this, since the spawned job os._exits()
                     try:
+                        signal.signal(signal.SIGUSR1, aborted)
                         for x in stdout, stderr, exception_out:
                             x.delete = False  # that's the parent's job!
                             x._closer.delete = False  # that's the parent's job!
@@ -395,7 +401,21 @@ class MultiFileGeneratingJob(Job):
                         finally:
                             os._exit(1)
                 else:
-                    _, waitstatus = os.waitpid(pid, 0)
+                    wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
+                    try:
+                        while (wp1 == 0 and waitstatus == 0):
+                            time.sleep(1)
+                            wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
+                    except KeyboardInterrupt:
+                        logger.info(f"Keyboard interrupt in {self.job_id} - sigbreak spawned process")
+                        os.kill(pid, signal.SIGUSR1)
+                        time.sleep(1)
+                        logger.info(f"Keyboard interrupt in {self.job_id} - checking spawned process")
+                        wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
+                        if wp1== 0 and waitstatus == 0:
+                            logger.info(f"Keyboard interrupt in {self.job_id} - sigkill spawned process")
+                            os.kill(pid, signal.SIGKILL)
+                        raise
                     if os.WIFEXITED(waitstatus):
                         # normal termination.
                         exitcode = os.WEXITSTATUS(waitstatus)

@@ -10,18 +10,20 @@ import time
 import datetime
 from pathlib import Path
 from loguru import logger
+
 from . import exceptions
 from .runner import Runner, JobState
-from .util import CPUs
+from .util import CPUs, console
 from .enums import RunMode
 from .exceptions import _RunAgain
 from rich.logging import RichHandler
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
-logger.configure(handlers=[{"sink": RichHandler(markup=True), "format": "{message}"}])
+logger.configure(handlers=[{"sink": RichHandler(markup=True, console=console), "format": "{message}"}])
 
 time_format = "%Y-%m-%d_%H-%M-%S"
+
 
 
 class ALL_CORES:
@@ -128,8 +130,9 @@ class PyPipeGraph:
                 if max_runs == 0:  # pragma: no cover
                     raise ValueError("endless loop")
                 try:
-                    runner = Runner(self, history, event_timeout, focus_on_these_jobs)
-                    result = runner.run(self.run_id, result)
+                    self.runner = Runner(self, history, event_timeout, focus_on_these_jobs)
+                    result = self.runner.run(self.run_id, result)
+                    del self.runner
                     self.run_id += 1
                     self.update_history(result, history)
                     self.log_runtimes(result, start_time)
@@ -169,8 +172,6 @@ class PyPipeGraph:
         fn = Path(sys.argv[0]).name
         pattern = f"{fn}-*.log"
         files = sorted(self.log_dir.glob(pattern))
-        print(self.time_str)
-        print("files", files)
         if len(files) > self.log_retention:
             remove = files[: -self.log_retention]
             for f in remove:
@@ -355,12 +356,19 @@ class PyPipeGraph:
             logger.debug("user logged off - continuing run")
 
         def sigint(*args, **kwargs):
-            logger.info("CTRL-C has been disabled")
+            if self.run_mode is (RunMode.CONSOLE):
+                logger.info("CTRL-C has been disabled")
+            else:
+                logger.info("CTRL-C received. Killing all running jobs.")
+                if hasattr(self, 'runner'):
+                    print('calling abort')
+                    self.runner.abort()
 
         if self.run_mode is (RunMode.CONSOLE):
             self._old_signal_hup = signal.signal(signal.SIGHUP, hup)
-        if self.run_mode in (RunMode.CONSOLE, RunMode.NOTEBOOK):
-            self._old_signal_int = signal.signal(signal.SIGINT, sigint)
+        #if self.run_mode in (RunMode.CONSOLE, RunMode.NOTEBOOK):
+        # we always steal ctrl c
+        self._old_signal_int = signal.signal(signal.SIGINT, sigint)
 
     def _restore_signals(self):
         logger.trace("_restore_signals")
