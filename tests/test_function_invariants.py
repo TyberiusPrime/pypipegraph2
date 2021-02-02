@@ -39,7 +39,6 @@ def b():
         f2 = ppg.FunctionInvariant("b", lambda: 45)
         with pytest.raises(ppg.JobRedefinitionError):
             ppg.FunctionInvariant("b", func2)  # python vs cython
-        raise ValueError(ppg.FunctionInvariant.function_to_str(func))
 
     def test_just_a_function_with_docstring(self):
         import cython

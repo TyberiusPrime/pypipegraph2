@@ -60,7 +60,7 @@ class ExitNow:
 
 
 class Runner:
-    def __init__(self, job_graph, history, event_timeout):
+    def __init__(self, job_graph, history, event_timeout, focus_on_these_jobs):
         from . import _with_changed_global_pipegraph
 
         logger.job_trace("Runner.__init__")
@@ -75,7 +75,7 @@ class Runner:
             flat_before = networkx.readwrite.json_graph.node_link_data(
                 job_graph.job_dag
             )
-            self.dag = self.modify_dag(job_graph)
+            self.dag = self.modify_dag(job_graph, focus_on_these_jobs)
             flat_after = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
             import json
 
@@ -108,21 +108,40 @@ class Runner:
             self.jobs_to_run_que = queue.SimpleQueue()
             self.threads = []
 
-    def modify_dag(self, job_graph):
+    def modify_dag(self, job_graph, focus_on_these_jobs):
         from .jobs import _DownstreamNeedsMeChecker
 
         def _recurse_pruning(job_id, reason):
+            """This goes forward/downstream"""
             pruned.add(job_id)
             if not hasattr(self.jobs[job_id], "prune_reason"):
                 self.jobs[job_id].prune_reason = reason
             for downstream_job_id in dag.successors(job_id):
                 _recurse_pruning(downstream_job_id, reason)
 
+        def _recurse_unpruning(job_id):
+            """This goes upstream"""
+            try:
+                pruned.remove(job_id)
+                del self.jobs[job_id].prune_reason
+            except (KeyError, AttributeError):
+                pass
+            for downstream_job_id in dag.predecessors(job_id):
+                _recurse_unpruning(downstream_job_id)
+
         dag = job_graph.job_dag.copy()
-        pruned = set()
-        for job_id in self.jobs:
-            if self.jobs[job_id]._pruned:
-                _recurse_pruning(job_id, job_id)
+        if focus_on_these_jobs:
+            # prune all jobs,
+            # then unprune this one and it's predecessors
+            pruned = set(dag.nodes) # prune all...
+            for job in focus_on_these_jobs:
+                _recurse_unpruning(job.job_id)
+        else:
+            # apply regular pruning
+            pruned = set()
+            for job_id in self.jobs:
+                if self.jobs[job_id]._pruned:
+                    _recurse_pruning(job_id, job_id)
         for job_id in pruned:
             dag.remove_node(job_id)
         known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))

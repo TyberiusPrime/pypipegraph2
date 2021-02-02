@@ -83,6 +83,12 @@ class PyPipeGraph:
     def run(
         self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5
     ) -> Dict[str, JobState]:
+        return self._run(print_failures, raise_on_job_error, event_timeout, None)
+
+    def _run(
+        self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5,
+        focus_on_these_jobs=None
+    ) -> Dict[str, JobState]:
         self.time_str = datetime.datetime.now().strftime(time_format)
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
             print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
@@ -120,7 +126,7 @@ class PyPipeGraph:
                 if max_runs == 0:  # pragma: no cover
                     raise ValueError("endless loop")
                 try:
-                    runner = Runner(self, history, event_timeout)
+                    runner = Runner(self, history, event_timeout, focus_on_these_jobs)
                     result = runner.run(self.run_id, result)
                     self.run_id += 1
                     self.update_history(result, history)
@@ -147,6 +153,12 @@ class PyPipeGraph:
             if print_failures:
                 self._print_failures()
             self._restore_signals()
+
+    def run_for_these(self, jobs):
+        if not isinstance(jobs, list):
+            jobs = [jobs]
+        return self._run(print_failures=True, raise_on_job_error=True, focus_on_these_jobs=jobs)
+
 
     def cleanup_logs(self):
         if not self.log_dir or self.log_retention is None:

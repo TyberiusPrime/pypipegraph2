@@ -12,15 +12,19 @@ A longer description of your project goes here...
 ## Note
 
 Differences to pypipegraph
+	- graphs can now be run multiple times
+	- calling a job will run the graph cut down to this job and it's prerequisites.
+	  Some jobs - like PlotJobs will return something useful from the call.
 
-	- FileGeneratingJobs callbacks now must take the target filename as first parameter
+	- FileGeneratingJob-callbacks now must take the target filename as first parameter
 	  MultiFileGeneratingJob receive either their mapping, or their list of output files.
+	  This is being checked at definitaion time.
 	- MultiFileGeneratingJob may receive a dict of 'pretty name' -> filename'. 
 	  Then you can depend_on(mfg['pretty name A']) to only invalidate when 'filenameA's content changes!
 	- PlotJob now returns a tuple: (PlotJob, Optional(CalcJob), Optional(TableJob).
-	  This removes all the unintuitive uglyness of 'which job will depends_on add the
+	  This removes all the unintuitive ugliness of 'which job will depends_on add the
 	  dependency to'.
-	- PlotJob skip_table / skip_caching are now create_table and cache_calc (defaulting to Ture)
+	- PlotJob skip_table / skip_caching are now create_table and cache_calc (defaulting to True)
 	- CachedAttributeLoadingJob now returns a tuple (AttributeLoadingJob, FileGeneratingJob)
 	- .ignore_code_changes has been replaced by constructor argument depend_on_function (inverted!)
 	- ppg.run_pipegraph() / ppg.new_pipegraph() is now just ppg.run()/ppg.ew()

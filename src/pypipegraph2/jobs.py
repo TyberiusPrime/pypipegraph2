@@ -189,6 +189,19 @@ class Job:
     def unprune(self):
         self._pruned = False
 
+    def __call__(self):
+        """execute just enough of the pipeline that this job get's evaluated.
+        A job may return something here for interactive work (plot jobs for example
+        will return the plot object
+        """
+        from . import global_pipegraph
+
+        global_pipegraph.run_for_these(self)
+        return self._call_result()
+
+    def _call_result(self): # pragma: no cover
+        return None
+
 
 class _DownstreamNeedsMeChecker(Job):
     job_kind = JobKind.Invariant
@@ -495,6 +508,12 @@ class MultiFileGeneratingJob(Job):
             if str(fn) not in runner.job_states[self.job_id].historical_output:
                 return True
         False
+
+    def _call_result(self):
+        if self.lookup:
+            return self.lookup
+        else:
+            return self.files
 
 
 class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
@@ -1500,6 +1519,13 @@ def PlotJob(
         plot_job.depends_on(FunctionInvariant(str(output_filename), plot_function))
     param_job = ParameterInvariant(output_filename, render_args)
     plot_job.depends_on(param_job)
+
+    def _call_result():
+        if not hasattr(plot_job, "data_"):
+            plot_job.data_ = calc_function()
+        return plot_function(plot_job.data_)
+
+    plot_job._call_result = _call_result
 
     cache_filename = Path(cache_dir) / output_filename
     if cache_calc:

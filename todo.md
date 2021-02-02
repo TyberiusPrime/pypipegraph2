@@ -1,5 +1,4 @@
 Open stuff
-	- The call() syntax
 	- magic turn-notebook-cell-into-job-thing
 	- notebook interaction vs early exploding
 	- 
@@ -35,8 +34,6 @@ Open stuff
 	 
 	- write test case with our regular object structure
 	 
-	 
-	- prevent stalling if a bunch of ALL_CORES jobs hog all the threads, no SINGLE_CORE jobs will be running.
 
 	-ppg1 compability layer
 	
