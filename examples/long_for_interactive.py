@@ -17,7 +17,7 @@ total_runtime = 10
 ppg.new(cores=3, run_mode =ppg.RunMode.CONSOLE)
 
 
-def gen_jobs_stack(name, runtime):
+def gen_jobs_stack(name, runtime, total_runtime=total_runtime):
     def inner(of, runtime=runtime):
         for ii in range(runtime):
             time.sleep(1)
@@ -35,6 +35,10 @@ def gen_jobs_stack(name, runtime):
 gen_jobs_stack('1s', 1)
 #gen_jobs_stack('30s', 10)
 #gen_jobs_stack('60s', 60)
+
+def gen_2nd():
+    gen_jobs_stack('1sB', 1,5)
+ppg.JobGeneratingJob('genjobs', gen_2nd)
 
 try:
     ppg.run()

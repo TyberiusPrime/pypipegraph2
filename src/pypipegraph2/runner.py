@@ -17,6 +17,7 @@ from .util import console
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
+from .interactive import ConsoleInteractive
 
 
 class JobStatus:
@@ -270,13 +271,14 @@ class Runner:
             if hasattr(self.jobs[job_id], "cleanup_job_class"):
                 for downstream_id in self.dag.neighbors(job_id):
                     self.push_event("JobSkipped", (downstream_id,))
-        self.jobs_in_flight = 0
+        self.jobs_in_flight = []
         self.jobs_all_cores_in_flight = 0
         self.start_job_executing_threads()
         todo = len(self.dag)
         logger.job_trace(f"jobs: {self.jobs.keys()}")
         logger.job_trace(f"skipped jobs: {skipped_jobs}")
         self.jobs_done = 0
+        self.start_interactive()
         self.report_status()
         try:
             while todo:
@@ -326,6 +328,7 @@ class Runner:
                 t.join()
             if hasattr(self, "_status"):
                 self._status.stop()
+            self.stop_interactive()
 
         if len(global_pipegraph.jobs) != job_count and not self.aborted:
             logger.job_trace(
@@ -338,25 +341,18 @@ class Runner:
         logger.job_trace("Left runner.run()")
         return self.job_states
 
-    def report_status(self):
+    def start_interactive(self):
         if self.job_graph.run_mode is RunMode.CONSOLE:
-            if not hasattr(self, "_status"):
-                import rich.status
+            self.interactive = ConsoleInteractive()
+            self.interactive.start(self)
 
-                self._status = console.status("Working")
-                self._status.start()
-                ##self._console = Console()
-                # self._live = Live(transient=True, console=console, auto_refresh=False, redirect_stdout=False, redirect_stderr=False)
-                # self._live.start()
-            self._status.update(
-                status=f"[red]Progress[/red] {self.jobs_done} / {len(self.dag)}"
-            )
-            ##self._live.update(text)
-            # self._live.refresh()
-            # sys.stderr.write(f"[red]Progress[/red] {self.jobs_done} / {len(self.dag)}\r")
-            # sys.stderr.flush()
-            # self._live.console.print('[blue]h[/blue]ello')
-            # print("report status")
+    def stop_interactive(self):
+        if hasattr(self, "interactive"):
+            self.interactive.stop()
+
+    def report_status(self):
+        if hasattr(self, "interactive"):
+            self.interactive.report_status(self.jobs_done, 0, len(self.dag))
 
     def abort(self):
         """Kill all running jobs and leave runner"""
@@ -754,14 +750,14 @@ class Runner:
         try:
             while True:
                 job_id = self.jobs_to_run_que.get()
-                self.jobs_in_flight += 1
+                self.jobs_in_flight.append(job_id)
                 logger.job_trace(f"Executing thread, got {job_id}")
                 if job_id is ExitNow:
                     break
                 job = self.jobs[job_id]
                 c = job.resources.to_number(self.core_lock.max_cores)
                 logger.job_trace(
-                    f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {self.jobs_in_flight}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
+                    f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {len(self.jobs_in_flight)}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
                 )
                 if c > 1:
                     # we could stall all SingleCores/RunsHere by having all_cores blocking all but one thread (which executes another all_core).
@@ -820,7 +816,7 @@ class Runner:
                         job.run_time = job.stop_time - job.start_time
                         self.job_states[job_id].run_time = job.run_time
                         logger.job_trace(f"end {job_id}")
-                        self.jobs_in_flight -= 1
+                        self.jobs_in_flight.remove(job_id)
                         if c > 1:
                             self.jobs_all_cores_in_flight -= 1
         except (KeyboardInterrupt, SystemExit):

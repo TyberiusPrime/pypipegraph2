@@ -694,8 +694,8 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             historical_output = {}
         file_unchanged = False
         new_file_hash = None
-        if sf:  # we only have a source file for python functions.
-            sf = Path(sf)
+        if sf and not sf.name.startswith('<'):  # we only have a source file for python functions.
+            #sf = Path(sf)
             stat = sf.stat()
             if historical_output:
                 if "source_file" in historical_output:
