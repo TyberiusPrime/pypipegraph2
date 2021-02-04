@@ -6,6 +6,7 @@ import sys
 import pickle
 import signal
 import networkx
+import subprocess
 import time
 import datetime
 from pathlib import Path
@@ -20,10 +21,15 @@ from rich.logging import RichHandler
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
-logger.configure(handlers=[{"sink": RichHandler(markup=True, console=console), "format": "{message}"}])
+logger.configure(
+    handlers=[
+        {"sink": RichHandler(markup=True, console=console), "format": "{message}"}
+    ]
+)
 
 time_format = "%Y-%m-%d_%H-%M-%S"
 
+start_cwd = Path(".").absolute()
 
 
 class ALL_CORES:
@@ -120,6 +126,7 @@ class PyPipeGraph:
         self.history_dir.mkdir(exist_ok=True, parents=True)
         self.run_dir.mkdir(exist_ok=True, parents=True)
         self.do_raise = []
+        self._restart_afterwards = False
         try:
             result = None
             self._install_signals()
@@ -130,7 +137,9 @@ class PyPipeGraph:
                 if max_runs == 0:  # pragma: no cover
                     raise ValueError("endless loop")
                 try:
-                    self.runner = Runner(self, history, event_timeout, focus_on_these_jobs)
+                    self.runner = Runner(
+                        self, history, event_timeout, focus_on_these_jobs
+                    )
                     result = self.runner.run(self.run_id, result)
                     del self.runner
                     self.run_id += 1
@@ -151,7 +160,7 @@ class PyPipeGraph:
                     ):
                         self.do_raise.append("At least one job failed")
             self.last_run_result = result
-            if self.do_raise:
+            if self.do_raise and not self._restart_afterwards:
                 raise exceptions.RunFailed(*self.do_raise)
             return result
         finally:
@@ -159,6 +168,11 @@ class PyPipeGraph:
             if print_failures:
                 self._print_failures()
             self._restore_signals()
+            if self._restart_afterwards:
+                logger.info(
+                    "Restart again issued - restarting via subprocess.check_call"
+                )
+                subprocess.check_call([sys.executable] + sys.argv, cwd=start_cwd)
 
     def run_for_these(self, jobs):
         if not isinstance(jobs, list):
@@ -361,13 +375,13 @@ class PyPipeGraph:
                 logger.info("CTRL-C has been disabled")
             else:
                 logger.info("CTRL-C received. Killing all running jobs.")
-                if hasattr(self, 'runner'):
-                    print('calling abort')
+                if hasattr(self, "runner"):
+                    print("calling abort")
                     self.runner.abort()
 
         if self.run_mode is (RunMode.CONSOLE):
             self._old_signal_hup = signal.signal(signal.SIGHUP, hup)
-        #if self.run_mode in (RunMode.CONSOLE, RunMode.NOTEBOOK):
+        # if self.run_mode in (RunMode.CONSOLE, RunMode.NOTEBOOK):
         # we always steal ctrl c
         self._old_signal_int = signal.signal(signal.SIGINT, sigint)
 
@@ -421,3 +435,6 @@ class PyPipeGraph:
         else:
             downstream_job_id = downstream_job
         return self.job_dag.has_edge(upstream_job_id, downstream_job_id)
+
+    def restart_afterwards(self):
+        self._restart_afterwards = True

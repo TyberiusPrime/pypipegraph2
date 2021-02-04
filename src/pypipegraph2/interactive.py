@@ -156,3 +156,15 @@ class ConsoleInteractive:
         print(f"Having to wait for jobs: {self.runner.jobs_in_flight}")
         self.runner.stop()
         self.stopped = True
+
+    def _cmd_again(self, _args):
+        """Restart the current python program after all jobs have completed"""
+        logger.info("Again command issued")
+        self.runner.job_graph.restart_afterwards()
+
+    def _cmd_stop_and_again(self, _args):
+        "Stop after current jobs, then restart the current python program"
+        logger.info("Stop_and_again command issued")
+        self.runner.stop()
+        self.stopped = True
+        self.runner.job_graph.restart_afterwards()

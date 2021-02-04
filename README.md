@@ -63,3 +63,7 @@ Differences to pypipegraph
 	- ppg.util.global_pipegraph is now ppg.global_pipegraph
 	- Redefining a job in an incompatible way now raises JobRedefinitionError (instead of JobContractError)
 	- Calling the same PlotJob once with cache_calc/create_table = True and once with False no longer triggers an exception, even in strict (RunMode.CONSOLE) mode. The jobs do stick around though.
+-
+	- interactive console mode
+		- restart/reboot is now 'again/stop_and_again' to make it clearer
+		- better progression, nice output 
