@@ -311,7 +311,7 @@ class Runner:
             if not self.aborted:
                 while self.jobs_in_flight:
                     try:
-                        ev = self.events.get(.1)
+                        ev = self.events.get(0.1)
                     except queue.Empty:
                         break
                     else:
@@ -370,8 +370,8 @@ class Runner:
 
     def abort(self):
         """Kill all running jobs and leave runner"""
-        self.aborted = True
         self.abort_time = time.time()
+        self.aborted = True
         self.push_event("AbortRun", (False,))
 
     def stop(self):
@@ -402,7 +402,11 @@ class Runner:
     def handle_job_success(self, job_id, job_outputs):
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
-        logger.info(f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]")
+        msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
+        if job.job_kind in (JobKind.Temp, JobKind.Output, JobKind.JobGenerating):
+            logger.info(msg)
+        else:
+            logger.debug(msg)
         # record our success
         logger.job_trace(f"\t{escape_logging(str(job_outputs)[:500])}...")
         if set(job_outputs.keys()) != set(job.outputs):
@@ -830,7 +834,10 @@ class Runner:
                             captured_tb = ppg_traceback.Trace(
                                 exception_type, exception_value, tb
                             )
-                            job_state.error = exceptions.JobError(e, captured_tb,)
+                            job_state.error = exceptions.JobError(
+                                e,
+                                captured_tb,
+                            )
                         e = job_state.error
                         self.push_event("JobFailed", (job_id, job_id))
                     finally:

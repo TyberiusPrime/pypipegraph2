@@ -1,4 +1,5 @@
 from typing import Optional, Union, Dict
+import logging
 import shutil
 import collections
 import os
@@ -18,12 +19,17 @@ from .util import CPUs, console
 from .enums import RunMode
 from .exceptions import _RunAgain
 from rich.logging import RichHandler
+from rich.console import Console
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
 logger.configure(
     handlers=[
-        {"sink": RichHandler(markup=True, console=console), "format": "{message}"}
+        {
+            "sink": RichHandler(markup=True, console=console),
+            "format": "{message}",
+            "level": logging.INFO,
+        }
     ]
 )
 
@@ -113,9 +119,17 @@ class PyPipeGraph:
         if self.log_dir:
             self.log_dir.mkdir(exist_ok=True, parents=True)
             fn = Path(sys.argv[0]).name
-            logger.add(self.log_dir / f"{fn}-{self.time_str}.log", level=self.log_level)
-            if self.log_level != 20:  # logging.INFO:
-                logger.add(sink=sys.stdout, level=self.log_level)  # pragma: no cover
+            logger.add(
+                RichHandler(
+                    markup=False,
+                    console=Console(
+                        file=open(self.log_dir / f"{fn}-{self.time_str}.log", "w")
+                    ),
+                ),
+                level=logging.DEBUG,
+            )
+            # if self.log_level != 20:  # logging.INFO:
+            # logger.add(sink=sys.stdout, level=logging.INFO)  # pragma: no cover
             import threading
 
             logger.info(

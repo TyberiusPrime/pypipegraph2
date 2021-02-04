@@ -381,7 +381,7 @@ class MultiFileGeneratingJob(Job):
                             stderr.flush()
                             sys.stdout = stdout_
                             sys.stderr = stderr_
-                    except Exception as e:
+                    except (Exception, KeyboardInterrupt) as e:
                         captured_tb = None  # if the capturing fails for any reason...
                         try:
                             exception_type, exception_value, tb = sys.exc_info()
