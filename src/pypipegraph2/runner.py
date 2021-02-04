@@ -403,7 +403,7 @@ class Runner:
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
         msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
-        if job.job_kind in (JobKind.Temp, JobKind.Output, JobKind.JobGenerating):
+        if job.job_kind in (JobKind.Temp, JobKind.Output, JobKind.JobGenerating, JobKind.Loading):
             logger.info(msg)
         else:
             logger.debug(msg)
