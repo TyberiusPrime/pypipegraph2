@@ -80,7 +80,7 @@ class ConsoleInteractive:
                         self.cmd = ""
                     elif value == "\x1a":  # ctrl-z
                         os.kill(os.getpid(), signal.SIGTSTP)
-                    elif ord("0") <= ord(value) <= ord("z"):
+                    elif ord("0") <= ord(value) <= ord("z") or value == ' ':
                         self.cmd += value
                     elif value == "\x7f":  # backspace
                         self.cmd = self.cmd[:-1]
@@ -91,7 +91,7 @@ class ConsoleInteractive:
                                 args = ""
                                 if " " in command:
                                     command = command[: command.find(" ")]
-                                    args = command[command.find(" ") + 1 :]
+                                    args = self.cmd[len(command) + 1:].strip()
                                 self.cmd = ""
                                 if hasattr(self, "_cmd_" + command):
                                     getattr(self, "_cmd_" + command)(args)
@@ -168,3 +168,28 @@ class ConsoleInteractive:
         self.runner.stop()
         self.stopped = True
         self.runner.job_graph.restart_afterwards()
+
+    def _cmd_kill(self, args):
+        try:
+            job_no = int(args)
+        except ValueError:
+            print(f"Could not understand job number {repr(args)}- must be an integer")
+            return
+        for job in self.runner.jobs.values():
+            if job.job_number == job_no:
+                break
+        else:
+            print("Could not find job number")
+            return
+        if not job.job_id in self.runner.jobs_in_flight:
+            print("Job not currently in flight - can't kill it")
+            return
+        if not job.resources.is_external():
+            print("Job is not running in an external process - can't kill")
+            return
+        print("ok, killing job", job.job_id)
+        logger.info(f"Command kill {job.job_id} ")
+        job.kill_if_running()
+
+
+

@@ -40,10 +40,13 @@ class RunMode(Enum):
 class Resources(Enum):
     SingleCore = "SingleCore"
     AllCores = "AllCores"
-    MemoryHog = "MemoryHog"  # todo
+    # MemoryHog = "MemoryHog"  # todo
     Exclusive = "Exclusive"
-    RateLimited = "RateLimited"  # todo, think web requests
+    # RateLimited = "RateLimited"  # todo, think web requests
     RunsHere = "RunsHere"  # in this process
+
+    def is_external(self):
+        return self in (Resources.SingleCore, Resources.AllCores, Resources.Exclusive)
 
     def to_number(self, max_cores):
         if self is Resources.SingleCore:

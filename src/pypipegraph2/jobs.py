@@ -261,6 +261,7 @@ class MultiFileGeneratingJob(Job):
         self.always_capture_output = always_capture_output
         self.stdout = "not captured"
         self.stderr = "not captured"
+        self.pid = None
 
     def __getitem__(self, key):
         if not self.lookup:
@@ -339,9 +340,9 @@ class MultiFileGeneratingJob(Job):
                 raise KeyboardInterrupt()
 
             try:
-                pid = os.fork()
+                self.pid = os.fork()
                 if (
-                    pid == 0
+                    self.pid == 0
                 ):  # pragma: no cover - coverage doesn't see this, since the spawned job os._exits()
                     try:
                         signal.signal(signal.SIGUSR1, aborted)
@@ -403,23 +404,23 @@ class MultiFileGeneratingJob(Job):
                 else:
                     sleep_time = 0.01 # which is the minimum time a job can take...
                     time.sleep(sleep_time)
-                    wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
+                    wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                     try:
                         while (wp1 == 0 and waitstatus == 0):
                             sleep_time *= 2
                             if sleep_time > 1:
                                 sleep_time = 1
                             time.sleep(sleep_time)
-                            wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
+                            wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                     except KeyboardInterrupt:
                         logger.info(f"Keyboard interrupt in {self.job_id} - sigbreak spawned process")
-                        os.kill(pid, signal.SIGUSR1)
+                        os.kill(self.pid, signal.SIGUSR1)
                         time.sleep(1)
                         logger.info(f"Keyboard interrupt in {self.job_id} - checking spawned process")
-                        wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
+                        wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                         if wp1== 0 and waitstatus == 0:
                             logger.info(f"Keyboard interrupt in {self.job_id} - sigkill spawned process")
-                            os.kill(pid, signal.SIGKILL)
+                            os.kill(self.pid, signal.SIGKILL)
                         raise
                     if os.WIFEXITED(waitstatus):
                         # normal termination.
@@ -470,6 +471,7 @@ class MultiFileGeneratingJob(Job):
                 stdout.close()  # unlink these soonish.
                 stderr.close()
                 exception_out.close()
+                self.pid = None
         else:
             self.generating_function(input)
         missing_files = [x for x in self.files if not x.exists()]
@@ -537,6 +539,10 @@ class MultiFileGeneratingJob(Job):
             return self.lookup
         else:
             return self.files
+
+    def kill_if_running(self):
+        if self.pid is not None:
+            os.kill(self.pid, signal.SIGTERM)
 
 
 class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
