@@ -146,37 +146,47 @@ class PyPipeGraph:
             self._install_signals()
             history = self.load_historical()
             max_runs = 5
+            jobs_already_run = set()
+            final_result = {}
             while True:
                 max_runs -= 1
                 if max_runs == 0:  # pragma: no cover
                     raise ValueError("endless loop")
+                do_break = False
                 try:
                     self.runner = Runner(
-                        self, history, event_timeout, focus_on_these_jobs
+                        self, history, event_timeout, focus_on_these_jobs,
+                        jobs_already_run
                     )
                     result = self.runner.run(self.run_id, result)
                     del self.runner
                     self.run_id += 1
-                    self.update_history(result, history)
-                    self.log_runtimes(result, start_time)
-                    break
+                    do_break = True
                 except _RunAgain as e:
                     logger.info("Jobs created - running again")
                     result = e.args[0]
-                    self.update_history(e.args[0], history)
-                    self.log_runtimes(result, start_time)
-                    pass
-            for job_id, job_state in result.items():
+                self.update_history(result, history)
+                self.log_runtimes(result, start_time)
+                jobs_already_run.update(result.keys())
+                for k,v in result.items():
+                    if not k in final_result or final_result[k].state != JobState.Failed:
+                        final_result[k] = v
+                #final_result.update(result)
+                if do_break:
+                    break
+                #final_result.update(result)
+            del result
+            for job_id, job_state in final_result.items():
                 if job_state.state == JobState.Failed:
                     if (
                         raise_on_job_error
                         and not "At least one job failed" in self.do_raise
                     ):
                         self.do_raise.append("At least one job failed")
-            self.last_run_result = result
+            self.last_run_result = final_result
             if self.do_raise and not self._restart_afterwards:
                 raise exceptions.RunFailed(*self.do_raise)
-            return result
+            return final_result
         finally:
             logger.info("Run is done")
             if print_failures:

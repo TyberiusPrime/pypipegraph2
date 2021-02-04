@@ -63,7 +63,14 @@ class ExitNow:
 
 
 class Runner:
-    def __init__(self, job_graph, history, event_timeout, focus_on_these_jobs):
+    def __init__(
+        self,
+        job_graph,
+        history,
+        event_timeout,
+        focus_on_these_jobs,
+        jobs_already_run_previously,
+    ):
         from . import _with_changed_global_pipegraph
 
         logger.job_trace("Runner.__init__")
@@ -78,7 +85,9 @@ class Runner:
             flat_before = networkx.readwrite.json_graph.node_link_data(
                 job_graph.job_dag
             )
-            self.dag = self.modify_dag(job_graph, focus_on_these_jobs)
+            self.dag = self.modify_dag(
+                job_graph, focus_on_these_jobs, jobs_already_run_previously
+            )
             flat_after = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
             import json
 
@@ -111,7 +120,7 @@ class Runner:
             self.jobs_to_run_que = queue.SimpleQueue()
             self.threads = []
 
-    def modify_dag(self, job_graph, focus_on_these_jobs):
+    def modify_dag(self, job_graph, focus_on_these_jobs, jobs_already_run_previously):
         from .jobs import _DownstreamNeedsMeChecker
 
         def _recurse_pruning(job_id, reason):
@@ -133,20 +142,34 @@ class Runner:
                 _recurse_unpruning(downstream_job_id)
 
         dag = job_graph.job_dag.copy()
-        if focus_on_these_jobs:
+        if jobs_already_run_previously:
+            new_jobs = set(dag.nodes).difference(jobs_already_run_previously)
+        else:
+            new_jobs = set()
+
+        if focus_on_these_jobs:  # which is only set in the first run...
             # prune all jobs,
             # then unprune this one and it's predecessors
             pruned = set(dag.nodes)  # prune all...
-            for job in focus_on_these_jobs:
-                _recurse_unpruning(job.job_id)
+            for job_id in set((x.job_id for x in focus_on_these_jobs)).union(new_jobs):
+                _recurse_unpruning(job_id)
         else:
             # apply regular pruning
-            pruned = set()
+            if jobs_already_run_previously:
+                pruned = jobs_already_run_previously
+            else:
+                pruned = set()
+            for job_id in new_jobs:
+                _recurse_unpruning(job_id)
             for job_id in self.jobs:
                 if self.jobs[job_id]._pruned:
                     _recurse_pruning(job_id, job_id)
         for job_id in pruned:
-            dag.remove_node(job_id)
+            try:
+                dag.remove_node(job_id)
+            except networkx.exception.NetworkXError: # happens with cleanup nodes that we  omitted
+                pass
+
         known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
         for job_id in reversed(known_job_ids):
             job = self.jobs[job_id]
@@ -403,7 +426,12 @@ class Runner:
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
         msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
-        if job.job_kind in (JobKind.Temp, JobKind.Output, JobKind.JobGenerating, JobKind.Loading):
+        if job.job_kind in (
+            JobKind.Temp,
+            JobKind.Output,
+            JobKind.JobGenerating,
+            JobKind.Loading,
+        ):
             logger.info(msg)
         else:
             logger.debug(msg)

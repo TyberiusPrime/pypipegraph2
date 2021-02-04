@@ -417,7 +417,9 @@ class TestPypipegraph2:
 
     def test_tempfile_triggered_by_invalidating_tempfile(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
+            "A",
+            lambda of: of.write_text("A" + counter("a")),
+            depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -439,7 +441,9 @@ class TestPypipegraph2:
 
     def test_last_invalidated_tempfile_isolation(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
+            "A",
+            lambda of: of.write_text("A" + counter("a")),
+            depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -463,7 +467,9 @@ class TestPypipegraph2:
 
     def test_depending_on_two_temp_jobs_but_only_one_invalidated(self):
         jobA = ppg.TempFileGeneratingJob(
-            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
+            "A",
+            lambda of: of.write_text("A" + counter("a")),
+            depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -1505,7 +1511,7 @@ class TestPypipegraph2:
         ppg.run()
         assert read("c") == "2"
 
-    def test_chained_failing_temps(self):
+    def test_chained_failing_temps(self, job_trace_log):
         def a(of):
             of.write_text("A")
 
@@ -1670,3 +1676,53 @@ class TestPypipegraph2:
         assert read("a") == "4"
         ppg.run()
         assert read("a") == "4"
+
+    def test_focus_on_these_jobs_and_generating(self):
+        """What happens when you focus() on a JobGeneratingJob?"""
+
+        def inner():
+            counter("b")
+            ppg.FileGeneratingJob("A", lambda of: counter("a") and of.write_text("A"))
+
+        c = ppg.FileGeneratingJob('c', lambda of: of.write_text('c'))
+        ppg.JobGeneratingJob("B", inner)()
+        assert read("b") == "1"
+        assert read("a") == "1"
+        assert read("A") == "A"
+        assert not Path('c').exists()
+        assert not hasattr(c, 'prune_reason')
+        ppg.run()
+        assert read("b") == "2"
+        assert read("a") == "1"
+        assert read("c") == "c"
+
+    def test_fail_but_write(self):
+        def fail(of):
+            of.write_text('A')
+            raise ValueError()
+        ppg.FileGeneratingJob('a', fail)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert read('a') == 'A'
+
+
+    def test_failing_job_but_required_again_after_job_generating_job(self):
+        def fail(of):
+            counter('a')
+            raise ValueError()
+        a = ppg.FileGeneratingJob('A', fail)
+        b = ppg.FileGeneratingJob('B', lambda of: counter('b') and of.write_text(read('a')))
+        b.depends_on(a)
+        def c():
+            counter('c')
+            d = ppg.FileGeneratingJob('d', lambda of: counter('d') and of.write_text(read('a')))
+            d.depends_on(a)
+        c = ppg.JobGeneratingJob('c', c)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert read('a') == '1'
+        assert read('c') == '1'
+        assert not Path('b').exists()
+        assert not Path('d').exists()
+
+

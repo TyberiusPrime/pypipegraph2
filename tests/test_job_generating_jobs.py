@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
 import pypipegraph2 as ppg
-from .shared import write, read, append, writeappend, Dummy
+from .shared import write, read, append, writeappend, Dummy, counter
 
 shu = None
 
@@ -66,14 +66,16 @@ class TestJobGeneratingJob:
         ppg.new()
 
         def gen3():
-            jobB = ppg.FileGeneratingJob("out/B", lambda of: write("out/B", "C"))
-            jobB.ignore_code_changes()
+            counter('3')
+            jobB = ppg.FileGeneratingJob("out/B", lambda of: write("out/B", "C"), depend_on_function=False)
+            # jobB.ignore_code_changes()
             jobCX = ppg.ParameterInvariant("C", ("DDD",))
             jobB.depends_on(jobCX)
 
         ppg.JobGeneratingJob("A", gen3)
         ppg.run()
         assert read("out/B") == "C"  # did get rerun
+        assert read("3") == "1" # check that gen3 really ran...
 
     def test_generated_job_depending_on_job_that_cant_have_finished(self):
         # basic idea. You have jobgen A, and filegen B.
