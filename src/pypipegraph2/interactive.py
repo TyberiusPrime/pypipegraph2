@@ -1,4 +1,5 @@
 import sys
+import io
 import time
 import os
 import signal
@@ -13,45 +14,50 @@ import rich.status
 
 
 class ConsoleInteractive:
-
     def _set_terminal_raw(self):
         """Set almost all raw settings on the terminal, except for the output meddling
         - if we did that we get weird newlines from rich"""
-        self.old_settings = termios.tcgetattr(sys.stdin)
-        fd = sys.stdin.fileno()
-        when = termios.TCSAFLUSH
-        tty.setraw(fd)
-        mode = termios.tcgetattr(sys.stdin.fileno())
-        mode[1] = mode[1] | termios.OPOST #termios.tcgetattr(fd)
-        termios.tcsetattr(sys.stdin.fileno(), when, mode)
+        try:
+            self.old_settings = termios.tcgetattr(sys.stdin)
+            fd = sys.stdin.fileno()
+            when = termios.TCSAFLUSH
+            tty.setraw(fd)
+            mode = termios.tcgetattr(sys.stdin.fileno())
+            mode[1] = mode[1] | termios.OPOST  # termios.tcgetattr(fd)
+            termios.tcsetattr(sys.stdin.fileno(), when, mode)
+        except io.UnsupportedOperation:  # happens in tests that set it to console mode
+            pass
 
     def _end_terminal_raw(self):
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
-
+        if hasattr(self, 'old_settings'):
+            try:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
+            except io.UnsupportedOperation:  # see _set_terminal_raw
+                pass
 
     def start(self, runner):
         self.runner = runner
-        self.last_report_status_args = (0,0,0)
+        self.last_report_status_args = (0, 0, 0)
         self._set_terminal_raw()
         self.thread = threading.Thread(target=self.loop)
         self.stopped = False
         self.thread.start()
         print("Type 'help<enter>' to receive a list of valid commands")
         self._cmd = ""
-        self.status = rich.status.Status('',console=console)
+        self.status = rich.status.Status("", console=console)
         self.status.start()
 
     def stop(self):
         self.stopped = True
         self._end_terminal_raw()
-        logger.info("Terminating interactive thread")
+        logger.job_trace("Terminating interactive thread")
         self.thread.join()
-        logger.info("Terminated interactive thread")
+        logger.job_trace("Terminated interactive thread")
         self.status.stop()
         del self.runner
         # async_raise(self.thread.ident, SystemExit)
 
-    @property 
+    @property
     def cmd(self):
         return self._cmd
 
@@ -69,38 +75,38 @@ class ConsoleInteractive:
                 input = bool(select.select([sys.stdin], [], [], 1)[0])
                 if input:
                     value = sys.stdin.read(1)
-                    #logger.info(f"received {repr(value)}")
+                    # logger.info(f"received {repr(value)}")
                     if value == "\x03":  # ctrl-c:
                         self.cmd = ""
                     elif value == "\x1a":  # ctrl-z
                         os.kill(os.getpid(), signal.SIGTSTP)
                     elif ord("0") <= ord(value) <= ord("z"):
                         self.cmd += value
-                    elif value == '\x7f': # backspace
+                    elif value == "\x7f":  # backspace
                         self.cmd = self.cmd[:-1]
-                    elif value == "\n" or value == '\r':
+                    elif value == "\n" or value == "\r":
                         try:
                             if self.cmd:
                                 command = self.cmd
-                                args = ''
-                                if ' ' in command:
-                                    command = command[:command.find(" ")]
-                                    args =command[command.find(" ")+1:]
+                                args = ""
+                                if " " in command:
+                                    command = command[: command.find(" ")]
+                                    args = command[command.find(" ") + 1 :]
                                 self.cmd = ""
-                                if hasattr(self, '_cmd_' + command):
-                                    getattr(self, '_cmd_' + command)(args)
+                                if hasattr(self, "_cmd_" + command):
+                                    getattr(self, "_cmd_" + command)(args)
                                 else:
                                     print("No such command")
                             else:
                                 self._cmd_default()
                         except Exception as e:
                             logger.error(e)
-                            self.cmd = ''
+                            self.cmd = ""
                             continue
 
             except KeyboardInterrupt:
                 break
-        logger.info("Leaving interactive loop")
+        logger.job_trace("Leaving interactive loop")
 
     def report_status(self, jobs_done, jobs_failed, jobs_total):
         self.last_report_status_args = jobs_done, jobs_failed, jobs_total
@@ -111,28 +117,27 @@ class ConsoleInteractive:
             msg += "Type help<enter> for commands"
         self.status.update(status=msg)
 
-
     def _cmd_help(self, _args):
         print("Help for interactive mode")
         print("You have the following commands available")
         print("\t- <enter> - Show currently running jobs")
         for x in dir(self):
-            if x.startswith('_cmd'):
+            if x.startswith("_cmd"):
                 cmd = x[5:]
                 if cmd:
                     print(f"\t {cmd} -  {getattr(self, x).__doc__}")
-        #print("\t- help - this command")
-        #print("\t- abort - kill current jobs and exit asap")
-        #print("\t- stop - Wait for the currently running jobs to finish, then exit")
-        #print("\t- reboot - After the pipegraph has ended, restart the current python script")
-        #print("\t- restart - After the currently running jobs have ended, restart the current python script")
+        # print("\t- help - this command")
+        # print("\t- abort - kill current jobs and exit asap")
+        # print("\t- stop - Wait for the currently running jobs to finish, then exit")
+        # print("\t- reboot - After the pipegraph has ended, restart the current python script")
+        # print("\t- restart - After the currently running jobs have ended, restart the current python script")
 
     def _cmd_default(self):
         t = time.time()
         to_sort = []
         for job_id in self.runner.jobs_in_flight:
             rt = t - self.runner.jobs[job_id].start_time
-            to_sort.append((rt,  job_id))
+            to_sort.append((rt, job_id))
         to_sort.sort()
         for rt, job_id in to_sort:
             job_no = self.runner.jobs[job_id].job_number
@@ -141,7 +146,13 @@ class ConsoleInteractive:
 
     def _cmd_abort(self, _args):
         """Kill current jobs and exit (safely) asap"""
-        logger.info("Run aborted")
+        logger.info("Run aborted by command")
         self.runner.abort()
         self.stopped = True
 
+    def _cmd_stop(self, _args):
+        """Exit after current jobs finished"""
+        logger.info("Run stopped by command")
+        print(f"Having to wait for jobs: {self.runner.jobs_in_flight}")
+        self.runner.stop()
+        self.stopped = True

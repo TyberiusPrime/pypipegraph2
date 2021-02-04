@@ -138,6 +138,7 @@ class PyPipeGraph:
                     self.log_runtimes(result, start_time)
                     break
                 except _RunAgain as e:
+                    logger.info("Jobs created - running again")
                     result = e.args[0]
                     self.update_history(e.args[0], history)
                     self.log_runtimes(result, start_time)

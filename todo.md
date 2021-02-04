@@ -9,7 +9,7 @@ Open stuff
 	- general api polishing
 	 
 	
-	- interactive stuff
+	- interactive restart,reboot,stop, kill, spy
 	
 
 	- what happens when you run a partial graph somewhere else without access to
@@ -37,4 +37,7 @@ Open stuff
 	 
 
 	-ppg1 compability layer
+	
+	
+	- remove jobs ran in earlier run from dag on rerun if not needed by any create jobs?
 	

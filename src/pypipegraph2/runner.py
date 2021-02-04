@@ -220,6 +220,7 @@ class Runner:
         logger.job_trace("Runner.__run__")
 
         self.aborted = False
+        self.stopped = False
         self.output_hashes = {}
         self.new_history = {}  # what are the job outputs this time.
         self.run_id = (
@@ -285,7 +286,8 @@ class Runner:
                 try:
                     ev = self.events.get(timeout=self.event_timeout)
                     if ev[0] == "AbortRun":
-                        logger.info("Aborting run on external request")
+                        logger.job_trace("AbortRun run on external request")
+                        todo = 0
                         break
                 except queue.Empty:
                     # long time, no event.
@@ -305,14 +307,26 @@ class Runner:
                 self.jobs_done -= d
                 self.report_status()
                 logger.job_trace(f"<-done - todo: {todo}")
+
             if not self.aborted:
-                try:
-                    ev = self.events.get_nowait()
-                except queue.Empty:
-                    pass
-                else:
-                    logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
-                    self.handle_event(ev)
+                while self.jobs_in_flight:
+                    try:
+                        ev = self.events.get(.1)
+                    except queue.Empty:
+                        break
+                    else:
+                        logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
+                        self.handle_event(ev)
+                # once more for good measure...
+                while True:
+                    try:
+                        ev = self.events.get_nowait()
+                    except queue.Empty:
+                        break
+                    else:
+                        logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
+                        self.handle_event(ev)
+
             else:
                 for t in self.threads:
                     logger.job_trace(
@@ -357,6 +371,12 @@ class Runner:
     def abort(self):
         """Kill all running jobs and leave runner"""
         self.aborted = True
+        self.abort_time = time.time()
+        self.push_event("AbortRun", (False,))
+
+    def stop(self):
+        """Leave runner after current jobs"""
+        self.stopped = True
         self.abort_time = time.time()
         self.push_event("AbortRun", (False,))
 
@@ -414,6 +434,8 @@ class Runner:
         )
 
     def inform_downstreams_of_outputs(self, job_id, job_outputs):
+        if self.stopped:
+            return
         for downstream_id in self.dag.successors(job_id):
             logger.job_trace(f"\t\tDownstream {downstream_id}")
             downstream_state = self.job_states[downstream_id]
@@ -748,7 +770,7 @@ class Runner:
         my_pid = os.getpid()
         cwd = os.getcwd()
         try:
-            while True:
+            while not self.stopped:
                 job_id = self.jobs_to_run_que.get()
                 self.jobs_in_flight.append(job_id)
                 logger.job_trace(f"Executing thread, got {job_id}")
