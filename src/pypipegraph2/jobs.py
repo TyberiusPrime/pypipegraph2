@@ -401,10 +401,15 @@ class MultiFileGeneratingJob(Job):
                         finally:
                             os._exit(1)
                 else:
+                    sleep_time = 0.01 # which is the minimum time a job can take...
+                    time.sleep(sleep_time)
                     wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
                     try:
                         while (wp1 == 0 and waitstatus == 0):
-                            time.sleep(1)
+                            sleep_time *= 2
+                            if sleep_time > 1:
+                                sleep_time = 1
+                            time.sleep(sleep_time)
                             wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
                     except KeyboardInterrupt:
                         logger.info(f"Keyboard interrupt in {self.job_id} - sigbreak spawned process")
