@@ -167,7 +167,7 @@ class Runner:
         for job_id in pruned:
             try:
                 dag.remove_node(job_id)
-            except networkx.exception.NetworkXError: # happens with cleanup nodes that we  omitted
+            except networkx.exception.NetworkXError:  # happens with cleanup nodes that we  omitted
                 pass
 
         known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
@@ -487,7 +487,9 @@ class Runner:
                 old_input = downstream_state.historical_input
                 new_input = downstream_state.updated_input
                 invalidated = False
-                logger.job_trace(f"new input {escape_logging(new_input.keys())} old_input {escape_logging(old_input.keys())}")
+                logger.job_trace(
+                    f"new input {escape_logging(new_input.keys())} old_input {escape_logging(old_input.keys())}"
+                )
                 if len(new_input) != len(
                     old_input
                 ):  # we lost or gained an input -> invalidate
@@ -511,7 +513,9 @@ class Runner:
                                 invalidated = True
                                 break
                     else:
-                        logger.job_trace(f"{downstream_id} differing set of keys")
+                        logger.job_trace(
+                            f"{downstream_id} differing set of keys. Prev invalidated: {invalidated}"
+                        )
                         for old_key, old_hash in old_input.items():
                             if old_key in new_input:
                                 logger.job_trace(
@@ -542,6 +546,9 @@ class Runner:
                                     # else:
                                     # pass # we found a match
                                 else:  # no match found
+                                    logger.job_trace(
+                                        f"{downstream_id} {old_key} - no match found"
+                                    )
                                     invalidated = True
                                     break
                         logger.job_trace(f"{downstream_id} invalidated: {invalidated}")
@@ -898,8 +905,22 @@ class JobCollector:
 
 
 def dict_values_count(a_dict, count_this):
+    logger.job_trace(
+        f"dict_values_count {escape_logging(a_dict)}, {escape_logging(count_this)}"
+    )
     counter = 0
     for value in a_dict.values():
         if value == count_this:
             counter += 1
+        if (
+            isinstance(value, dict)
+            and isinstance(count_this, dict)
+            and "hash" in value
+            and "hash" in count_this
+            and "size" in value
+            and "size" in count_this
+            and value["hash"] == count_this["hash"]
+        ):
+            counter += 1
+        "hash" in value and isinstance(count_this, dict) and "hash" in count_this
     return counter

@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 from loguru import logger
 import pytest
 import pypipegraph2 as ppg
@@ -1463,7 +1464,7 @@ class TestPypipegraph2:
         assert e.index("ValueError") < e.index("KeyError")
         assert "cause" in e
 
-    def test_renaming_input_while_invalidating_other(self):
+    def test_renaming_input_while_invalidating_other(self, job_trace_log):
         a = ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
         b = ppg.FileGeneratingJob("B", lambda of: of.write_text("B"))
 
@@ -1483,6 +1484,7 @@ class TestPypipegraph2:
         b = ppg.FileGeneratingJob("B", lambda of: of.write_text("B"))
         c = ppg.FileGeneratingJob("c", C, depend_on_function=False)
         c.depends_on(a, b)
+        time.sleep(1) # always change mtime - it is being rewritten, right
         ppg.run()  # no rerun, changed name detection.
         assert read("C") == "1"
         assert read("c") == "AB"
