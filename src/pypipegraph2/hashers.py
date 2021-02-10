@@ -27,5 +27,6 @@ def hash_file(path: Path):
         while block:
             hasher.update(block)
             block = op.read(1024 * 512)
+    stat = path.stat()
 
-    return {"xx": hasher.hexdigest()}
+    return {"hash": hasher.hexdigest(), "mtime": int(stat.st_mtime), "size": stat.st_size}

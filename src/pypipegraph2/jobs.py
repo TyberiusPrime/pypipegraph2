@@ -102,7 +102,7 @@ class Job:
 
     def depends_on(
         self,
-        other_job: Union[Union[str, Job], List[Union[str, Job]]] = None,
+        other_job: Union[Union[str, Job], List[Union[str, Job]]] = False,
         *other_jobs: Union[Union[str, Job], List[Union[str, Job]]],
     ):
         """Depend on another Job, which must be done before this one can run.
@@ -115,6 +115,9 @@ class Job:
         """
 
         from . import global_pipegraph
+
+        if other_job is False and not other_jobs:
+            raise ValueError("You have to pass in at least one job")
 
         if isinstance(other_job, list):
             for x in other_job:
@@ -265,9 +268,12 @@ class MultiFileGeneratingJob(Job):
 
     def __getitem__(self, key):
         if not self.lookup:
-            raise ValueError(
-                f"{self.job_id} has no lookup dictionary - files was not a dict"
-            )
+            if isinstance(key, int):
+                return self.files[key]
+            else:
+                raise ValueError(
+                    f"{self.job_id} has no lookup dictionary - files was not a dict, and key was not an integer index(into files)"
+                )
         return self.lookup[key]
 
     @staticmethod
@@ -396,30 +402,38 @@ class MultiFileGeneratingJob(Job):
                             # traceback is already dumped
                             # exception_out.seek(0,0) # might have dumped the traceback already, right?
                             # pickle.dump(captured_tb, exception_out)
-                            pickle.dump(exceptions.JobDied(repr(e), repr(e2)), exception_out)
+                            pickle.dump(
+                                exceptions.JobDied(repr(e), repr(e2)), exception_out
+                            )
                             exception_out.flush()
                             raise
                         finally:
                             os._exit(1)
                 else:
-                    sleep_time = 0.01 # which is the minimum time a job can take...
+                    sleep_time = 0.01  # which is the minimum time a job can take...
                     time.sleep(sleep_time)
                     wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                     try:
-                        while (wp1 == 0 and waitstatus == 0):
+                        while wp1 == 0 and waitstatus == 0:
                             sleep_time *= 2
                             if sleep_time > 1:
                                 sleep_time = 1
                             time.sleep(sleep_time)
                             wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                     except KeyboardInterrupt:
-                        logger.info(f"Keyboard interrupt in {self.job_id} - sigbreak spawned process")
+                        logger.info(
+                            f"Keyboard interrupt in {self.job_id} - sigbreak spawned process"
+                        )
                         os.kill(self.pid, signal.SIGUSR1)
                         time.sleep(1)
-                        logger.info(f"Keyboard interrupt in {self.job_id} - checking spawned process")
+                        logger.info(
+                            f"Keyboard interrupt in {self.job_id} - checking spawned process"
+                        )
                         wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
-                        if wp1== 0 and waitstatus == 0:
-                            logger.info(f"Keyboard interrupt in {self.job_id} - sigkill spawned process")
+                        if wp1 == 0 and waitstatus == 0:
+                            logger.info(
+                                f"Keyboard interrupt in {self.job_id} - sigkill spawned process"
+                            )
                             os.kill(self.pid, signal.SIGKILL)
                         raise
                     if os.WIFEXITED(waitstatus):
@@ -544,6 +558,10 @@ class MultiFileGeneratingJob(Job):
         if self.pid is not None:
             os.kill(self.pid, signal.SIGTERM)
 
+    @classmethod
+    def compare_hashes(cls, old_hash, new_hash):
+        return new_hash["hash"] == old_hash.get("hash", "")
+
 
 class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
     def __new__(cls, output_filename, *args, **kwargs):
@@ -659,11 +677,7 @@ class _FileInvariantMixin:
     def calculate(
         self, file, stat
     ):  # so that FileInvariant and FunctionInvariant can reuse it
-        return {
-            "mtime": int(stat.st_mtime),
-            "size": stat.st_size,
-            "hash": hashers.hash_file(file),
-        }
+        return hashers.hash_file(file)
 
 
 class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
@@ -705,8 +719,10 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             historical_output = {}
         file_unchanged = False
         new_file_hash = None
-        if sf and not sf.name.startswith('<'):  # we only have a source file for python functions.
-            #sf = Path(sf)
+        if sf and not sf.name.startswith(
+            "<"
+        ):  # we only have a source file for python functions.
+            # sf = Path(sf)
             stat = sf.stat()
             if historical_output:
                 if "source_file" in historical_output:
@@ -824,7 +840,10 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if function.__doc__:
             for prefix in ['"""', "'''", '"', "'"]:
                 if prefix + function.__doc__ + prefix in source:
-                    source = source.replace(prefix + function.__doc__ + prefix, "",)
+                    source = source.replace(
+                        prefix + function.__doc__ + prefix,
+                        "",
+                    )
         return source
 
     @classmethod
@@ -1165,7 +1184,7 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                 # logger.info(f"mtime: {int(stat.st_mtime)}, size: {stat.st_size}")
                 # logger.info(f"mtime the same: {mtime_the_same}")
                 # logger.info(f"size the same: {size_the_same}")
-                self.did_hash_last_run = True
+                self.did_hash_last_run = (mtime_the_same, size_the_same)
                 return {self.outputs[0]: self.calculate(self.file, stat)}
 
     @classmethod
@@ -1295,7 +1314,9 @@ def CachedDataLoadingJob(
             )
 
     load_job = DataLoadingJob(
-        "load" + str(cache_filename), load, depend_on_function=False,
+        "load" + str(cache_filename),
+        load,
+        depend_on_function=False,
     )
     load_job.depends_on(cache_job)
     # do this after you have sucessfully created both jobs

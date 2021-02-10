@@ -487,6 +487,7 @@ class Runner:
                 old_input = downstream_state.historical_input
                 new_input = downstream_state.updated_input
                 invalidated = False
+                logger.job_trace(f"new input {escape_logging(new_input.keys())} old_input {escape_logging(old_input.keys())}")
                 if len(new_input) != len(
                     old_input
                 ):  # we lost or gained an input -> invalidate

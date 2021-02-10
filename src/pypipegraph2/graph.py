@@ -268,7 +268,10 @@ class PyPipeGraph:
 
     def _get_history_fn(self):
         fn = Path(sys.argv[0]).name
-        return self.history_dir / f"{fn}.ppg_history"  # don't end on .py
+        # we by default share the history file
+        # if it's the same history dir, it's the same project
+        # and you'd retrigger the calculations too often otherwise
+        return self.history_dir / ".ppg_history"  # don't end on .py
 
     def load_historical(self):
         logger.trace("load_historicals")

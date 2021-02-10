@@ -1212,7 +1212,8 @@ class TestDependency:
         jobC = ppg.FileGeneratingJob("out/C", lambda of: write("out/C", "C"))
         jobC.depends_on(jobA, [jobB], None, [None])
         jobC.depends_on(None)
-        jobC.depends_on()
+        with pytest.raises(ValueError):
+            jobC.depends_on() # that's not valid
         ppg.run()
         assert read("out/A") == "A"
         assert read("out/B") == "B"

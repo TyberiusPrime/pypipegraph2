@@ -8,9 +8,6 @@ Open stuff
 	
 	- general api polishing
 	 
-	
-	- interactive restart,reboot,stop, kill, spy
-	
 
 	- what happens when you run a partial graph somewhere else without access to
 	  the original history? The FunctionInvariants clobber everything.

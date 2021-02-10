@@ -767,7 +767,7 @@ class TestPypipegraph2:
         assert fi.did_hash_last_run
         del fi.did_hash_last_run  # so we detect if it's not run() at all
         ppg.run()
-        assert not fi.did_hash_last_run
+        assert fi.did_hash_last_run is False
         date = datetime.datetime(
             year=2020, month=12, day=12, hour=12, minute=12, second=12
         )
@@ -1684,13 +1684,13 @@ class TestPypipegraph2:
             counter("b")
             ppg.FileGeneratingJob("A", lambda of: counter("a") and of.write_text("A"))
 
-        c = ppg.FileGeneratingJob('c', lambda of: of.write_text('c'))
+        c = ppg.FileGeneratingJob("c", lambda of: of.write_text("c"))
         ppg.JobGeneratingJob("B", inner)()
         assert read("b") == "1"
         assert read("a") == "1"
         assert read("A") == "A"
-        assert not Path('c').exists()
-        assert not hasattr(c, 'prune_reason')
+        assert not Path("c").exists()
+        assert not hasattr(c, "prune_reason")
         ppg.run()
         assert read("b") == "2"
         assert read("a") == "1"
@@ -1698,31 +1698,141 @@ class TestPypipegraph2:
 
     def test_fail_but_write(self):
         def fail(of):
-            of.write_text('A')
+            of.write_text("A")
             raise ValueError()
-        ppg.FileGeneratingJob('a', fail)
+
+        ppg.FileGeneratingJob("a", fail)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
-        assert read('a') == 'A'
-
+        assert read("a") == "A"
 
     def test_failing_job_but_required_again_after_job_generating_job(self):
         def fail(of):
-            counter('a')
+            counter("a")
             raise ValueError()
-        a = ppg.FileGeneratingJob('A', fail)
-        b = ppg.FileGeneratingJob('B', lambda of: counter('b') and of.write_text(read('a')))
+
+        a = ppg.FileGeneratingJob("A", fail)
+        b = ppg.FileGeneratingJob(
+            "B", lambda of: counter("b") and of.write_text(read("a"))
+        )
         b.depends_on(a)
+
         def c():
-            counter('c')
-            d = ppg.FileGeneratingJob('d', lambda of: counter('d') and of.write_text(read('a')))
+            counter("c")
+            d = ppg.FileGeneratingJob(
+                "d", lambda of: counter("d") and of.write_text(read("a"))
+            )
             d.depends_on(a)
-        c = ppg.JobGeneratingJob('c', c)
+
+        c = ppg.JobGeneratingJob("c", c)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
-        assert read('a') == '1'
-        assert read('c') == '1'
-        assert not Path('b').exists()
-        assert not Path('d').exists()
+        assert read("a") == "1"
+        assert read("c") == "1"
+        assert not Path("b").exists()
+        assert not Path("d").exists()
 
+    def test_going_from_file_generating_to_file_invariant_no_retrigger(
+        self, job_trace_log
+    ):
+        a = ppg.FileGeneratingJob("a", lambda of: of.write_text("a"))
+        b = ppg.FileGeneratingJob(
+            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
+        )
+        b.depends_on(a)
+        ppg.run()
+        assert read("b") == "ba"
+        assert read("B") == "1"
+        ppg.new()
+        a = ppg.FileInvariant("a")
+        b = ppg.FileGeneratingJob(
+            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
+        )
+        b.depends_on(a)
+        ppg.run()
+        assert read("b") == "ba"
+        assert read("B") == "1"
+        ppg.new()
+        a = ppg.FileGeneratingJob("a", lambda of: of.write_text("a"))
+        b = ppg.FileGeneratingJob(
+            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
+        )
+        b.depends_on(a)
+        ppg.run()
+        assert read("b") == "ba"
+        assert read("B") == "1"
 
+    def test_going_from_multi_file_generating_to_file_invariant_no_retrigger(
+        self, job_trace_log
+    ):
+        # this one depends on just one of the files...
+        a = ppg.MultiFileGeneratingJob(
+            ["a", "a1"], lambda of: of[0].write_text("a") and of[1].write_text("a1")
+        )
+        b = ppg.FileGeneratingJob(
+            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
+        )
+        b.depends_on(a[0])  # depend just on a.
+        ppg.run()
+        assert read("b") == "ba"
+        assert read("B") == "1"
+        ppg.new()
+        a = ppg.FileInvariant("a")
+        b = ppg.FileGeneratingJob(
+            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
+        )
+        b.depends_on(a)
+        ppg.run()
+        assert read("b") == "ba"
+        assert read("B") == "1"
+        ppg.new()
+        a = ppg.MultiFileGeneratingJob(
+            ["a", "a1"], lambda of: of[0].write_text("a") and of[1].write_text("a1")
+        )
+        b = ppg.FileGeneratingJob(
+            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
+        )
+        b.depends_on(a[0])
+        ppg.run()
+        assert read("b") == "ba"
+        assert read("B") == "1"
+
+    def test_going_from_multi_file_generating_to_file_invariant_no_retrigger(
+        self, job_trace_log
+    ):
+        # this one depends on all files
+        a = ppg.MultiFileGeneratingJob(
+            ["a", "a1"], lambda of: of[0].write_text("a") and of[1].write_text("a1")
+        )
+        b = ppg.FileGeneratingJob(
+            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
+        )
+        b.depends_on(a)
+        ppg.run()
+        assert read("b") == "ba"
+        assert read("B") == "1"
+        ppg.new()
+        b = ppg.FileGeneratingJob(
+            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
+        )
+        b.depends_on(ppg.FileInvariant("a"))
+        b.depends_on(ppg.FileInvariant("a1"))
+        ppg.run()
+        assert read("b") == "ba"
+        assert read("B") == "1"
+        ppg.new()
+        a = ppg.MultiFileGeneratingJob(
+            ["a", "a1"], lambda of: of[0].write_text("a") and of[1].write_text("a1")
+        )
+        b = ppg.FileGeneratingJob(
+            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
+        )
+        b.depends_on(a)
+        ppg.run()
+        assert read("b") == "ba"
+        assert read("B") == "1"
+
+    def test_empty_depends_on_raises(self):
+        a = ppg.FileGeneratingJob('shu', lambda of: of.write_text(of.name))
+        with pytest.raises(ValueError):
+            a.depends_on()
