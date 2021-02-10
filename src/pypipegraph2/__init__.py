@@ -21,6 +21,7 @@ from .jobs import (
     ParameterInvariant,
     JobGeneratingJob,
     Job,
+    SharedMultiFileGeneratingJob,
 )
 from .exceptions import (
     PPGException,
@@ -141,6 +142,7 @@ __all__ = [
     "FileInvariant",
     "ParameterInvariant",
     "JobGeneratingJob",
+    "SharedMultiFileGeneratingJob",
     "PPGException",
     "NotADag",
     "FatalGraphException",

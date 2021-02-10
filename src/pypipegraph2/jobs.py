@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import signal
 import time
 import collections
@@ -18,11 +19,15 @@ from collections import namedtuple
 from . import hashers, exceptions, ppg_traceback
 from .enums import JobKind, Resources, RunMode
 from .util import escape_logging
+import hashlib
+import shutil
 
 module_type = type(sys)
 
 non_chdired_path = Path(".").absolute()
-python_version = tuple(sys.version_info)[:2]  # we only care about major.minor
+python_version = ".".join(
+    (str(x) for x in sys.version_info[:2])
+)  # we only care about major.minor
 
 DependsOnInvariant = namedtuple("DependsOnInvariant", ["invariant", "self"])
 CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
@@ -253,11 +258,12 @@ class MultiFileGeneratingJob(Job):
 
         self.generating_function = self._validate_func_argument(generating_function)
         self.depend_on_function = depend_on_function
-        self.files, self.lookup = self._validate_files_argument(files)
+        self.files, self._lookup = self._validate_files_argument(files)
         if len(self.files) != len(set(self.files)):
             raise ValueError(
                 "Paths were present multiple times in files argument. Fix your input"
             )
+        self.org_files = self.files
         Job.__init__(self, [str(x) for x in self.files], resources)
         self._single_file = False
         self.empty_ok = empty_ok
@@ -267,14 +273,14 @@ class MultiFileGeneratingJob(Job):
         self.pid = None
 
     def __getitem__(self, key):
-        if not self.lookup:
+        if not self._lookup:
             if isinstance(key, int):
-                return self.files[key]
+                return self._map_filename(self.org_files[key])
             else:
                 raise ValueError(
                     f"{self.job_id} has no lookup dictionary - files was not a dict, and key was not an integer index(into files)"
                 )
-        return self.lookup[key]
+        return self._map_filename(self._lookup[key])
 
     @staticmethod
     def _validate_func_argument(func):
@@ -314,6 +320,7 @@ class MultiFileGeneratingJob(Job):
             self.depends_on(func_invariant)
 
     def run(self, runner, _historical_output):
+        self.files = [self._map_filename(fn) for fn in self.org_files]
         for fn in self.files:  # we rebuild anyway!
             if fn.exists():
                 fn.unlink()
@@ -499,7 +506,9 @@ class MultiFileGeneratingJob(Job):
                 raise exceptions.JobContractError(
                     f"Job {self.job_id} created empty files and empty_ok was False: {[str(x) for x in empty_files]}"
                 )
-        res = {str(of): hashers.hash_file(of) for of in self.files}
+        res = {
+            str(of): hashers.hash_file(self._map_filename(of)) for of in self.org_files
+        }
         return res
 
     def _read_stdout_stderr(self, stdout, stderr):
@@ -533,8 +542,8 @@ class MultiFileGeneratingJob(Job):
         if self._single_file:
             return self.files[0]
         else:
-            if self.lookup:
-                return self.lookup
+            if self._lookup:
+                return self._lookup
             else:
                 return self.files
 
@@ -549,10 +558,13 @@ class MultiFileGeneratingJob(Job):
         False
 
     def _call_result(self):
-        if self.lookup:
-            return self.lookup
+        if self._lookup:
+            return self._lookup
         else:
             return self.files
+
+    def _map_filename(self, f):
+        return f
 
     def kill_if_running(self):
         if self.pid is not None:
@@ -1650,3 +1662,196 @@ def PlotJob(
     plot_job.add_another_plot = add_another_plot
 
     return (plot_job, cache_job, table_job)
+
+
+class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
+    """A shared MultiFileGeneratingJob.
+
+    Sharing means that this can be produced by multiple pypipegraphs,
+    each with it's own history.
+
+    The outputs are placed in a folder keyed for he input hashes.
+    That means, no double work is being done (if they don't run in parallel,
+    that is).
+
+    Building happens in a folder named for hostname + pid + time,
+    renaming to final input-keyed folder is atomic.
+
+    That still means that one will clober the other, but since their
+    outputs are supposed to be identical, this will be safe.
+
+    If the job dies, the build folder is removed (except if @remove_build_dir_on_error is False).
+
+    There is also a log file for mapping ppg-history-filenames ->
+    target folders.
+
+    This is used to identify unused output folders,
+    which then get removed as well (except if @remove_unused is False).
+
+    """
+
+    def __new__(cls, output_dir_prefix, files, *args, **kwargs):
+        output_dir_prefix = Path(output_dir_prefix)
+        files = cls._validate_files_argument(files)[0]
+        files = [output_dir_prefix / "__never_placed_here__" / f for f in files]
+        return Job.__new__(cls, [str(x) for x in files])
+
+    def __init__(
+        self,
+        output_dir_prefix: Path,
+        files: List[Path],  # todo: extend type attribute to allow mapping
+        generating_function: Callable[List[Path]],
+        resources: Resources = Resources.SingleCore,
+        depend_on_function: bool = True,
+        empty_ok=True,
+        always_capture_output=True,
+        remove_build_dir_on_error=True,
+        remove_unused=True,
+    ):
+        self.output_dir_prefix = Path(output_dir_prefix)
+
+        self.generating_function = self._validate_func_argument(generating_function)
+        self.depend_on_function = depend_on_function
+        self.files, self._lookup = self._validate_files_argument(files)
+        self.org_files = [
+            (self.output_dir_prefix / "__never_placed_here__" / f) for f in self.files
+        ]
+        if self._lookup:
+            self._lookup = {
+                k: self.org_files[self.files.index(v)]
+                for (k, v) in self._lookup.items()
+            }
+        self.files = self.org_files[:]
+
+        if len(self.files) != len(set(self.files)):
+            raise ValueError(
+                "Paths were present multiple times in files argument. Fix your input"
+            )
+        Job.__init__(self, [str(x) for x in self.files], resources)
+        self._single_file = False
+        self.empty_ok = empty_ok
+        self.always_capture_output = always_capture_output
+        self.stdout = "not captured"
+        self.stderr = "not captured"
+        self.pid = None
+        self.remove_build_dir_on_error = remove_build_dir_on_error
+        self.remove_unused = remove_unused
+        # todo refactor
+
+    def run(self, runner, _historical_output):
+        output_name = self._derive_output_name(runner)
+        self.target_folder = self.output_dir_prefix / output_name
+
+        if all((self._map_filename(fn).exists() for fn in self.org_files)):
+            logger.job_trace(f"{self.job_id} -  all files existed - just hashing")
+            res = {
+                str(of): hashers.hash_file(self._map_filename(of))
+                for of in self.org_files
+            }
+        else:
+            import socket
+
+            logger.job_trace(f"{self.job_id} - output files missing, building them")
+            # temp replace for the actual run
+            self.target_folder = (
+                self.output_dir_prefix
+                / f"build_{socket.gethostname()}_{os.getpid()}_{time.time()}"
+            )
+            self.target_folder.mkdir(exist_ok=True, parents=True)
+            try:
+                res = MultiFileGeneratingJob.run(self, runner, _historical_output)
+            except:
+                if self.remove_build_dir_on_error:
+                    shutil.rmtree(self.target_folder)
+                raise
+
+            real_target = self.output_dir_prefix / output_name
+            if (
+                real_target.exists()
+            ):  # either a previous partial, or parallel build. -> clobber
+
+                shutil.rmtree(real_target)
+            self.target_folder.rename(real_target)
+            self.target_folder = real_target
+            self.files = [self._map_filename(fn) for fn in self.org_files]
+        self._log_and_cleanup(runner, output_name)
+        return res
+
+    def _map_filename(self, filename):
+        parts = filename.parts
+        if not hasattr(self, "target_folder"):
+            tf = "__never_placed_here__"
+        else:
+            tf = self.target_folder.name
+        parts = [tf if x == "__never_placed_here__" else x for x in parts]
+        return Path(*parts)
+
+    def get_input(self):  # todo: fold in?
+        if self._single_file:
+            return self._map_filename(self.files[0])
+        else:
+            if self._lookup:
+                return {k: self._map_filename(f) for (k, f) in self._lookup.items()}
+            else:
+                return [self._map_filename(f) for f in self.files]
+
+    def output_needed(self, runner):
+        output_name = self._derive_output_name(runner)
+        self.target_folder = self.output_dir_prefix / output_name
+        if not self.target_folder.exists():
+            return True
+        for fn in self.org_files:
+            if not self._map_filename(fn).exists():
+                return True
+            if (
+                str(fn) not in runner.job_states[self.job_id].historical_output
+            ):  # we must record the hashes
+                return True
+
+        return False
+
+    def _call_result(self):
+        if self._lookup:
+            return {k: self._map_filename(f) for (k, f) in self._lookup.items()}
+        else:
+            return [self._map_filename(f) for f in self.files]
+
+    def _derive_output_name(self, runner):
+        input_names = runner.job_inputs[self.job_id]
+        if not input_names:
+            return "done_no_input"
+        actual_input = runner.job_states[self.job_id].updated_input
+        hasher = hashlib.sha512()
+        for (key, value) in sorted(actual_input.items()):
+            hasher.update(key.encode("utf-8"))
+            hasher.update(str(ParameterInvariant.freeze(value)).encode("utf-8"))
+        output_name = "done_" + hasher.hexdigest()
+        logger.info(
+            f"SharedMultiFileGeneratingJob{self.job_id} output_name {output_name}"
+        )
+        return output_name
+
+    def _log_and_cleanup(self, runner, output_name):
+        history_filename = runner.job_graph._get_history_fn().absolute()
+        log_filename = self.output_dir_prefix / ".ppgs_using_this"
+        known = {}
+        # todo: this should get some kind of locking?
+        if log_filename.exists():
+            with open(log_filename) as op:
+                know = json.load(op)
+        known[str(history_filename)] = output_name
+        with open(log_filename, "w") as op:
+            json.dump(known, op)
+
+        if self.remove_unused:
+            keep = set(known.values())
+            remove = [
+                x
+                for x in self.output_dir_prefix.glob("*")
+                if x.name.startswith("done_") and x.is_dir() and not x.name in keep
+            ]
+            for dir in remove:
+                logger.info(
+                    f"Identified {dir} as no longer in use by any PPG. Removing"
+                )
+                shutil.rmtree(dir)
