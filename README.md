@@ -68,3 +68,6 @@ Differences to pypipegraph
 		- restart/reboot is now 'again/stop_and_again' to make it clearer
 		- better progression, nice output 
 		- some barely used commands were removed for now (runtimes (see log/runtimes.tsv), next, stay, errors, spy, spy-flame
+	
+	- new job kind: SharedMultiFileGeneratingJob
+      This job's output folder is keyed by a hash of it's inputs, and can be easily shared between multiple ppgs from multiple places (replaces mbf_externals.PreBuildJob, conceptually)
