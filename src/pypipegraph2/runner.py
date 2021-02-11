@@ -183,6 +183,9 @@ class Runner:
                 pass
 
         known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
+        ti = time.time()
+        counter = 0
+        hulls = {}
         for job_id in reversed(known_job_ids):
             job = self.jobs[job_id]
             if job.job_kind in (JobKind.Temp, JobKind.Loading):
@@ -190,6 +193,7 @@ class Runner:
                     # part one: add the 'does the downstream need me to calculate' check?
                     downstream_job = self.jobs[downstream_job_id]
                     if downstream_job.job_kind is not JobKind.Cleanup:
+                        counter += 1
                         downstream_needs_me_checker = _DownstreamNeedsMeChecker(
                             downstream_job
                         )
@@ -197,7 +201,7 @@ class Runner:
                         self.jobs[
                             downstream_needs_me_checker.job_id
                         ] = downstream_needs_me_checker
-                        # self.job_inputs[downstream_needs_me_checker.job_id] =  set() # empty is covered by default duct
+                        # self.job_inputs[downstream_needs_me_checker.job_id] =  set() # empty is covered by default dict
                         self.job_inputs[job_id].add(downstream_needs_me_checker.job_id)
                         self.outputs_to_job_ids[
                             downstream_needs_me_checker.job_id
@@ -207,9 +211,15 @@ class Runner:
                         # part two - clone downstreams inputs:
                         # with special attention to temp jobs
                         # to avoid crosslinking
-                        for down_upstream_id in self._iter_job_non_temp_upstream_hull(
+                        #print(len(self._iter_job_non_temp_upstream_hull(
+                            #downstream_job_id, dag
+                        #)))
+                        if downstream_job_id not in hulls:
+                            hulls[downstream_job_id] = self._iter_job_non_temp_upstream_hull(
                             downstream_job_id, dag
-                        ):
+                        )
+                        for down_upstream_id in hulls[downstream_job_id]:
+                            counter += 1
                             if down_upstream_id != job_id:
                                 downstream_upstream_job = self.jobs[down_upstream_id]
                                 dag.add_edge(down_upstream_id, job_id)
@@ -236,15 +246,15 @@ class Runner:
         # now add an initial job, so we can cut off the evaluation properly
 
     def _iter_job_non_temp_upstream_hull(self, job_id, dag):
-        result = []
+        result = set()
         for upstream_job_id in dag.predecessors(job_id):
             upstream_job = self.jobs[upstream_job_id]
             if upstream_job.job_kind in (JobKind.Temp, JobKind.Loading):
-                result.extend(
+                result.update(
                     self._iter_job_non_temp_upstream_hull(upstream_job_id, dag)
                 )
             else:
-                result.append(upstream_job_id)
+                result.add(upstream_job_id)
         return result
 
     def run(self, run_id, last_job_states):
