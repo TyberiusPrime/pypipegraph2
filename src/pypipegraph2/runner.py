@@ -241,6 +241,7 @@ class Runner:
                     self.job_inputs[cleanup_job.job_id].update(
                         self.jobs[downstream_job_id].outputs
                     )
+        raise ValueError(counter, time.time() -ti)
         return dag
 
         # now add an initial job, so we can cut off the evaluation properly
