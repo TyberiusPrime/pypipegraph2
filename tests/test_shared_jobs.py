@@ -1,4 +1,5 @@
 from pathlib import Path
+from loguru import logger
 import pytest
 import pypipegraph2 as ppg
 from .shared import write, read, counter
@@ -9,14 +10,13 @@ class TestSharedJob:
     def test_simple(self):
         def doit(output_files):
             for of in output_files:
-                assert not 'no_input' in str(of)
+                assert not "no_input" in str(of)
             count = counter("doit")
             write(output_files[0], "a" + str(count))
             write(output_files[1], "b")
 
         job = ppg.SharedMultiFileGeneratingJob(
-            "out", ["a", "b"], doit, depend_on_function=False,
-            remove_unused = False
+            "out", ["a", "b"], doit, depend_on_function=False, remove_unused=False
         )
 
         def followup_c(of):
@@ -55,8 +55,7 @@ class TestSharedJob:
 
         ppg.new()
         job = ppg.SharedMultiFileGeneratingJob(
-            "out", ["a", "b"], doit, depend_on_function=False,
-            remove_unused = False
+            "out", ["a", "b"], doit, depend_on_function=False, remove_unused=False
         )
         fc = ppg.FileGeneratingJob("C", followup_c).depends_on(job)
         fd = ppg.FileGeneratingJob("D", followup_d).depends_on(job.files[1])
@@ -69,18 +68,44 @@ class TestSharedJob:
         assert read(job.files[0]) == "a2"
         assert read(job.files[1]) == "b"
         assert read("C") == "a2b"
-        assert len([x for x in Path('out').glob("*") if x.is_dir() and x.name.startswith('done_')]) == 3
-
+        assert (
+            len(
+                [
+                    x
+                    for x in Path("out").glob("*")
+                    if x.is_dir() and x.name.startswith("done_")
+                ]
+            )
+            == 3
+        )
 
         job.remove_unused = True
         ppg.run()
         assert read("doit") == "3"
         # we had history, we didn't go there..
-        assert len([x for x in Path('out').glob("*") if x.is_dir() and x.name.startswith('done_')]) == 3
-        ppg.global_pipegraph._get_history_fn().unlink()
+        assert (
+            len(
+                [
+                    x
+                    for x in Path("out").glob("*")
+                    if x.is_dir() and x.name.startswith("done_")
+                ]
+            )
+            == 3
+        )
+        ppg.global_pipegraph.get_history_filename().unlink()
 
         ppg.run()
-        assert len([x for x in Path('out').glob("*") if x.is_dir() and x.name.startswith('done_')]) == 1
+        assert (
+            len(
+                [
+                    x
+                    for x in Path("out").glob("*")
+                    if x.is_dir() and x.name.startswith("done_")
+                ]
+            )
+            == 1
+        )
 
     def test_multi_file_gen_job_lookup_colission(self):
         with pytest.raises(ValueError):
@@ -148,7 +173,7 @@ class TestSharedJob:
         assert read("C") == "1"
         assert read("d") == "a0cd"
 
-        ppg.global_pipegraph._get_history_fn().unlink()
+        ppg.global_pipegraph.get_history_filename().unlink()
         ppg.new()
 
         job = ppg.SharedMultiFileGeneratingJob(
@@ -181,3 +206,97 @@ class TestSharedJob:
         with pytest.raises(ppg.RunFailed):
             a()
         assert list(Path("out").glob("*"))
+
+    def test_multiple_histories(self, job_trace_log):
+        import json
+
+        def doit(output_files):
+            for of in output_files:
+                assert not "no_input" in str(of)
+            count = counter("doit")
+            write(output_files[0], "a" + str(count))
+            write(output_files[1], "b")
+
+        job = ppg.SharedMultiFileGeneratingJob(
+            "out", ["a", "b"], doit, depend_on_function=False
+        )
+        ppg.FileGeneratingJob(
+            "a",
+            lambda of: counter("A") and of.write_text(str(of)),
+            depend_on_function=False,
+        ).depends_on(job)
+        ppg.run()
+        assert read("A") == "1"
+        h1 = ppg.global_pipegraph.get_history_filename()
+        assert read("doit") == "1"
+
+        ppg.new(history_dir=".my_history")
+        job = ppg.SharedMultiFileGeneratingJob(
+            "out", ["a", "b"], doit, depend_on_function=False
+        )
+        ppg.FileGeneratingJob(
+            "a",
+            lambda of: counter("A") and of.write_text(str(of)),
+            depend_on_function=False,
+        ).depends_on(job)
+        h2 = ppg.global_pipegraph.get_history_filename()
+        assert h1.resolve() != h2.resolve()
+        logger.info("2nd run")
+        ppg.run()
+        assert read("doit") == "1"
+        assert (
+            read("A") == "2"
+        )  # changing the history dir obviously triggers a rerun to capture hashes.
+
+        ppg.new(history_dir=".my_history2")
+        job = ppg.SharedMultiFileGeneratingJob(
+            "out", ["a", "b"], doit, depend_on_function=False
+        )
+        job.depends_on(ppg.ParameterInvariant("e", "e"))
+        ppg.FileGeneratingJob(
+            "a",
+            lambda of: counter("A") and of.write_text(str(of)),
+            depend_on_function=False,
+        ).depends_on(job)
+        h3 = ppg.global_pipegraph.get_history_filename()
+        assert h3.resolve() != h2.resolve()
+        ppg.run()
+        assert read("doit") == "2"
+        assert read("A") == "3"  # changed history dir...
+        with open(job.output_dir_prefix / ".ppgs_using_this") as op:
+            known = json.loads(op.read())
+        assert str(h1.absolute()) in known
+        assert str(h2.absolute()) in known
+        assert str(h3.absolute()) in known
+        assert known[str(h1.absolute())] == known[str(h2.absolute())]
+        assert known[str(h1.absolute())] != known[str(h3.absolute())]
+        key3 = known[str(h3.absolute())]
+        assert (Path("out") / key3).exists()
+
+        ppg.run()  # running again is harmless
+        assert read("doit") == "2"
+        assert read("A") == "3"
+
+        logger.info("final")
+        ppg.new(history_dir=".my_history2")
+        job = ppg.SharedMultiFileGeneratingJob(
+            "out", ["a", "b"], doit, depend_on_function=False
+        )
+        ppg.FileGeneratingJob(
+            "a",
+            lambda of: counter("A") and of.write_text(str(of)),
+            depend_on_function=False,
+        ).depends_on(job)
+        h4 = ppg.global_pipegraph.get_history_filename()
+        assert h3.resolve() == h4.resolve()
+        ppg.run()
+        assert read("A") == "4"  # changed input
+        with open(job.output_dir_prefix / ".ppgs_using_this") as op:
+            known = json.loads(op.read())
+        assert str(h3.absolute()) in known
+        print(job.target_folder)
+        print(known)
+        assert (
+            known[str(h3.absolute())] == known[str(h2.absolute())]
+        )  # goes back to old value
+        assert not (Path("out") / key3).exists()

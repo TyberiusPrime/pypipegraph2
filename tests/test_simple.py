@@ -7,7 +7,7 @@ from .shared import write, read
 def forget_job_status(invariant_status_filename=None):
     """Delete the job status file - usually only useful for testing"""
     if invariant_status_filename is None:
-        invariant_status_filename = ppg.global_pipegraph._get_history_fn()
+        invariant_status_filename = ppg.global_pipegraph.get_history_filename()
     try:
         Path(invariant_status_filename).unlink()
     except OSError:

@@ -557,8 +557,8 @@ class TestInvariant:
         write("out/b", "a")
         import pickle
 
-        Path(ppg.global_pipegraph._get_history_fn()).parent.mkdir(parents=True)
-        with open(ppg.global_pipegraph._get_history_fn(), "wb") as op:
+        Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True)
+        with open(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             op.write(b"This breaks")
         with pytest.raises(ppg.RunFailed):
@@ -585,8 +585,8 @@ class TestInvariant:
         b.depends_on(a)
         write("out/b", "a")
 
-        Path(ppg.global_pipegraph._get_history_fn()).parent.mkdir(parents=True)
-        with open(ppg.global_pipegraph._get_history_fn(), "wb") as op:
+        Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True)
+        with open(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(Undepickable(), op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(c.job_id, op, pickle.HIGHEST_PROTOCOL)
@@ -605,8 +605,8 @@ class TestInvariant:
         b.depends_on(a)
         write("out/b", "a")
 
-        Path(ppg.global_pipegraph._get_history_fn()).parent.mkdir(parents=True)
-        with open(ppg.global_pipegraph._get_history_fn(), "wb") as op:
+        Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True)
+        with open(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             op.write(b"key breaks already")
             op.write(b"This breaks")
         with pytest.raises(ppg.RunFailed):

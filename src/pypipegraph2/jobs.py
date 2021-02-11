@@ -1727,7 +1727,12 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             raise ValueError(
                 "Paths were present multiple times in files argument. Fix your input"
             )
+        self._output_name_history_name = str(
+            self.output_dir_prefix / ".ppg_output_name"
+        )
+        self.files.append(self._output_name_history_name)
         Job.__init__(self, [str(x) for x in self.files], resources)
+        self.files.remove(self._output_name_history_name)
         self._single_file = False
         self.empty_ok = empty_ok
         self.always_capture_output = always_capture_output
@@ -1775,6 +1780,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             self.target_folder = real_target
             self.files = [self._map_filename(fn) for fn in self.org_files]
         self._log_and_cleanup(runner, output_name)
+        res[self._output_name_history_name] = {'hash': output_name, 'size': len(self.files),  'mtime': 0}
         return res
 
     def _map_filename(self, filename):
@@ -1807,6 +1813,15 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 str(fn) not in runner.job_states[self.job_id].historical_output
             ):  # we must record the hashes
                 return True
+            else:  # we have a hash... but our inputs may have changed us to a different folder
+                # so we need to verify this.
+                if (
+                    runner.job_states[self.job_id].historical_output.get(
+                        self._output_name_history_name, {}
+                    ).get('hash', None)
+                    != output_name
+                ):
+                    return True
 
         return False
 
@@ -1832,19 +1847,21 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         return output_name
 
     def _log_and_cleanup(self, runner, output_name):
-        history_filename = runner.job_graph._get_history_fn().absolute()
+        history_filename = runner.job_graph.get_history_filename().absolute()
         log_filename = self.output_dir_prefix / ".ppgs_using_this"
         known = {}
         # todo: this should get some kind of locking?
         if log_filename.exists():
             with open(log_filename) as op:
-                know = json.load(op)
+                known = json.load(op)
+        logger.info(f"setting {history_filename} {output_name}")
         known[str(history_filename)] = output_name
         with open(log_filename, "w") as op:
             json.dump(known, op)
 
         if self.remove_unused:
             keep = set(known.values())
+            logger.info("Removing - keep {keep}")
             remove = [
                 x
                 for x in self.output_dir_prefix.glob("*")

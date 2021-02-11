@@ -21,6 +21,8 @@ from .interactive import ConsoleInteractive
 
 
 class JobStatus:
+    """Job run information collector"""
+
     def __init__(self):
         self._state = JobState.Waiting
         self.validation_state = ValidationState.Unknown
@@ -59,10 +61,14 @@ class JobStatus:
 
 
 class ExitNow:
+    """Token for leave-this-thread-now-signal"""
+
     pass
 
 
 class Runner:
+    """Run a given JobGraph"""
+
     def __init__(
         self,
         job_graph,
@@ -121,6 +127,12 @@ class Runner:
             self.threads = []
 
     def modify_dag(self, job_graph, focus_on_these_jobs, jobs_already_run_previously):
+        """Modify the DAG to be executed
+        by adding CleanupJobs, _DownstreamNeedsMeChecker,
+        applying pruning,
+        focusing on selected jobs (ie. prune everything outside of their DAG),
+        or removing jobs we ran in the last ran-through
+        """
         from .jobs import _DownstreamNeedsMeChecker
 
         def _recurse_pruning(job_id, reason):
@@ -195,7 +207,7 @@ class Runner:
                         # part two - clone downstreams inputs:
                         # with special attention to temp jobs
                         # to avoid crosslinking
-                        for down_upstream_id in self.iter_job_non_temp_upstream_hull(
+                        for down_upstream_id in self._iter_job_non_temp_upstream_hull(
                             downstream_job_id, dag
                         ):
                             if down_upstream_id != job_id:
@@ -223,19 +235,20 @@ class Runner:
 
         # now add an initial job, so we can cut off the evaluation properly
 
-    def iter_job_non_temp_upstream_hull(self, job_id, dag):
+    def _iter_job_non_temp_upstream_hull(self, job_id, dag):
         result = []
         for upstream_job_id in dag.predecessors(job_id):
             upstream_job = self.jobs[upstream_job_id]
             if upstream_job.job_kind in (JobKind.Temp, JobKind.Loading):
                 result.extend(
-                    self.iter_job_non_temp_upstream_hull(upstream_job_id, dag)
+                    self._iter_job_non_temp_upstream_hull(upstream_job_id, dag)
                 )
             else:
                 result.append(upstream_job_id)
         return result
 
     def run(self, run_id, last_job_states):
+        """Actually run the current DAG"""
         from . import global_pipegraph
 
         job_count = len(global_pipegraph.jobs)  # track if new jobs are being created
@@ -257,7 +270,7 @@ class Runner:
             return (
                 not self.job_inputs[job_id]
                 and self.jobs[job_id].output_needed(self)
-                and not self.job_failed_last_time(job_id)
+                and not self._job_failed_last_time(job_id)
             )
 
         def is_skipped(job_id):
@@ -267,7 +280,7 @@ class Runner:
                     and not self.jobs[job_id].output_needed(self)
                 )
                 # or self.job_states[job_id].state == JobState.Failed
-                or self.job_failed_last_time(job_id)
+                or self._job_failed_last_time(job_id)
             )
 
         logger.job_trace(f"job_ids_topological {job_ids_topological}")
@@ -276,35 +289,30 @@ class Runner:
         # for job_id in job_ids_topological:
         # logger.info(f"{job_id} - inputs - {escape_logging(self.job_inputs[job_id])}")
         # logger.info(f"{job_id} - outputneeded - {self.jobs[job_id].output_needed(self)}")
-        # if not initial_job_ids:
-        # if self.jobs:
-        # raise exceptions.RunFailedInternally("Could not identify inital jobs")
-        # else:
-        # return {}
         skipped_jobs = [x for x in job_ids_topological if is_skipped(x)]
         self.events = queue.Queue()
 
         for job_id in sorted(initial_job_ids):
             self.job_states[job_id].state = JobState.ReadyToRun
-            self.push_event("JobReady", (job_id,))
+            self._push_event("JobReady", (job_id,))
         for job_id in skipped_jobs:
-            self.push_event("JobSkipped", (job_id,))
+            self._push_event("JobSkipped", (job_id,))
             # if we have no dependencies, we add the cleanup directly after the job
             # but it's not getting added to skipped_jobs
             # and I don't want to write an output_needed for the cleanup jobs
             if hasattr(self.jobs[job_id], "cleanup_job_class"):
                 for downstream_id in self.dag.neighbors(job_id):
-                    self.push_event("JobSkipped", (downstream_id,))
+                    self._push_event("JobSkipped", (downstream_id,))
         self.jobs_in_flight = []
         self.jobs_all_cores_in_flight = 0
-        self.start_job_executing_threads()
+        self._start_job_executing_threads()
         todo = len(self.dag)
         logger.job_trace(f"jobs: {self.jobs.keys()}")
         logger.job_trace(f"skipped jobs: {skipped_jobs}")
         self.jobs_done = 0
-        self.start_interactive()
-        self.report_status()
+        self._interactive_start()
         try:
+            self._interactive_report()
             while todo:
                 try:
                     ev = self.events.get(timeout=self.event_timeout)
@@ -325,10 +333,10 @@ class Runner:
                 logger.job_trace(
                     f"<-handle {ev[0]} {escape_logging(ev[1][0])}, todo: {todo}"
                 )
-                d = self.handle_event(ev)
+                d = self._handle_event(ev)
                 todo += d
                 self.jobs_done -= d
-                self.report_status()
+                self._interactive_report()
                 logger.job_trace(f"<-done - todo: {todo}")
 
             if not self.aborted:
@@ -339,7 +347,7 @@ class Runner:
                         break
                     else:
                         logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
-                        self.handle_event(ev)
+                        self._handle_event(ev)
                 # once more for good measure...
                 while True:
                     try:
@@ -348,7 +356,7 @@ class Runner:
                         break
                     else:
                         logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
-                        self.handle_event(ev)
+                        self._handle_event(ev)
 
             else:
                 for t in self.threads:
@@ -365,7 +373,7 @@ class Runner:
                 t.join()
             if hasattr(self, "_status"):
                 self._status.stop()
-            self.stop_interactive()
+            self._interactive_stop()
 
         if len(global_pipegraph.jobs) != job_count and not self.aborted:
             logger.job_trace(
@@ -378,43 +386,50 @@ class Runner:
         logger.job_trace("Left runner.run()")
         return self.job_states
 
-    def start_interactive(self):
+    def _interactive_start(self):
+        """Activate the interactive thread"""
         if self.job_graph.run_mode is RunMode.CONSOLE:
             self.interactive = ConsoleInteractive()
             self.interactive.start(self)
 
-    def stop_interactive(self):
+    def _interactive_stop(self):
+        """Stop the interactive thread (if present)"""
         if hasattr(self, "interactive"):
             self.interactive.stop()
 
-    def report_status(self):
+    def _interactive_report(self):
         if hasattr(self, "interactive"):
             self.interactive.report_status(self.jobs_done, 0, len(self.dag))
 
     def abort(self):
-        """Kill all running jobs and leave runner"""
+        """Kill all running jobs and leave runner.
+        Called from the interactive interface
+        """
         self.abort_time = time.time()
         self.aborted = True
-        self.push_event("AbortRun", (False,))
+        self._push_event("AbortRun", (False,))
 
     def stop(self):
-        """Leave runner after current jobs"""
+        """Leave runner after current jobs
+        Called from the interactive interface
+
+        """
         self.stopped = True
         self.abort_time = time.time()
-        self.push_event("AbortRun", (False,))
+        self._push_event("AbortRun", (False,))
 
-    def handle_event(self, event):
+    def _handle_event(self, event):
         todo = 0
         if event[0] == "JobSuccess":
-            self.handle_job_success(*event[1])
+            self._handle_job_success(*event[1])
             todo -= 1
         elif event[0] == "JobSkipped":
-            self.handle_job_skipped(*event[1])
+            self._handle_job_skipped(*event[1])
             todo -= 1
         elif event[0] == "JobReady":
-            self.handle_job_ready(*event[1])
+            self._handle_job_ready(*event[1])
         elif event[0] == "JobFailed":
-            self.handle_job_failed(*event[1])
+            self._handle_job_failed(*event[1])
             todo -= 1
         elif event[0] == "JobUpstreamFailed":
             todo -= 1
@@ -422,7 +437,9 @@ class Runner:
             raise NotImplementedError(event[0])
         return todo
 
-    def handle_job_success(self, job_id, job_outputs):
+    def _handle_job_success(self, job_id, job_outputs):
+        """A job was done correctly. Record it's outputs,
+        decide on downstreams"""
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
         msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
@@ -444,7 +461,7 @@ class Runner:
             )
 
             job_state.state = JobState.Failed
-            self.fail_downstream_by_outputs(job.outputs, job_id)
+            self._fail_downstream_by_outputs(job.outputs, job_id)
             job_state.error = exceptions.JobContractError(
                 f"\t{job_id} returned the wrong set of outputs. "
                 f"Should be {escape_logging(str(set(job.outputs)))}, was {escape_logging(str(set(job_outputs.keys())))}"
@@ -460,12 +477,15 @@ class Runner:
                 # for name in self.get_job_inputs(job.job_id)
                 # }
             job_state.state = JobState.Executed
-            self.inform_downstreams_of_outputs(job_id, job_outputs)
+            self._inform_downstreams_of_outputs(job_id, job_outputs)
         logger.job_trace(
-            f"after handle_job_success {job_id}.state == {self.job_states[job_id]}"
+            f"after _handle_job_success {job_id}.state == {self.job_states[job_id]}"
         )
 
-    def inform_downstreams_of_outputs(self, job_id, job_outputs):
+    def _inform_downstreams_of_outputs(self, job_id, job_outputs):
+        """Tell all the downstreams of their updated inputs
+        and decide what to do with them once all inputs are available.
+        """
         if self.stopped:
             return
         for downstream_id in self.dag.successors(job_id):
@@ -475,15 +495,10 @@ class Runner:
             for name, hash in job_outputs.items():
                 if name in self.job_inputs[downstream_id]:
                     logger.job_trace(f"\t\t\tHad {name}")
-                    # old = downstream_state.historical_input.get(name, None)
-                    # new = hash
-                    # if not self.compare_history(old, new, job.__class__):
-                    # logger.job_trace("\t\t\tinput changed -> invalidate")
-                    # downstream_state.validation_state = ValidationState.Invalidated
                     downstream_state.updated_input[name] = hash  # update any way.
                 else:
                     logger.job_trace(f"\t\t\tNot an input {name}")
-            if self.all_inputs_finished(downstream_id):
+            if self._all_inputs_finished(downstream_id):
                 old_input = downstream_state.historical_input
                 new_input = downstream_state.updated_input
                 invalidated = False
@@ -504,7 +519,7 @@ class Runner:
                         logger.job_trace(f"{downstream_id} Same set of input keys")
                         for key, old_hash in old_input.items():
                             cmp_job = self.jobs[self.outputs_to_job_ids[key]].__class__
-                            if not self.compare_history(
+                            if not self._compare_history(
                                 old_hash, new_input[key], cmp_job
                             ):
                                 logger.job_trace(
@@ -524,7 +539,7 @@ class Runner:
                                 cmp_job = self.jobs[
                                     self.outputs_to_job_ids[old_key]
                                 ].__class__
-                                if not self.compare_history(
+                                if not self._compare_history(
                                     old_hash, new_input[old_key], cmp_job
                                 ):
                                     logger.job_trace(
@@ -535,7 +550,7 @@ class Runner:
                             else:
                                 # we compare on identity here. Changing file names and hashing methods at once,
                                 # what happens if you change the job class as well... better to stay on the easy side
-                                count = dict_values_count(new_input, old_hash)
+                                count = _dict_values_count_hashed(new_input, old_hash)
                                 if count:
                                     if count > 1:
                                         logger.job_trace(
@@ -560,7 +575,7 @@ class Runner:
                     downstream_job.job_kind is JobKind.Temp
                     and downstream_state.validation_state is ValidationState.Invalidated
                 ):
-                    if self.job_has_non_temp_somewhere_downstream(downstream_id):
+                    if self._job_has_non_temp_somewhere_downstream(downstream_id):
                         self._ready_or_failed(downstream_id)
                     else:
                         # I actually don't think we ever visit this case
@@ -568,7 +583,7 @@ class Runner:
                         raise NotImplementedError(
                             "Did not expect to go down this case"
                         )  # pragma: no cover
-                        # self.push_event("JobSkipped", (downstream_id,), 3)
+                        # self._push_event("JobSkipped", (downstream_id,), 3)
                 elif (
                     downstream_state.validation_state is ValidationState.Invalidated
                     or downstream_job.output_needed(self)
@@ -590,29 +605,35 @@ class Runner:
                             downstream_state.validation_state = (
                                 ValidationState.Validated
                             )
-                            self.push_event("JobSkipped", (downstream_id,), 3)
+                            self._push_event("JobSkipped", (downstream_id,), 3)
                     else:
                         downstream_state.validation_state = ValidationState.Validated
-                        self.push_event("JobSkipped", (downstream_id,), 3)
+                        self._push_event("JobSkipped", (downstream_id,), 3)
 
     def _ready_or_failed(self, job_id):
+        """Mark this job as either failed (if failed last time), or ready to go.
+        Even with the 'prune jobs from the last run' logic, we
+        might see a job again if it's a failed upstream of a newly generated job
+        """
 
-        if self.job_failed_last_time(job_id):
-            self.push_event("JobFailed", (job_id, job_id))
+        if self._job_failed_last_time(job_id):
+            self._push_event("JobFailed", (job_id, job_id))
             self.job_states[job_id].error = self.last_job_states[job_id].error
         else:
-            self.push_event("JobReady", (job_id,), 3)
+            self._push_event("JobReady", (job_id,), 3)
 
-    def job_failed_last_time(self, job_id):
+    def _job_failed_last_time(self, job_id):
+        """Did this job fail last time?"""
         res = (
             self.last_job_states
             and job_id in self.last_job_states
             and self.last_job_states[job_id].state == JobState.Failed
         )
-        logger.job_trace(f"job_failed_last_time: {job_id}: {res}")
+        logger.job_trace(f"_job_failed_last_time: {job_id}: {res}")
         return res
 
-    def handle_job_skipped(self, job_id):
+    def _handle_job_skipped(self, job_id):
+        """This job was skipped (inputs unchanged, outputs recorded & present)"""
         job_state = self.job_states[job_id]
         job_state.state = JobState.Skipped
         if job_state.historical_output:
@@ -620,21 +641,60 @@ class Runner:
         else:
             # yelp, we skipped this job (because it's output existed?
             # but we do not have a historical state.
-            # that means the downstream jobs will never have all_inputs_finished
+            # that means the downstream jobs will never have _all_inputs_finished
             # and we hang.
             # so...
             job_state.updated_output = job_state.historical_output.copy()
 
         # the input has already been filled.
-        self.inform_downstreams_of_outputs(
+        self._inform_downstreams_of_outputs(
             job_id, job_state.updated_output
         )  # todo: leave off for optimization - should not trigger anyway.
 
-    def handle_job_ready(self, job_id):
+    def _handle_job_ready(self, job_id):
+        """The job is ready to run."""
+        # suppose we could inline this
         logger.job_trace(f"putting {job_id}")
         self.jobs_to_run_que.put(job_id)
 
+    def _handle_job_failed(self, job_id, source):
+        """A job did not succeed (wrong output, no output, exception...0, - log the error, fail all downstreams"""
+        job = self.jobs[job_id]
+        job_state = self.job_states[job_id]
+        job_state.state = JobState.Failed
+        self._fail_downstream_by_outputs(job.outputs, job_id)
+        # logger.error(f"Failed {job_id}")
+        if not self._job_failed_last_time(job_id):
+            if self.job_graph.error_dir is not None:
+                error_file = self.job_graph.error_dir / (
+                    str(job.job_number) + "_exception.txt"
+                )
+                with open(error_file, "w") as ef:
+                    c = Console(file=ef, record=True)
+                    c.print(f"{job_id}\n")
+                    c.log(
+                        self._format_rich_traceback_fallback(
+                            job_state.error.args[1], True
+                        )
+                    )
+                    # ef.write(self._format_rich_traceback_fallback(job_state.error.args[1]))
+                logger.error(
+                    f"Failed after {job_state.run_time:.2}s: [bold]{job_id}[/bold]. Exception (incl. locals) logged to {error_file}"
+                )
+            else:
+                logger.error(f"Failed job: {job_id}")
+            logger.error(
+                escape_logging(
+                    self._format_rich_traceback_fallback(job_state.error.args[1], False)
+                )
+            )
+
     def _format_rich_traceback_fallback(self, tb, include_locals):
+        """Pretty print a traceback.
+
+        We don't use rich's own facility, since it is
+        not time-bounded /  does not cut the output
+        """
         if include_locals:
 
             def render_locals(frame):
@@ -709,38 +769,8 @@ class Runner:
                 )
         return "\n".join(out)
 
-    def handle_job_failed(self, job_id, source):
-        job = self.jobs[job_id]
-        job_state = self.job_states[job_id]
-        job_state.state = JobState.Failed
-        self.fail_downstream_by_outputs(job.outputs, job_id)
-        # logger.error(f"Failed {job_id}")
-        if not self.job_failed_last_time(job_id):
-            if self.job_graph.error_dir is not None:
-                error_file = self.job_graph.error_dir / (
-                    str(job.job_number) + "_exception.txt"
-                )
-                with open(error_file, "w") as ef:
-                    c = Console(file=ef, record=True)
-                    c.print(f"{job_id}\n")
-                    c.log(
-                        self._format_rich_traceback_fallback(
-                            job_state.error.args[1], True
-                        )
-                    )
-                    # ef.write(self._format_rich_traceback_fallback(job_state.error.args[1]))
-                logger.error(
-                    f"Failed after {job_state.run_time:.2}s: [bold]{job_id}[/bold]. Exception (incl. locals) logged to {error_file}"
-                )
-            else:
-                logger.error(f"Failed job: {job_id}")
-            logger.error(
-                escape_logging(
-                    self._format_rich_traceback_fallback(job_state.error.args[1], False)
-                )
-            )
-
-    def all_inputs_finished(self, job_id):
+    def _all_inputs_finished(self, job_id):
+        """Are all inputs for this job finished?"""
         job_state = self.job_states[job_id]
         if job_state.state in (JobState.Failed, JobState.UpstreamFailed):
             logger.job_trace("\t\t\tall_inputs_finished = false because failed")
@@ -755,22 +785,25 @@ class Runner:
         logger.job_trace(f"\t\t\tall_input_finished: {all_finished}")
         return all_finished
 
-    def push_event(self, event, args, indent=0):
+    def _push_event(self, event, args, indent=0):
+        """Push an event to be handled by the control thread"""
         with self.event_lock:
             logger.opt(depth=1).log(
                 "JobTrace", "\t" * indent + f"->push {event} {args[0]}"
             )
             self.events.put((event, args))
 
-    def fail_downstream_by_outputs(self, outputs, source):
+    def _fail_downstream_by_outputs(self, outputs, source):
+        """Identify all downstream jobs via a job's outputs, and _fail_downstream them"""
         for output in outputs:
             # can't I run this with the job_id? todo: optimization
             job_id = self.outputs_to_job_ids[
                 output
             ]  # todo: don't continue if the state is already failed...
-            self.fail_downstream(job_id, source)
+            self._fail_downstream(job_id, source)
 
-    def fail_downstream(self, job_id, source):
+    def _fail_downstream(self, job_id, source):
+        """Fail a node because it's upstream failed, recursively"""
         logger.job_trace(f"failed_downstream {job_id} {source}")
         job_state = self.job_states[job_id]
         if (
@@ -778,37 +811,54 @@ class Runner:
         ):  # we also call this on the failed job
             job_state.state = JobState.UpstreamFailed
             job_state.error = f"Upstream {source} failed"
-            self.push_event("JobUpstreamFailed", (job_id,))
+            self._push_event("JobUpstreamFailed", (job_id,))
         for node in self.dag.successors(job_id):
-            self.fail_downstream(node, source)
+            self._fail_downstream(node, source)
 
-    def compare_history(self, old_hash, new_hash, job_class):
-        # if old_hash is None:
-        # return False
+    def _compare_history(self, old_hash, new_hash, job_class):
+        """Compare the hashes of two jobs"""
         return job_class.compare_hashes(old_hash, new_hash)
 
-    def job_has_non_temp_somewhere_downstream(self, job_id):
+    def _job_has_non_temp_somewhere_downstream(self, job_id):
+        """Does this job have a non-temp job somewhere downstream.
+
+        Used to decide on whether we execute temp jobs at all.
+        """
         for downstream_id in self.dag.neighbors(job_id):
             j = self.jobs[downstream_id]
             if j.job_kind is not JobKind.Temp:
                 return True
             else:
-                if self.job_has_non_temp_somewhere_downstream(downstream_id):
+                if self._job_has_non_temp_somewhere_downstream(downstream_id):
                     return True
         return False  # pragma: no cover - apperantly we never call this with a job with no downstreams
 
-    def start_job_executing_threads(self):
+    def _start_job_executing_threads(self):
+        """Fire up the default number of threads"""
         for ii in range(self.job_graph.cores):
-            self.start_another_thread()
+            self._start_another_thread()
 
-    def start_another_thread(self):
-        t = Thread(target=self.executing_thread)
+    def _start_another_thread(self):
+        """Fire up another thread (if all current threads are blocked with multi core threads.
+
+        This prevents stalling, since it will ensure that there's a thread around
+        to do the SingleCore jobs.
+
+        Note that we don't fire up threads without limit - at one point, you can still
+        stall the graph
+        """
+        t = Thread(target=self._executing_thread)
         self.threads.append(t)
         t.start()
 
-    def executing_thread(self):
-        my_pid = os.getpid()
-        cwd = os.getcwd()
+    def _executing_thread(self):
+        """The inner function of the threads actually executing the jobs"""
+        my_pid = (
+            os.getpid()
+        )  # so we can detect if we return inside a forked process and exit (safety net)
+        cwd = (
+            os.getcwd()
+        )  # so we can detect if the job cahnges the cwd (don't do that!)
         try:
             while not self.stopped:
                 job_id = self.jobs_to_run_que.get()
@@ -835,7 +885,7 @@ class Runner:
                         logger.job_trace(
                             "All threads blocked by Multi core jobs - starting another one"
                         )
-                        self.start_another_thread()
+                        self._start_another_thread()
 
                 logger.job_trace(f"wait for {job_id}")
                 with self.core_lock.using(c):
@@ -855,7 +905,7 @@ class Runner:
                             raise exceptions.JobContractError(
                                 f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
                             )
-                        self.push_event("JobSuccess", (job_id, outputs))
+                        self._push_event("JobSuccess", (job_id, outputs))
                     except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
                         logger.job_trace(
                             "SystemExit in spawned process -> converting to hard exit"
@@ -875,7 +925,7 @@ class Runner:
                                 captured_tb,
                             )
                         e = job_state.error
-                        self.push_event("JobFailed", (job_id, job_id))
+                        self._push_event("JobFailed", (job_id, job_id))
                     finally:
                         job.stop_time = time.time()
                         job.run_time = job.stop_time - job.start_time
@@ -890,7 +940,10 @@ class Runner:
 
 
 class JobCollector:
-    """only in place during the dag modification step of Runner"""
+    """only in place during the dag modification step of Runner.__init__,
+    so that the jobs that are only created during run (cleanup, _DownstreamNeedsMeChecker)
+    do not end up in the actual graph.
+    """
 
     def __init__(self, run_mode):
         self.clear()
@@ -904,15 +957,13 @@ class JobCollector:
         self.edges = set()
 
 
-def dict_values_count(a_dict, count_this):
-    logger.job_trace(
-        f"dict_values_count {escape_logging(a_dict)}, {escape_logging(count_this)}"
-    )
+def _dict_values_count_hashed(a_dict, count_this):
+    """Specialised 'how many times does this hash occur in this dict for renamed inputs"""
     counter = 0
     for value in a_dict.values():
         if value == count_this:
             counter += 1
-        if (
+        elif (
             isinstance(value, dict)
             and isinstance(count_this, dict)
             and "hash" in value

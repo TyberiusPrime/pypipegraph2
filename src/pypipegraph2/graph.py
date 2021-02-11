@@ -96,6 +96,7 @@ class PyPipeGraph:
     def run(
         self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5
     ) -> Dict[str, JobState]:
+        """Run the complete pypipegraph"""
         return self._run(print_failures, raise_on_job_error, event_timeout, None)
 
     def _run(
@@ -105,6 +106,9 @@ class PyPipeGraph:
         event_timeout=5,
         focus_on_these_jobs=None,
     ) -> Dict[str, JobState]:
+        """Run the jobgraph - possibly focusing on a subset of jobs (ie. ignoring
+        anything that's not necessary to calculate them - activated by calling a Job
+        """
         self.time_str = datetime.datetime.now().strftime(time_format)
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
             print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
@@ -113,7 +117,7 @@ class PyPipeGraph:
             # print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
             pass
         start_time = time.time()
-        self.fill_dependency_callbacks()
+        self._resolve_dependency_callbacks()
         if self.error_dir:
             (self.error_dir / self.time_str).mkdir(exist_ok=True, parents=True)
         if self.log_dir:
@@ -135,8 +139,8 @@ class PyPipeGraph:
             logger.info(
                 f"Run is go {threading.get_ident()} pid: {os.getpid()}, run_id {self.run_id}"
             )
-        self.cleanup_logs()
-        self.cleanup_errors()
+        self._cleanup_logs()
+        self._cleanup_errors()
         self.history_dir.mkdir(exist_ok=True, parents=True)
         self.run_dir.mkdir(exist_ok=True, parents=True)
         self.do_raise = []
@@ -144,7 +148,7 @@ class PyPipeGraph:
         try:
             result = None
             self._install_signals()
-            history = self.load_historical()
+            history = self._load_history()
             max_runs = 5
             jobs_already_run = set()
             final_result = {}
@@ -165,8 +169,8 @@ class PyPipeGraph:
                 except _RunAgain as e:
                     logger.info("Jobs created - running again")
                     result = e.args[0]
-                self.update_history(result, history)
-                self.log_runtimes(result, start_time)
+                self._update_history(result, history)
+                self._log_runtimes(result, start_time)
                 jobs_already_run.update(result.keys())
                 for k,v in result.items():
                     if not k in final_result or final_result[k].state != JobState.Failed:
@@ -199,13 +203,15 @@ class PyPipeGraph:
                 subprocess.check_call([sys.executable] + sys.argv, cwd=start_cwd)
 
     def run_for_these(self, jobs):
+        """Run graph for just these jobs (and their upstreams)"""
         if not isinstance(jobs, list):
             jobs = [jobs]
         return self._run(
             print_failures=True, raise_on_job_error=True, focus_on_these_jobs=jobs
         )
 
-    def cleanup_logs(self):
+    def _cleanup_logs(self):
+        """Clean up old logs"""
         if not self.log_dir or self.log_retention is None:
             return
         fn = Path(sys.argv[0]).name
@@ -216,7 +222,8 @@ class PyPipeGraph:
             for f in remove:
                 os.unlink(f)
 
-    def cleanup_errors(self):
+    def _cleanup_errors(self):
+        """Cleanup old errors"""
         if not self.error_dir or self.log_retention is None:
             return
         err_dirs = sorted(
@@ -227,9 +234,10 @@ class PyPipeGraph:
             for f in remove:
                 shutil.rmtree(f)
 
-    def update_history(self, job_results, history):
+    def _update_history(self, job_results, history):
+        """Merge history from previous and this run"""
         # we must keep the history of jobs unseen in this run.
-        # tly to allow partial runs
+        # to to allow partial runs
         new_history = (
             history  # .copy() don't copy. we reuse this in the subsequent runs
         )
@@ -245,13 +253,14 @@ class PyPipeGraph:
         done = False
         while not done:
             try:
-                self.save_historical(new_history)
+                self._save_history(new_history)
                 done = True
             except KeyboardInterrupt as e:
                 self.do_raise.append(e)
                 pass
 
-    def log_runtimes(self, job_results, run_start_time):
+    def _log_runtimes(self, job_results, run_start_time):
+        """Log the runtimes to a file (ever growing. But only runtimes over a threshold)"""
         if self.log_dir:
             rt_file = self.log_dir / "runtimes.tsv"
             lines = []
@@ -266,16 +275,16 @@ class PyPipeGraph:
             with open(rt_file, "a+") as op:
                 op.write("\n".join(lines))
 
-    def _get_history_fn(self):
-        fn = Path(sys.argv[0]).name
+    def get_history_filename(self):
+        """where do we store the graph's history?"""
         # we by default share the history file
         # if it's the same history dir, it's the same project
         # and you'd retrigger the calculations too often otherwise
         return self.history_dir / ".ppg_history"  # don't end on .py
 
-    def load_historical(self):
-        logger.trace("load_historicals")
-        fn = self._get_history_fn()
+    def _load_history(self):
+        logger.trace("_load_history")
+        fn = self.get_history_filename()
         history = {}
         if fn.exists():
             logger.job_trace("Historical existed")
@@ -328,9 +337,9 @@ class PyPipeGraph:
 
         return history
 
-    def save_historical(self, historical):
-        logger.trace("save_historical")
-        fn = self._get_history_fn()
+    def _save_history(self, historical):
+        logger.trace("_save_history")
+        fn = self.get_history_filename()
         if Path(fn).exists():
             fn.rename(fn.with_suffix(fn.suffix + ".backup"))
         raise_keyboard_interrupt = False
@@ -365,7 +374,10 @@ class PyPipeGraph:
             logger.error("Keyboard interrupt")
             raise KeyboardInterrupt()
 
-    def fill_dependency_callbacks(self):
+    def _resolve_dependency_callbacks(self):
+        """jobs may depend on functions that return their actual dependencies.
+        This resolves them
+        """
         # we need this copy,
         # for the callbacks may create jobs
         # so we can't simply iterate over the jobs.values()
@@ -381,7 +393,7 @@ class PyPipeGraph:
             for c in dc:
                 # logger.info(f"{j.job_id}, {c}")
                 j.depends_on(c())
-        self.fill_dependency_callbacks()  # nested?
+        self._resolve_dependency_callbacks()  # nested?
 
     def _print_failures(self):
         logger.trace("print_failures")
@@ -389,8 +401,7 @@ class PyPipeGraph:
 
     def _install_signals(self):
         """make sure we don't crash just because the user logged of.
-        Should also block ctrl-c
-
+        Also blocks CTRl-c in console, and transaltes into save shutdown otherwise.
         """
         logger.trace("_install_signals")
 
@@ -413,6 +424,7 @@ class PyPipeGraph:
         self._old_signal_int = signal.signal(signal.SIGINT, sigint)
 
     def _restore_signals(self):
+        """Restore signals to pre-run values"""
         logger.trace("_restore_signals")
         if hasattr(self, "_old_signal_hup"):
             signal.signal(signal.SIGHUP, self._old_signal_hup)
@@ -423,6 +435,9 @@ class PyPipeGraph:
             # raise ValueError("WHen does this happen")
 
     def add(self, job):
+        """Add a job.
+        Automatically called when a Job() is created
+        """
 
         for output in job.outputs:
             if output in self.outputs_to_job_ids:
@@ -443,6 +458,13 @@ class PyPipeGraph:
         job.job_number = len(self.jobs) - 1
 
     def add_edge(self, upstream_job, downstream_job):
+        """Declare a dependency between jobs
+
+        Implementation note:
+        While we connect the DAG based on the Jobs,
+        we calculate invalidation based on the job_inputs (see Job.depends_on),
+        allowing a MultiFileGeneratingJob to (optionally) only invalidate some of it's downstreams.
+        """
         if not upstream_job.job_id in self.jobs:
             raise KeyError(f"{upstream_job} not in this graph. Call job.readd() first")
         if not downstream_job.job_id in self.jobs:
@@ -453,6 +475,7 @@ class PyPipeGraph:
         self.job_dag.add_edge(upstream_job.job_id, downstream_job.job_id)
 
     def has_edge(self, upstream_job, downstream_job):
+        """Does this edge already exist?"""
         if not isinstance(upstream_job, str):
             upstream_job_id = upstream_job.job_id
         else:
@@ -464,4 +487,7 @@ class PyPipeGraph:
         return self.job_dag.has_edge(upstream_job_id, downstream_job_id)
 
     def restart_afterwards(self):
+        """Restart the whole python program afterwards?
+        Used by the interactive console
+        """
         self._restart_afterwards = True
