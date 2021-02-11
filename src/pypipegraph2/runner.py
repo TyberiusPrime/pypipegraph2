@@ -98,14 +98,14 @@ class Runner:
             import json
 
             assert flat_before == flat_after
-            logger.job_trace(
-                "dag "
-                + escape_logging(
-                    json.dumps(
-                        networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
-                    )
-                ),
-            )
+            # logger.job_trace(
+            # "dag "
+            # + escape_logging(
+            # json.dumps(
+            # networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
+            # )
+            # ),
+            # )
 
             if not networkx.algorithms.is_directed_acyclic_graph(
                 self.dag
@@ -211,13 +211,15 @@ class Runner:
                         # part two - clone downstreams inputs:
                         # with special attention to temp jobs
                         # to avoid crosslinking
-                        #print(len(self._iter_job_non_temp_upstream_hull(
-                            #downstream_job_id, dag
-                        #)))
+                        # print(len(self._iter_job_non_temp_upstream_hull(
+                        # downstream_job_id, dag
+                        # )))
                         if downstream_job_id not in hulls:
-                            hulls[downstream_job_id] = self._iter_job_non_temp_upstream_hull(
-                            downstream_job_id, dag
-                        )
+                            hulls[
+                                downstream_job_id
+                            ] = self._iter_job_non_temp_upstream_hull(
+                                downstream_job_id, dag
+                            )
                         for down_upstream_id in hulls[downstream_job_id]:
                             counter += 1
                             if down_upstream_id != job_id:
@@ -401,6 +403,7 @@ class Runner:
         """Activate the interactive thread"""
         if self.job_graph.run_mode is RunMode.CONSOLE:
             self.interactive = ConsoleInteractive()
+            self.last_status_time = time.time()
             self.interactive.start(self)
 
     def _interactive_stop(self):
@@ -410,7 +413,12 @@ class Runner:
 
     def _interactive_report(self):
         if hasattr(self, "interactive"):
-            self.interactive.report_status(self.jobs_done, 0, len(self.dag))
+            t = time.time()
+            if (
+                t - self.last_status_time >= 0.5
+            ):  # don't update more than every half second.
+                self.interactive.report_status(self.jobs_done, 0, len(self.dag))
+                self.last_status_time = t
 
     def abort(self):
         """Kill all running jobs and leave runner.
@@ -453,18 +461,19 @@ class Runner:
         decide on downstreams"""
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
-        msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
-        if job.job_kind in (
-            JobKind.Temp,
-            JobKind.Output,
-            JobKind.JobGenerating,
-            JobKind.Loading,
-        ):
-            logger.info(msg)
-        else:
-            logger.debug(msg)
+        if job.run_time >= 1:
+            msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
+            if job.job_kind in (
+                JobKind.Temp,
+                JobKind.Output,
+                JobKind.JobGenerating,
+                JobKind.Loading,
+            ):
+                logger.info(msg)
+            else:
+                logger.debug(msg)
         # record our success
-        logger.job_trace(f"\t{escape_logging(str(job_outputs)[:500])}...")
+        # logger.job_trace(f"\t{escape_logging(str(job_outputs)[:500])}...")
         if set(job_outputs.keys()) != set(job.outputs):
             logger.job_trace(
                 f"\t{job_id} returned the wrong set of outputs. "
@@ -500,15 +509,15 @@ class Runner:
         if self.stopped:
             return
         for downstream_id in self.dag.successors(job_id):
-            logger.job_trace(f"\t\tDownstream {downstream_id}")
+            # logger.job_trace(f"\t\tDownstream {downstream_id}")
             downstream_state = self.job_states[downstream_id]
             downstream_job = self.jobs[downstream_id]
             for name, hash in job_outputs.items():
                 if name in self.job_inputs[downstream_id]:
-                    logger.job_trace(f"\t\t\tHad {name}")
+                    # logger.job_trace(f"\t\t\tHad {name}")
                     downstream_state.updated_input[name] = hash  # update any way.
-                else:
-                    logger.job_trace(f"\t\t\tNot an input {name}")
+                # else:
+                # logger.job_trace(f"\t\t\tNot an input {name}")
             if self._all_inputs_finished(downstream_id):
                 old_input = downstream_state.historical_input
                 new_input = downstream_state.updated_input
@@ -784,16 +793,16 @@ class Runner:
         """Are all inputs for this job finished?"""
         job_state = self.job_states[job_id]
         if job_state.state in (JobState.Failed, JobState.UpstreamFailed):
-            logger.job_trace("\t\t\tall_inputs_finished = false because failed")
+            # logger.job_trace("\t\t\tall_inputs_finished = false because failed")
             return False
-        logger.job_trace(f"\t\t\tjob_inputs: {escape_logging(self.job_inputs[job_id])}")
-        logger.job_trace(
-            f"\t\t\tupdated_input: {escape_logging(self.job_states[job_id].updated_input.keys())}"
-        )
+        # logger.job_trace(f"\t\t\tjob_inputs: {escape_logging(self.job_inputs[job_id])}")
+        # logger.job_trace(
+        # f"\t\t\tupdated_input: {escape_logging(self.job_states[job_id].updated_input.keys())}"
+        # )
         all_finished = len(self.job_states[job_id].updated_input) == len(
             self.job_inputs[job_id]
         )
-        logger.job_trace(f"\t\t\tall_input_finished: {all_finished}")
+        # logger.job_trace(f"\t\t\tall_input_finished: {all_finished}")
         return all_finished
 
     def _push_event(self, event, args, indent=0):

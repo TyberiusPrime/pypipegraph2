@@ -55,3 +55,4 @@ benchmarks/run
 benchmarks/flames.svg
 */.ppg/*
 examples/run
+flame*.svg

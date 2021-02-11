@@ -159,8 +159,11 @@ class PyPipeGraph:
                 do_break = False
                 try:
                     self.runner = Runner(
-                        self, history, event_timeout, focus_on_these_jobs,
-                        jobs_already_run
+                        self,
+                        history,
+                        event_timeout,
+                        focus_on_these_jobs,
+                        jobs_already_run,
                     )
                     result = self.runner.run(self.run_id, result)
                     del self.runner
@@ -172,13 +175,16 @@ class PyPipeGraph:
                 self._update_history(result, history)
                 self._log_runtimes(result, start_time)
                 jobs_already_run.update(result.keys())
-                for k,v in result.items():
-                    if not k in final_result or final_result[k].state != JobState.Failed:
+                for k, v in result.items():
+                    if (
+                        not k in final_result
+                        or final_result[k].state != JobState.Failed
+                    ):
                         final_result[k] = v
-                #final_result.update(result)
+                # final_result.update(result)
                 if do_break:
                     break
-                #final_result.update(result)
+                # final_result.update(result)
             del result
             for job_id, job_state in final_result.items():
                 if job_state.state == JobState.Failed:
@@ -294,15 +300,15 @@ class PyPipeGraph:
                         counter = 0
                         while True:
                             try:
-                                logger.job_trace(f"History read {counter}")
+                                # logger.job_trace(f"History read {counter}")
                                 counter += 1
                                 job_id = None
                                 job_id = pickle.load(op)
-                                logger.job_trace(f"read job_id {job_id}")
+                                # logger.job_trace(f"read job_id {job_id}")
                                 inputs_and_outputs = pickle.load(op)
                                 history[job_id] = inputs_and_outputs
                             except (TypeError, pickle.UnpicklingError) as e:
-                                logger.job_trace(f"unipckling error {e}")
+                                # logger.job_trace(f"unpickleing error {e}")
                                 if job_id is None:
                                     raise exceptions.RunFailed(
                                         "Could not depickle job id - history file is borked beyond automatic recovery"

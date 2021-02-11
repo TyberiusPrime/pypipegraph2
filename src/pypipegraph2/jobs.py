@@ -800,13 +800,13 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     def compare_hashes(cls, old_hash, new_hash, python_version=python_version):
         if python_version in new_hash and python_version in old_hash:
             res = new_hash[python_version] == old_hash[python_version]
-            logger.job_trace(f"Comparing based on bytecode: result {res}")
+            # logger.job_trace(f"Comparing based on bytecode: result {res}")
             return res
         else:  # pragma: no cover
             # missing one python version, did the source change?
             # should we compare Closures here as well? todo
             res = new_hash["source"] == old_hash["source"]
-            logger.job_trace(f"Comparing based on source: result {res}")
+            # logger.job_trace(f"Comparing based on source: result {res}")
             return res
 
     def get_source_file(self):
@@ -1780,7 +1780,11 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             self.target_folder = real_target
             self.files = [self._map_filename(fn) for fn in self.org_files]
         self._log_and_cleanup(runner, output_name)
-        res[self._output_name_history_name] = {'hash': output_name, 'size': len(self.files),  'mtime': 0}
+        res[self._output_name_history_name] = {
+            "hash": output_name,
+            "size": len(self.files),
+            "mtime": 0,
+        }
         return res
 
     def _map_filename(self, filename):
@@ -1816,9 +1820,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             else:  # we have a hash... but our inputs may have changed us to a different folder
                 # so we need to verify this.
                 if (
-                    runner.job_states[self.job_id].historical_output.get(
-                        self._output_name_history_name, {}
-                    ).get('hash', None)
+                    runner.job_states[self.job_id]
+                    .historical_output.get(self._output_name_history_name, {})
+                    .get("hash", None)
                     != output_name
                 ):
                     return True
