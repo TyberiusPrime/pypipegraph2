@@ -214,7 +214,12 @@ class Runner:
                         # print(len(self._iter_job_non_temp_upstream_hull(
                         # downstream_job_id, dag
                         # )))
-                        if downstream_job_id not in hulls:
+                        if downstream_job_id not in hulls: 
+                            # this caching speeds up 'wide' graphs 
+                            # e.g. those in benchmarks/bench_wide.py
+                            # goes from 192s with 1000 jobs to 1.23
+                            # still not great, but much better.
+                            # still quadratic in nature though :(.
                             hulls[
                                 downstream_job_id
                             ] = self._iter_job_non_temp_upstream_hull(
@@ -243,7 +248,7 @@ class Runner:
                     self.job_inputs[cleanup_job.job_id].update(
                         self.jobs[downstream_job_id].outputs
                     )
-        # raise ValueError(counter, time.time() -ti)
+        #raise ValueError(counter, time.time() -ti)
         return dag
 
         # now add an initial job, so we can cut off the evaluation properly

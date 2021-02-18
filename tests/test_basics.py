@@ -418,9 +418,7 @@ class TestPypipegraph2:
 
     def test_tempfile_triggered_by_invalidating_tempfile(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "A",
-            lambda of: of.write_text("A" + counter("a")),
-            depend_on_function=False,
+            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -442,9 +440,7 @@ class TestPypipegraph2:
 
     def test_last_invalidated_tempfile_isolation(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "A",
-            lambda of: of.write_text("A" + counter("a")),
-            depend_on_function=False,
+            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -468,9 +464,7 @@ class TestPypipegraph2:
 
     def test_depending_on_two_temp_jobs_but_only_one_invalidated(self):
         jobA = ppg.TempFileGeneratingJob(
-            "A",
-            lambda of: of.write_text("A" + counter("a")),
-            depend_on_function=False,
+            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -1484,7 +1478,7 @@ class TestPypipegraph2:
         b = ppg.FileGeneratingJob("B", lambda of: of.write_text("B"))
         c = ppg.FileGeneratingJob("c", C, depend_on_function=False)
         c.depends_on(a, b)
-        time.sleep(1) # always change mtime - it is being rewritten, right
+        time.sleep(1)  # always change mtime - it is being rewritten, right
         ppg.run()  # no rerun, changed name detection.
         assert read("C") == "1"
         assert read("c") == "AB"
@@ -1835,6 +1829,6 @@ class TestPypipegraph2:
         assert read("B") == "1"
 
     def test_empty_depends_on_raises(self):
-        a = ppg.FileGeneratingJob('shu', lambda of: of.write_text(of.name))
+        a = ppg.FileGeneratingJob("shu", lambda of: of.write_text(of.name))
         with pytest.raises(ValueError):
             a.depends_on()
