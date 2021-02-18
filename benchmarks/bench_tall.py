@@ -31,13 +31,15 @@ def simple():
 
     final_job = ppg.FileGeneratingJob("final", final)
 
+    last = final_job
     for ii in range(count):
 
         def load(ii=ii):
             data[ii] = str(ii)
 
         loader = ppg.DataLoadingJob(f"dl{ii}", load)
-        final_job.depends_on(loader)
+        last.depends_on(loader)
+        last = loader
     ppg.run()
 
 

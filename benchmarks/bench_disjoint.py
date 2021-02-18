@@ -26,18 +26,10 @@ def simple():
 
     data = {}
 
-    def final(of):
-        of.write_text(str(len(data)))
-
-    final_job = ppg.FileGeneratingJob("final", final)
-
     for ii in range(count):
-
-        def load(ii=ii):
-            data[ii] = str(ii)
-
-        loader = ppg.DataLoadingJob(f"dl{ii}", load)
-        final_job.depends_on(loader)
+        a = ppg.FileGeneratingJob(f'file_{ii}', lambda of: of.write_text(of.name))
+        b = ppg.DataLoadingJob(f'load_{ii}', lambda ii=ii: ii)
+        a.depends_on(b)
     ppg.run()
 
 
