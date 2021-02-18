@@ -56,6 +56,3 @@ class JobError(PPGException):
             # + (f"\tTraceback: {self.args[1]}\n")
             + ("")
         )
-
-class _TerminateThread(Exception):
-    pass

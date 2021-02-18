@@ -13,7 +13,7 @@ run_dir = (Path(__file__).parent / "run").absolute()
 
 try:
     count = int(sys.argv[1])
-except:
+except:  # noqa:E722
     count = 200
 
 
@@ -24,11 +24,9 @@ def simple():
     os.chdir(run_dir)
     ppg.new()
 
-    data = {}
-
     for ii in range(count):
-        a = ppg.FileGeneratingJob(f'file_{ii}', lambda of: of.write_text(of.name))
-        b = ppg.DataLoadingJob(f'load_{ii}', lambda ii=ii: ii)
+        a = ppg.FileGeneratingJob(f"file_{ii}", lambda of: of.write_text(of.name))
+        b = ppg.DataLoadingJob(f"load_{ii}", lambda ii=ii: ii)
         a.depends_on(b)
     ppg.run()
 

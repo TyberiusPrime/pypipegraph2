@@ -1213,7 +1213,7 @@ class TestDependency:
         jobC.depends_on(jobA, [jobB], None, [None])
         jobC.depends_on(None)
         with pytest.raises(ValueError):
-            jobC.depends_on() # that's not valid
+            jobC.depends_on()  # that's not valid
         ppg.run()
         assert read("out/A") == "A"
         assert read("out/B") == "B"

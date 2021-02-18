@@ -17,7 +17,7 @@ from pathlib import Path
 from io import StringIO
 from collections import namedtuple
 from . import hashers, exceptions, ppg_traceback
-from .enums import JobKind, Resources, RunMode
+from .enums import JobKind, Resources
 from .util import escape_logging
 import hashlib
 import shutil
@@ -319,7 +319,7 @@ class MultiFileGeneratingJob(Job):
             func_invariant = FunctionInvariant(self.generating_function, self.job_id)
             self.depends_on(func_invariant)
 
-    def run(self, runner, _historical_output):
+    def run(self, runner, _historical_output):  # noqa:C901
         self.files = [self._map_filename(fn) for fn in self.org_files]
         for fn in self.files:  # we rebuild anyway!
             if fn.exists():
@@ -852,10 +852,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if function.__doc__:
             for prefix in ['"""', "'''", '"', "'"]:
                 if prefix + function.__doc__ + prefix in source:
-                    source = source.replace(
-                        prefix + function.__doc__ + prefix,
-                        "",
-                    )
+                    source = source.replace(prefix + function.__doc__ + prefix, "",)
         return source
 
     @classmethod
@@ -1326,9 +1323,7 @@ def CachedDataLoadingJob(
             )
 
     load_job = DataLoadingJob(
-        "load" + str(cache_filename),
-        load,
-        depend_on_function=False,
+        "load" + str(cache_filename), load, depend_on_function=False,
     )
     load_job.depends_on(cache_job)
     # do this after you have sucessfully created both jobs
@@ -1536,7 +1531,7 @@ def _save_plot(
         raise NotImplementedError("Don't know how to handle this plotjob")
 
 
-def PlotJob(
+def PlotJob(  # noqa:C901
     output_filename,
     calc_function,
     plot_function,
@@ -1765,7 +1760,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             self.target_folder.mkdir(exist_ok=True, parents=True)
             try:
                 res = MultiFileGeneratingJob.run(self, runner, _historical_output)
-            except:
+            except:  # noqa:E722
                 if self.remove_build_dir_on_error:
                     shutil.rmtree(self.target_folder)
                 raise

@@ -1,5 +1,5 @@
 from threading import Lock, Condition
-import threading
+import ctypes
 
 
 class _CoreLockContextManager:
@@ -71,10 +71,6 @@ class CoreLock:
             # logger.info(f"{_thread.get_ident()} done notify condition")
 
 
-import threading
-import inspect
-import ctypes
-
 def async_raise(target_tid, exception):
     """Raises an asynchronous exception in another thread.
     Read http://docs.python.org/c-api/init.html#PyThreadState_SetAsyncExc
@@ -84,8 +80,9 @@ def async_raise(target_tid, exception):
     """
     # Ensuring and releasing GIL are useless since we're not in C
     # gil_state = ctypes.pythonapi.PyGILState_Ensure()
-    ret = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(target_tid),
-                                                     ctypes.py_object(exception))
+    ret = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_long(target_tid), ctypes.py_object(exception)
+    )
     # ctypes.pythonapi.PyGILState_Release(gil_state)
     if ret == 0:
         raise ValueError("Invalid thread ID {}".format(target_tid))

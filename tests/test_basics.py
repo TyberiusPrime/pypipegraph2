@@ -418,7 +418,9 @@ class TestPypipegraph2:
 
     def test_tempfile_triggered_by_invalidating_tempfile(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
+            "A",
+            lambda of: of.write_text("A" + counter("a")),
+            depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -440,7 +442,9 @@ class TestPypipegraph2:
 
     def test_last_invalidated_tempfile_isolation(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
+            "A",
+            lambda of: of.write_text("A" + counter("a")),
+            depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -464,7 +468,9 @@ class TestPypipegraph2:
 
     def test_depending_on_two_temp_jobs_but_only_one_invalidated(self):
         jobA = ppg.TempFileGeneratingJob(
-            "A", lambda of: of.write_text("A" + counter("a")), depend_on_function=False,
+            "A",
+            lambda of: of.write_text("A" + counter("a")),
+            depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "B",
@@ -1754,41 +1760,6 @@ class TestPypipegraph2:
             "b", lambda of: counter("B") and of.write_text("b" + read("a"))
         )
         b.depends_on(a)
-        ppg.run()
-        assert read("b") == "ba"
-        assert read("B") == "1"
-
-    def test_going_from_multi_file_generating_to_file_invariant_no_retrigger(
-        self, job_trace_log
-    ):
-        # this one depends on just one of the files...
-        a = ppg.MultiFileGeneratingJob(
-            ["a", "a1"], lambda of: of[0].write_text("a") and of[1].write_text("a1")
-        )
-        b = ppg.FileGeneratingJob(
-            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
-        )
-        b.depends_on(a[0])  # depend just on a.
-        ppg.run()
-        assert read("b") == "ba"
-        assert read("B") == "1"
-        ppg.new()
-        a = ppg.FileInvariant("a")
-        b = ppg.FileGeneratingJob(
-            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
-        )
-        b.depends_on(a)
-        ppg.run()
-        assert read("b") == "ba"
-        assert read("B") == "1"
-        ppg.new()
-        a = ppg.MultiFileGeneratingJob(
-            ["a", "a1"], lambda of: of[0].write_text("a") and of[1].write_text("a1")
-        )
-        b = ppg.FileGeneratingJob(
-            "b", lambda of: counter("B") and of.write_text("b" + read("a"))
-        )
-        b.depends_on(a[0])
         ppg.run()
         assert read("b") == "ba"
         assert read("B") == "1"

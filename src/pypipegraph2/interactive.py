@@ -8,7 +8,6 @@ import select
 import termios
 import tty
 import threading
-from .parallel import async_raise
 from .util import console
 import rich.status
 
@@ -29,7 +28,7 @@ class ConsoleInteractive:
             pass
 
     def _end_terminal_raw(self):
-        if hasattr(self, 'old_settings'):
+        if hasattr(self, "old_settings"):
             try:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
             except io.UnsupportedOperation:  # see _set_terminal_raw
@@ -55,7 +54,6 @@ class ConsoleInteractive:
         logger.job_trace("Terminated interactive thread")
         self.status.stop()
         del self.runner
-        # async_raise(self.thread.ident, SystemExit)
 
     @property
     def cmd(self):
@@ -80,7 +78,7 @@ class ConsoleInteractive:
                         self.cmd = ""
                     elif value == "\x1a":  # ctrl-z
                         os.kill(os.getpid(), signal.SIGTSTP)
-                    elif ord("0") <= ord(value) <= ord("z") or value == ' ':
+                    elif ord("0") <= ord(value) <= ord("z") or value == " ":
                         self.cmd += value
                     elif value == "\x7f":  # backspace
                         self.cmd = self.cmd[:-1]
@@ -91,7 +89,7 @@ class ConsoleInteractive:
                                 args = ""
                                 if " " in command:
                                     command = command[: command.find(" ")]
-                                    args = self.cmd[len(command) + 1:].strip()
+                                    args = self.cmd[len(command) + 1 :].strip()
                                 self.cmd = ""
                                 if hasattr(self, "_cmd_" + command):
                                     getattr(self, "_cmd_" + command)(args)
@@ -190,6 +188,3 @@ class ConsoleInteractive:
         print("ok, killing job", job.job_id)
         logger.info(f"Command kill {job.job_id} ")
         job.kill_if_running()
-
-
-

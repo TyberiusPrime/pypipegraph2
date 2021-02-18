@@ -1,6 +1,4 @@
 import os
-from rich.console import Console
-console = Console()
 
 cpu_count = None
 

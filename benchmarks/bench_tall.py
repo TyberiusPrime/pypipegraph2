@@ -13,7 +13,7 @@ run_dir = (Path(__file__).parent / "run").absolute()
 
 try:
     count = int(sys.argv[1])
-except:
+except:  # noqa:E722
     count = 200
 
 

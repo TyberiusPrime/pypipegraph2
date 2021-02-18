@@ -339,7 +339,9 @@ class PyPipeGraph:
                     except EOFError:
                         pass
             except Exception as e:
-                raise exceptions.RunFailed("Could not load history data", e, fn.absolute())
+                raise exceptions.RunFailed(
+                    "Could not load history data", e, fn.absolute()
+                )
 
         return history
 

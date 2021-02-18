@@ -12,7 +12,9 @@ from .shared import write, read, Dummy
 class TestResourceCoordinator:
     def test_jobs_that_need_all_cores_are_spawned_one_by_one(self, job_trace_log):
         # we'll determine this by the start respective end times..
-        ppg.new(cores=3,)
+        ppg.new(
+            cores=3,
+        )
 
         def a(of):
             write(of, "A")
@@ -47,7 +49,9 @@ class TestResourceCoordinator:
 
     def test_jobs_concurrent_jobs_run_concurrently(self):
         # we'll determine this by the start respective end times..
-        ppg.new(cores=2,)
+        ppg.new(
+            cores=2,
+        )
         jobA = ppg.FileGeneratingJob(
             "out/A", lambda of: write(of, "A"), resources=ppg.Resources.AllCores
         )

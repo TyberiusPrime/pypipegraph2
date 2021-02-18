@@ -8,15 +8,12 @@ import time
 import networkx
 from .util import escape_logging
 from .enums import JobKind, ValidationState, JobState, RunMode
-from .exceptions import _RunAgain, _TerminateThread
+from .exceptions import _RunAgain
 from .parallel import CoreLock, async_raise
 from threading import Thread
 from . import ppg_traceback
 import threading
-from .util import console
 from rich.console import Console
-from rich.live import Live
-from rich.text import Text
 from .interactive import ConsoleInteractive
 
 
@@ -88,16 +85,16 @@ class Runner:
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
             self.core_lock = CoreLock(job_graph.cores)
 
-            flat_before = networkx.readwrite.json_graph.node_link_data(
-                job_graph.job_dag
-            )
+            # flat_before = networkx.readwrite.json_graph.node_link_data(
+            # job_graph.job_dag
+            # )
             self.dag = self.modify_dag(
                 job_graph, focus_on_these_jobs, jobs_already_run_previously
             )
-            flat_after = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
-            import json
+            # flat_after = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
+            # import json
 
-            assert flat_before == flat_after
+            # assert flat_before == flat_after
             # logger.job_trace(
             # "dag "
             # + escape_logging(
@@ -126,7 +123,9 @@ class Runner:
             self.jobs_to_run_que = queue.SimpleQueue()
             self.threads = []
 
-    def modify_dag(self, job_graph, focus_on_these_jobs, jobs_already_run_previously):
+    def modify_dag(  # noqa: C901
+        self, job_graph, focus_on_these_jobs, jobs_already_run_previously
+    ):
         """Modify the DAG to be executed
         by adding CleanupJobs, _DownstreamNeedsMeChecker,
         applying pruning,
@@ -183,7 +182,7 @@ class Runner:
                 pass
 
         known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
-        ti = time.time()
+        # ti = time.time()
         counter = 0
         hulls = {}
         for job_id in reversed(known_job_ids):
@@ -214,8 +213,8 @@ class Runner:
                         # print(len(self._iter_job_non_temp_upstream_hull(
                         # downstream_job_id, dag
                         # )))
-                        if downstream_job_id not in hulls: 
-                            # this caching speeds up 'wide' graphs 
+                        if downstream_job_id not in hulls:
+                            # this caching speeds up 'wide' graphs
                             # e.g. those in benchmarks/bench_wide.py
                             # goes from 192s with 1000 jobs to 1.23
                             # still not great, but much better.
@@ -248,7 +247,7 @@ class Runner:
                     self.job_inputs[cleanup_job.job_id].update(
                         self.jobs[downstream_job_id].outputs
                     )
-        #raise ValueError(counter, time.time() -ti)
+        # raise ValueError(counter, time.time() -ti)
         return dag
 
         # now add an initial job, so we can cut off the evaluation properly
@@ -265,7 +264,7 @@ class Runner:
                 result.add(upstream_job_id)
         return result
 
-    def run(self, run_id, last_job_states):
+    def run(self, run_id, last_job_states):  # noqa:C901
         """Actually run the current DAG"""
         from . import global_pipegraph
 
@@ -945,10 +944,7 @@ class Runner:
                             captured_tb = ppg_traceback.Trace(
                                 exception_type, exception_value, tb
                             )
-                            job_state.error = exceptions.JobError(
-                                e,
-                                captured_tb,
-                            )
+                            job_state.error = exceptions.JobError(e, captured_tb,)
                         e = job_state.error
                         self._push_event("JobFailed", (job_id, job_id))
                     finally:

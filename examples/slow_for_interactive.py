@@ -30,7 +30,7 @@ def gen_jobs_stack(name, runtime, total_runtime=total_runtime):
 
     out_jobs = []
     for ii in range(0, total_runtime + 1, runtime):
-        j = ppg.FileGeneratingJob(
+        ppg.FileGeneratingJob(
             f"{name}_{ii}", inner, resources=ppg.Resources.SingleCore
         )
         if out_jobs:
@@ -38,8 +38,8 @@ def gen_jobs_stack(name, runtime, total_runtime=total_runtime):
     return out_jobs
 
 
-#gen_jobs_stack("1s", 1)
-gen_jobs_stack('30s', 20)
+# gen_jobs_stack("1s", 1)
+gen_jobs_stack("30s", 20)
 # gen_jobs_stack('60s', 60)
 
 

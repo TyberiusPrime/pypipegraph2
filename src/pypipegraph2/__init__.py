@@ -132,6 +132,7 @@ __all__ = [
     "FileGeneratingJob",
     "MultiFileGeneratingJob",
     "TempFileGeneratingJob",
+    "MultiTempFileGeneratingJob",
     "MultiFileGeneratingJob",
     "DataLoadingJob",
     "AttributeLoadingJob",

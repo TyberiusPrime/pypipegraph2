@@ -475,7 +475,12 @@ class TestFileGeneratingJob:
             write(sentinel, "done")
 
         job = ppg.FileGeneratingJob(of, do_write, empty_ok=True)
-        dep = ppg.ParameterInvariant("my_params", {1,},)
+        dep = ppg.ParameterInvariant(
+            "my_params",
+            {
+                1,
+            },
+        )
         job.depends_on(dep)
         ppg.run()
         assert Path(of).exists()
