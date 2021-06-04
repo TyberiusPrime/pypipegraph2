@@ -148,7 +148,7 @@ def both_ppg_and_no_ppg(request):
     """Create both an inside and an outside ppg test case.
     don't forgot to add this to your conftest.py
 
-    Use togother with run_ppg and force_load
+    Use together with run_ppg and force_load
 
     ```
     def pytest_generate_tests(metafunc):
@@ -156,7 +156,7 @@ def both_ppg_and_no_ppg(request):
             metafunc.parametrize("both_ppg_and_no_ppg", [True, False], indirect=True)
     ```
     """
-    raise ValueError("check implemenattion")
+    raise ValueError("check implementation")
 
     if request.param:
         if request.cls is None:
@@ -297,3 +297,77 @@ def trace_log():  # could not find out how to abstract pytest fixtures
     yield
     logger.remove(handler_id)
     # logger.add(old)
+
+
+@pytest.fixture
+def ppg1_compability_test(request):
+    import sys
+    import pypipegraph as ppg
+
+    if request.cls is None:
+        target_path = Path(request.fspath).parent / "run" / ("." + request.node.name)
+    else:
+        target_path = (
+            Path(request.fspath).parent
+            / "run"
+            / (request.cls.__name__ + "." + request.node.name)
+        )
+        target_path = target_path.absolute()
+    old_dir = Path(os.getcwd()).absolute()
+    if old_dir == target_path:
+        pass
+    else:
+        if target_path.exists():  # pragma: no cover
+            shutil.rmtree(target_path)
+
+    try:
+        first = [False]
+
+        def np(quiet=True, **kwargs):
+            if not first[0]:
+                Path(target_path).mkdir(parents=True, exist_ok=True)
+                os.chdir(target_path)
+                Path("logs").mkdir()
+                Path("cache").mkdir()
+                Path("results").mkdir()
+                Path("out").mkdir()
+                import logging
+
+                h = logging.getLogger("pypipegraph")
+                h.setLevel(logging.WARNING)
+                first[0] = True
+
+            if not 'resource_coordinator' in kwargs:
+                kwargs['resource_coordinator'] =ppg.resource_coordinators.LocalSystem(1, interactive=False)
+            if not 'dump_graph' in kwargs:
+                kwargs['dump_graph'] = False
+            if not 'quiet' in kwargs:
+                kwargs['quiet'] = quiet
+            ppg.new_pipegraph(**kwargs)
+            ppg.util.global_pipegraph.result_dir = Path("results")
+            g = ppg.util.global_pipegraph
+            g.new_pipegraph = np
+            print(g.rc.interactive)
+            return g
+
+        def finalize():
+            if hasattr(request.node, "rep_setup"):
+
+                if request.node.rep_setup.passed and (
+                    request.node.rep_call.passed
+                    or request.node.rep_call.outcome == "skipped"
+                ):
+                    try:
+                        if not hasattr(ppg.util.global_pipegraph, "test_keep_output"):
+                            if "--profile" not in sys.argv:
+                                shutil.rmtree(target_path)
+                    except OSError:  # pragma: no cover
+                        pass
+
+        request.addfinalizer(finalize)
+        yield np()
+
+    finally:
+        os.chdir(old_dir)
+
+
