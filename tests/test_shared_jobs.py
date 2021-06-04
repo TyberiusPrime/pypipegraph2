@@ -300,3 +300,19 @@ class TestSharedJob:
             known[str(h3.absolute())] == known[str(h2.absolute())]
         )  # goes back to old value
         assert not (Path("out") / key3).exists()
+
+
+    def test_simple_one_file(self):
+        def doit(output_file):
+            count = counter("doit")
+            write(output_file, "a" + str(count))
+
+        job = ppg.SharedMultiFileGeneratingJob(
+            "out", ["a"], doit, depend_on_function=False, remove_unused=False
+        )
+        ppg.run()
+        assert read("out/done_no_input/a") == "a0"
+
+
+
+

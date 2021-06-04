@@ -46,7 +46,7 @@ class Resources(Enum):
     RunsHere = "RunsHere"  # in this process
 
     def is_external(self):
-        return self in (Resources.SingleCore, Resources.AllCores, Resources.Exclusive)
+        return self in (Resources.SingleCore, Resources.AllCores, Resources.Exclusive) # pragma: no cover - used by interactive
 
     def to_number(self, max_cores):
         if self is Resources.SingleCore:

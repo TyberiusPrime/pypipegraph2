@@ -360,7 +360,7 @@ class Runner:
                 while self.jobs_in_flight:
                     try:
                         ev = self.events.get(0.1)
-                    except queue.Empty:
+                    except queue.Empty:  # pragma: no cover
                         break
                     else:
                         logger.job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
@@ -465,8 +465,8 @@ class Runner:
         decide on downstreams"""
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
+        msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
         if job.run_time >= 1:
-            msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
             if job.job_kind in (
                 JobKind.Temp,
                 JobKind.Output,
@@ -475,6 +475,8 @@ class Runner:
             ):
                 logger.info(msg)
             else:
+                logger.debug(msg)
+        else:
                 logger.debug(msg)
         # record our success
         # logger.job_trace(f"\t{escape_logging(str(job_outputs)[:500])}...")
@@ -690,7 +692,7 @@ class Runner:
         # logger.error(f"Failed {job_id}")
         if not self._job_failed_last_time(job_id):
             if self.job_graph.error_dir is not None:
-                error_file = self.job_graph.error_dir / (
+                error_file = self.job_graph.error_dir / self.job_graph.time_str / (
                     str(job.job_number) + "_exception.txt"
                 )
                 with open(error_file, "w") as ef:
