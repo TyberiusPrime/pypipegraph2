@@ -33,7 +33,7 @@ class TestCycles:
         def inner():
             ppg.new_pipegraph(quiet=True, dump_graph=False)
             jobA = ppg.FileGeneratingJob("A", lambda: write("A", "A"))
-            jobB = ppg.FileGeneratingJob("A", lambda: write("B", "A"))
+            jobB = ppg.FileGeneratingJob("B", lambda: write("B", "A"))
             jobA.depends_on(jobB)
             jobB.depends_on(jobA)
             # ppg.run_pipegraph()

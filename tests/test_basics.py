@@ -7,7 +7,7 @@ from pypipegraph2.runner import JobState
 from .shared import counter, write, read
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestPypipegraph2:
     def test_very_simple(self):
         assert not Path("A").exists()
@@ -1458,7 +1458,11 @@ class TestPypipegraph2:
         ppg.DataLoadingJob("a", a)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
-        e = (ppg.global_pipegraph.error_dir / "0_exception.txt").read_text()
+        e = (
+            ppg.global_pipegraph.error_dir
+            / ppg.global_pipegraph.time_str
+            / "0_exception.txt"
+        ).read_text()
         assert "KeyError" in e
         assert "ValueError" in e
         assert e.index("ValueError") < e.index("KeyError")
@@ -1573,7 +1577,11 @@ class TestPypipegraph2:
         ppg.DataLoadingJob("a", a)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
-        e = (ppg.global_pipegraph.error_dir / "0_exception.txt").read_text()
+        e = (
+            ppg.global_pipegraph.error_dir
+            / ppg.global_pipegraph.time_str
+            / "0_exception.txt"
+        ).read_text()
         assert "# no source available" in e
         assert "KeyError" in e
 
@@ -1799,7 +1807,6 @@ class TestPypipegraph2:
         assert read("b") == "ba"
         assert read("B") == "1"
 
-    def test_empty_depends_on_raises(self):
+    def test_empty_depends_on_ok(self):
         a = ppg.FileGeneratingJob("shu", lambda of: of.write_text(of.name))
-        with pytest.raises(ValueError):
-            a.depends_on()
+        a.depends_on()

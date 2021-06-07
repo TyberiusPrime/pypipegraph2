@@ -28,7 +28,7 @@ if has_pyggplot:  # noqa C901
         stdout, stderr = p.communicate()
         return stdout
 
-    @pytest.mark.usefixtures("ppg_per_test")
+    @pytest.mark.usefixtures("ppg2_per_test")
     class TestPlotJob:
         def test_basic(self):
             def calc():

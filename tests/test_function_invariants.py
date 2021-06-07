@@ -2,14 +2,14 @@ import pypipegraph2 as ppg
 import pytest
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestBuildInCompabilty:
     def test_invariant_build_in_function(self):
         a = ppg.FunctionInvariant("test", sorted).run(None, None)["FItest"]["source"]
         assert a == "<built-in function sorted>"
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestCythonCompability:
     def source_via_func_invariant(self, name, func):
         return ppg.FunctionInvariant(name, func).run(None, None)["FIa"]["source"]

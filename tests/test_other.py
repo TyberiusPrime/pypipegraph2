@@ -8,7 +8,7 @@ from pathlib import Path
 from .shared import write, read, Dummy
 
 
-@pytest.mark.usefixtures("ppg_per_test", "create_out_dir")
+@pytest.mark.usefixtures("ppg2_per_test", "create_out_dir")
 class TestResourceCoordinator:
     def test_jobs_that_need_all_cores_are_spawned_one_by_one(self, job_trace_log):
         # we'll determine this by the start respective end times..
@@ -94,7 +94,7 @@ class CantDepickle:
         raise TypeError("I can be pickled, but not unpickled")
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestingTheUnexpectedTests:
     def test_job_exiting_python(self):
         def dies(of):
@@ -186,7 +186,7 @@ class TestingTheUnexpectedTests:
         # with pytest.raises(ppg.PyPipeGraphError):
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestPathLib:
     def test_multifilegenerating_job_requires_string_filenames(self):
         import pathlib
@@ -270,14 +270,14 @@ class TestPathLib:
         assert not (Path("j").exists())
 
 
-def test_fixture_without_class(ppg_per_test):
-    # just to make sure the ppg_per_test fixture does what it's supposed to if you're not using a class
+def test_fixture_without_class(ppg2_per_test):
+    # just to make sure the ppg2_per_test fixture does what it's supposed to if you're not using a class
     import pathlib
 
     assert "run/.test_fixture_without_class" in str(pathlib.Path(".").absolute())
 
 
-def test_job_or_filename(ppg_per_test):
+def test_job_or_filename(ppg2_per_test):
     a, dep_a = ppg.util.job_or_filename("out/A")
     assert a == Path("out/A")
     assert len(dep_a) == 1
@@ -294,7 +294,7 @@ def test_job_or_filename(ppg_per_test):
 
 
 @pytest.mark.xfail()  # todo
-def test_interactive_import(ppg_per_test):
+def test_interactive_import(ppg2_per_test):
     # just so at least the import part of interactive is under coverage
     import pypipegraph2.interactive  # noqa:F401
 
@@ -309,7 +309,7 @@ def test_version_is_correct():
     assert version == ppg.__version__
 
 
-def test_dataloading_job_changing_cwd(ppg_per_test):
+def test_dataloading_job_changing_cwd(ppg2_per_test):
     from pathlib import Path
 
     os.mkdir("shu")
@@ -329,7 +329,7 @@ def test_dataloading_job_changing_cwd(ppg_per_test):
     )
 
 
-def test_job_generating_job_changing_cwd(ppg_per_test):
+def test_job_generating_job_changing_cwd(ppg2_per_test):
     from pathlib import Path
 
     os.mkdir("shu")

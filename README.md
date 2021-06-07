@@ -38,6 +38,7 @@ Differences to pypipegraph
 		- class CombinedPlotJob
 		- class FinalJob (was only used in the Bil)
 		- PlotJob.add_fiddle
+		- class JobList (depends_on handles all use cases without this special class / and it was unused)
 
 		
 	- a failed jobs exceptions are no longer available as job.exception,

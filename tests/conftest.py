@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*-tcoding: utf-8 -*-
 """
     Dummy conftest.py for pypipegraph2.
 
@@ -12,13 +12,13 @@ import pytest
 from pathlib import Path
 import shutil
 import os
-import pypipegraph2 as ppg
+import pypipegraph2 as ppg2
 import sys
 from loguru import logger
 
 # support code to remove test created files
 # only if the test suceeded
-# ppg.util._running_inside_test = True
+# ppg2.util._running_inside_test = True
 if "pytest" not in sys.modules:
     raise ValueError("fixtures can only be used together with pytest")
 
@@ -36,7 +36,7 @@ def pytest_runtest_makereport(item, call):
 
 
 @pytest.fixture
-def ppg_per_test(request):
+def ppg2_per_test(request):
     import sys
 
     if request.cls is None:
@@ -64,11 +64,11 @@ def ppg_per_test(request):
                 os.chdir(target_path)
                 first[0] = True
 
-            g = ppg.new(
+            g = ppg2.new(
                 cores=1,
                 # log_level=5,
                 allow_short_filenames=True,
-                run_mode=ppg.RunMode.NONINTERACTIVE,
+                run_mode=ppg2.RunMode.NONINTERACTIVE,
             )
             g.new = np
             return g
@@ -81,7 +81,7 @@ def ppg_per_test(request):
                     or request.node.rep_call.outcome == "skipped"
                 ):
                     try:
-                        # if not hasattr(ppg.util.global_pipegraph, "test_keep_output"):
+                        # if not hasattr(ppg2.util.global_pipegraph, "test_keep_output"):
                         if "--profile" not in sys.argv:
                             shutil.rmtree(target_path)
                     except OSError:  # pragma: no cover
@@ -114,7 +114,7 @@ def dir_per_test(request):
     try:
 
         def np():
-            ppg.util.global_pipegraph = None
+            ppg2.util.global_pipegraph = None
             return None
 
         def finalize():
@@ -130,7 +130,7 @@ def dir_per_test(request):
                         pass
 
         request.addfinalizer(finalize)
-        ppg.util.global_pipegraph = None
+        ppg2.util.global_pipegraph = None
         yield np()
 
     finally:
@@ -144,16 +144,16 @@ def create_out_dir(request):
 
 
 @pytest.fixture
-def both_ppg_and_no_ppg(request):
-    """Create both an inside and an outside ppg test case.
+def both_ppg2_and_no_ppg2(request):
+    """Create both an inside and an outside ppg2 test case.
     don't forgot to add this to your conftest.py
 
-    Use together with run_ppg and force_load
+    Use together with run_ppg2 and force_load
 
     ```
     def pytest_generate_tests(metafunc):
-        if "both_ppg_and_no_ppg" in metafunc.fixturenames:
-            metafunc.parametrize("both_ppg_and_no_ppg", [True, False], indirect=True)
+        if "both_ppg2_and_no_ppg2" in metafunc.fixturenames:
+            metafunc.parametrize("both_ppg2_and_no_ppg2", [True, False], indirect=True)
     ```
     """
     raise ValueError("check implementation")
@@ -184,10 +184,10 @@ def both_ppg_and_no_ppg(request):
                     os.chdir(target_path)
                     first[0] = True
 
-                rc = ppg.resource_coordinators.LocalSystem()
-                ppg.new_pipegraph(rc, quiet=True, dump_graph=False)
-                ppg.util.global_pipegraph.result_dir = Path("results")
-                g = ppg.util.global_pipegraph
+                rc = ppg2.resource_coordinators.LocalSystem()
+                ppg2.new_pipegraph(rc, quiet=True, dump_graph=False)
+                ppg2.util.global_pipegraph.result_dir = Path("results")
+                g = ppg2.util.global_pipegraph
                 g.new_pipegraph = np
                 return g
 
@@ -233,7 +233,7 @@ def both_ppg_and_no_ppg(request):
         try:
 
             def np():
-                ppg.util.global_pipegraph = None
+                ppg2.util.global_pipegraph = None
 
                 class Dummy:
                     pass
@@ -255,7 +255,7 @@ def both_ppg_and_no_ppg(request):
                             pass
 
             request.addfinalizer(finalize)
-            ppg.util.global_pipegraph = None
+            ppg2.util.global_pipegraph = None
             yield np()
 
         finally:
@@ -303,6 +303,7 @@ def trace_log():  # could not find out how to abstract pytest fixtures
 def ppg1_compability_test(request):
     import sys
     import pypipegraph as ppg
+    ppg2.replace_ppg1()
 
     if request.cls is None:
         target_path = Path(request.fspath).parent / "run" / ("." + request.node.name)
@@ -347,7 +348,6 @@ def ppg1_compability_test(request):
             ppg.util.global_pipegraph.result_dir = Path("results")
             g = ppg.util.global_pipegraph
             g.new_pipegraph = np
-            print(g.rc.interactive)
             return g
 
         def finalize():
@@ -369,5 +369,6 @@ def ppg1_compability_test(request):
 
     finally:
         os.chdir(old_dir)
+        ppg2.unreplace_ppg1()
 
 

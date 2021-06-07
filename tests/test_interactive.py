@@ -4,7 +4,7 @@ import pypipegraph2 as ppg
 import pytest
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestCallSyntax:
     def test_simple(self):
         a = ppg.FileGeneratingJob("A", lambda of: counter("a") and of.write_text("A"))

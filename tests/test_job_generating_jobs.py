@@ -7,7 +7,7 @@ shu = None
 
 
 @pytest.mark.usefixtures("create_out_dir")
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestJobGeneratingJob:
     def test_basic(self):
         def gen():

@@ -55,6 +55,7 @@ class PyPipeGraph:
         error_dir: Optional[Path],
         history_dir: Path,
         run_dir: Path,
+        cache_dir: Path,
         log_level: int,
         run_mode: RunMode,
         paths: Optional[Dict[str, Union[Path, str]]] = None,
@@ -92,6 +93,11 @@ class PyPipeGraph:
         )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
         self.run_id = 0
         self.allow_short_filenames = allow_short_filenames
+        if cache_dir:
+            self.cache_dir = Path(cache_dir)
+            self.cache_dir.mkdir(exist_ok=True, parents=True)
+        else:
+            self.cache_dir = None
 
     def run(
         self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5
@@ -127,10 +133,11 @@ class PyPipeGraph:
                 RichHandler(
                     markup=False,
                     console=Console(
-                        file=open(self.log_dir / f"{fn}-{self.time_str}.log", "w")
+                        file=open(self.log_dir / f"{fn}-{self.time_str}.log", "w"), 
+                        width=120, # 
                     ),
                 ),
-                level=logging.DEBUG,
+                level=self.log_level,
             )
             # if self.log_level != 20:  # logging.INFO:
             # logger.add(sink=sys.stdout, level=logging.INFO)  # pragma: no cover
@@ -292,6 +299,7 @@ class PyPipeGraph:
         logger.trace("_load_history")
         fn = self.get_history_filename()
         history = {}
+        self.invariant_loading_issues = set()
         if fn.exists():
             logger.job_trace("Historical existed")
             try:
@@ -321,6 +329,7 @@ class PyPipeGraph:
                                         f"\n Exception: {e}"
                                     )
                                     self.do_raise.append(msg)
+                                    self.invariant_loading_issues.add(job_id)
                                 # use pickle tools to read the pickles op codes until
                                 # the end of the current pickle, hopefully allowing decoding of the next one
                                 # of course if the actual on disk file is messed up beyond this,
@@ -338,8 +347,10 @@ class PyPipeGraph:
 
                     except EOFError:
                         pass
+            except exceptions.RunFailed:
+                raise
             except Exception as e:
-                raise exceptions.RunFailed(
+                raise exceptions.FatalGraphException( # that's pretty terminal
                     "Could not load history data", e, fn.absolute()
                 )
 

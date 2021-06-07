@@ -22,7 +22,7 @@ class Undepickable(object):
 
 
 @pytest.mark.usefixtures("create_out_dir")
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestInvariant:
     def sentinel_count(self):
         sentinel = "out/sentinel"
@@ -494,7 +494,7 @@ class TestInvariant:
         ppg.run()
         assert read("A") == "1"
 
-    def test_input_output_dumping_dies_for_some_reason(self, ppg_per_test, mocker):
+    def test_input_output_dumping_dies_for_some_reason(self, ppg2_per_test, mocker):
         import pickle
 
         raised_ki = [False]
@@ -618,7 +618,7 @@ def first_value(d):
     return list(d.values())[0]
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestFunctionInvariant:
     # most of the function invariant testing is handled by other test classes.
     # but these are more specialized.
@@ -1026,7 +1026,7 @@ class TestFunctionInvariant:
 
 
 @pytest.mark.usefixtures("create_out_dir")
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestDependency:
     def test_simple_chain(self):
         o = Dummy()
@@ -1212,8 +1212,8 @@ class TestDependency:
         jobC = ppg.FileGeneratingJob("out/C", lambda of: write("out/C", "C"))
         jobC.depends_on(jobA, [jobB], None, [None])
         jobC.depends_on(None)
-        with pytest.raises(ValueError):
-            jobC.depends_on()  # that's not valid
+        jobC.depends_on()  # that's a no-op as well
+        jobC.depends_on([])  # that's a no-op as well
         ppg.run()
         assert read("out/A") == "A"
         assert read("out/B") == "B"
@@ -1339,7 +1339,7 @@ class TestDependency:
         assert read("out/A") == "AB"
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestDefinitionErrors:
     def test_defining_function_invariant_twice(self):
         a = lambda: 55  # noqa:E731
@@ -1371,7 +1371,7 @@ class TestDefinitionErrors:
             ppg.ParameterInvariant("a", lambda: 55)
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestFunctionInvariantDisChanges_BetweenVersions:
     def test_function_name_is_irrelevant(self):
         def test_a():

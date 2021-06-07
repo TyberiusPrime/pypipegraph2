@@ -25,6 +25,7 @@ import os
 import platform
 import pytest
 import pypipegraph as ppg
+import pypipegraph2 as ppg2
 from .shared import write, assertRaises, read, append, Dummy
 
 
@@ -61,8 +62,10 @@ class TestCachedAttributeJob:
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         job_preq = ppg.FileGeneratingJob("out/B", do_write)
         job.depends_on(job_preq)
-        assert not (job_preq in job.prerequisites)
-        assert job_preq in job.lfg.prerequisites
+        # assert not (job_preq in job.prerequisites)
+        # assert job_preq in job.lfg.prerequisites
+        assert not ppg.util.global_pipegraph.has_edge(job_preq, job)
+        assert ppg.util.global_pipegraph.has_edge(job_preq, job.lfg)
 
     def test_no_dependand_still_calc(self):
         o = Dummy()
@@ -141,7 +144,8 @@ class TestCachedAttributeJob:
     def test_throws_on_non_function_func(self):
         o = Dummy()
 
-        with pytest.raises(ValueError):
+        # with pytest.raises(ValueError): ppg2
+        with pytest.raises(TypeError):
             ppg.CachedAttributeLoadingJob(
                 "out/mycalc", lambda: 5, o, "a"
             )  # wrong argument order
@@ -169,7 +173,10 @@ class TestCachedAttributeJob:
             "out/A", o, "shu", lambda: write("out/A", "shu")
         )
         jobB = ppg.FileGeneratingJob("out/B", lambda: write("out/B", "shu"))
-        assert jobA.depends_on(jobB) is jobA
+        # assert jobA.depends_on(jobB) is jobA
+        # ppg2
+        x = jobA.depends_on(jobB)
+        assert x.__wrapped__ is jobA.__wrapped__
 
     def test_passing_non_function(self):
         o = Dummy()
@@ -177,7 +184,7 @@ class TestCachedAttributeJob:
         def inner():
             ppg.CachedAttributeLoadingJob("out/a", o, "a", 55)
 
-        assertRaises(ValueError, inner)
+        assertRaises(TypeError, inner)
 
     def test_passing_non_string_as_jobid(self):
         o = Dummy()
@@ -213,7 +220,7 @@ class TestCachedAttributeJob:
         assertRaises(ppg.JobContractError, inner)
 
     def test_cached_jobs_get_depencies_only_on_the_lazy_filegenerator_not_on_the_loading_job(
-        self
+        self,
     ):
         o = Dummy()
 
@@ -227,11 +234,22 @@ class TestCachedAttributeJob:
 
         jobB = ppg.AttributeLoadingJob("b", o, "b", do_b)
         job.depends_on(jobB)
-        assert not (jobB in job.prerequisites)
-        assert jobB in job.lfg.prerequisites
+        # ppg2
+        # assert not (jobB in job.prerequisites)
+        assert not ppg.util.global_pipegraph.has_edge(jobB, job)
+        assert ppg.util.global_pipegraph.has_edge(jobB, job.lfg)
         ppg.run_pipegraph()
-        assert jobB.was_invalidated
-        assert job.was_invalidated
+        # ppg2...
+        # assert jobB.was_invalidated
+        assert (
+            ppg.util.global_pipegraph.last_run_result[jobB.job_id].state
+            == ppg2.enums.JobState.Executed
+        )
+        assert (
+            ppg.util.global_pipegraph.last_run_result[job.job_id].state
+            == ppg2.enums.JobState.Executed
+        )
+        # assert job.was_invalidated
 
     def test_cached_attribute_job_does_not_load_its_preqs_on_cached(
         self, ppg1_compability_test
@@ -289,7 +307,7 @@ class TestCachedAttributeJob:
             o = Dummy()
             ppg.CachedAttributeLoadingJob("x", o, "a", "shu")
 
-        assertRaises(ValueError, inner)
+        assertRaises(TypeError, inner)
 
     def test_name_must_be_str(self):
         def inner():
@@ -302,7 +320,7 @@ class TestCachedAttributeJob:
         o = Dummy()
         ca = ppg.CachedAttributeLoadingJob("out/C", o, "c", lambda: 55)
         assert ca.use_cores(5) is ca
-        assert ca.lfg.cores_needed == 5
+        assert ca.lfg.cores_needed == -1  # ppg2 - was 5
 
 
 @pytest.mark.usefixtures("ppg1_compability_test")
@@ -359,20 +377,24 @@ class TestCachedDataLoadingJob:
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         job_preq = ppg.FileGeneratingJob("out/B", do_write)
         job.depends_on(job_preq)
-        assert not (job_preq in job.prerequisites)
-        assert job_preq in job.lfg.prerequisites
+        # ppg2 assert not (job_preq in job.prerequisites)
+        assert not ppg.util.global_pipegraph.has_edge(job_preq, job)
+        # ppg2 assert job_preq in job.lfg.prerequisites
+        assert ppg.util.global_pipegraph.has_edge(job_preq, job.lfg)
 
     def test_passing_non_function_to_calc(self):
         def inner():
             ppg.CachedDataLoadingJob("out/a", "shu", lambda value: 55)
 
-        assertRaises(ValueError, inner)
+        # ppg 2assertRaises(ValueError, inner)
+        assertRaises(TypeError, inner)
 
     def test_passing_non_function_to_store(self):
         def inner():
             ppg.CachedDataLoadingJob("out/a", lambda value: 55, "shu")
 
-        assertRaises(ValueError, inner)
+        # ppg2 assertRaises(ValueError, inner)
+        assertRaises(TypeError, inner)
 
     def test_passing_non_string_as_jobid(self):
         def inner():
@@ -427,7 +449,7 @@ class TestCachedDataLoadingJob:
         assert read("out/A") == "55"
 
     def test_cached_jobs_get_depencies_only_on_the_lazy_filegenerator_not_on_the_loading_job(
-        self
+        self,
     ):
         o = Dummy()
 
@@ -444,8 +466,10 @@ class TestCachedDataLoadingJob:
 
         jobB = ppg.AttributeLoadingJob("b", o, "b", do_b)
         job.depends_on(jobB)
-        assert not (jobB in job.prerequisites)
-        assert jobB in job.lfg.prerequisites
+        # ppg2 assert not (jobB in job.prerequisites)
+        # assert jobB in job.lfg.prerequisites
+        assert not ppg.util.global_pipegraph.has_edge(jobB, job)
+        assert ppg.util.global_pipegraph.has_edge(jobB, job.lfg)
 
     def test_cached_dataloading_job_does_not_load_its_preqs_on_cached(
         self, ppg1_compability_test
@@ -493,12 +517,16 @@ class TestCachedDataLoadingJob:
     def test_name_must_be_str(self):
         with pytest.raises(TypeError):
             ppg.CachedDataLoadingJob(123, lambda: 123, lambda: 5)
-        with pytest.raises(ValueError):
+        # ppg2 with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             ppg.CachedDataLoadingJob("123", 123, lambda: 5)
-        with pytest.raises(ValueError):
+        # ppg2 with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             ppg.CachedDataLoadingJob("123", lambda: 5, 123)
 
     def test_cant_unpickle(self):
+        import pickle
+
         o = Dummy()
 
         def calc():
@@ -509,22 +537,29 @@ class TestCachedDataLoadingJob:
 
         job = ppg.CachedDataLoadingJob("out/mycalc", calc, store)
         job.ignore_code_changes()
-        write("out/mycalc", "no unpickling this")
         of = "out/A"
 
         def do_write():
             write(of, o.a)
 
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
-        with pytest.raises(ValueError):
+        # ppg2 always runs it once
+        ppg.run_pipegraph()
+        write("out/mycalc", "no unpickling this")
+        job2 = ppg.FileGeneratingJob("out/job2", lambda: write(o.a))
+        job2.depends_on(job)
+        with pytest.raises(ppg.RuntimeError):  # ppg2: was ValueError
             ppg.run_pipegraph()
-        assert isinstance(job.exception, ValueError)
+        # ppg2 assert isinstance(job.exception, ValueError)
+        assert isinstance(job.exception, pickle.UnpicklingError)
         assert "Unpickling error" in str(job.exception)
 
     def test_use_cores(self):
         ca = ppg.CachedDataLoadingJob("out/C", lambda: 55, lambda x: None)
-        assert ca.use_cores(5) is ca
-        assert ca.lfg.cores_needed == 5
+        assert ca.use_cores(5) is ca  # this is on the lfg, right
+        assert ca.cores_needed == 1
+        # ppg2 assert ca.lfg.cores_needed == 5
+        assert ca.lfg.cores_needed == -1  # more than one core becomes 'almost all'
 
 
 is_pypy = platform.python_implementation() == "PyPy"
@@ -561,7 +596,7 @@ if (  # noqa: C901
 
 else:
 
-    @pytest.mark.skip # No MemMappedDataLoadingJob in ppg2
+    @pytest.mark.skip  # No MemMappedDataLoadingJob in ppg2
     @pytest.mark.usefixtures("ppg1_compability_test")
     class TestMemMappedDataLoadingJob:
         """Similar to a CachedDataLoadingJob, except that the data in question is a numpy

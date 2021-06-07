@@ -44,12 +44,13 @@ class TestJobGeneratingJob:
         assert read("out/B") == "B"
         assert read("out/C") == "C"
 
+    @pytest.mark.skip # we only support 1, all, or almost all cores now.
     def test_raises_if_needs_more_cores_than_we_have(self):
         def gen():
             jobA = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "A"))
             jobA.cores_needed = 20000
 
-        ppg.JobGeneratingJob("genjob", gen)
+        j = ppg.JobGeneratingJob("genjob", gen)
         try:
             ppg.run_pipegraph()
             raise ValueError("should not be reached")
@@ -60,6 +61,7 @@ class TestJobGeneratingJob:
         assert jobGenerated.failed
         assert jobGenerated.error_reason == "Needed to much memory/cores"
 
+    @pytest.mark.skip # we don't support ram limits
     def test_raises_if_needs_more_ram_than_we_have(self):
         def gen():
             jobA = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "A"))
@@ -76,6 +78,7 @@ class TestJobGeneratingJob:
         assert jobGenerated.failed
         assert jobGenerated.error_reason == "Needed to much memory/cores"
 
+    @pytest.mark.skip # we don't support ram limits
     def test_with_memory_needed(self):
         jobA = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "A"))
         jobA.memory_needed = 1024
@@ -214,7 +217,8 @@ class TestJobGeneratingJob:
         def inner():
             ppg.JobGeneratingJob("out/a", "shu")
 
-        assertRaises(ValueError, inner)
+        #assertRaises(ValueError, inner)
+        assertRaises(TypeError, inner)
 
     def test_passing_non_string_as_jobid(self):
         def inner():
@@ -240,6 +244,7 @@ class TestJobGeneratingJob:
         assert read("out/C") == "Ashu"
         assert read("out/D") == "Bshu"
 
+    #ppg2 name no longer applies
     def test_filegen_invalidated_jobgen_created_filegen_later_also_invalidated(
         self, ppg1_compability_test
     ):
@@ -267,8 +272,9 @@ class TestJobGeneratingJob:
         ppg.JobGeneratingJob("b", gen)
         ppg.run_pipegraph()
         assert read("out/Ac") == "AA"
-        assert read("out/Cx") == "CC"
+        assert read("out/Cx") == "C" # ppg2 - not rebuild. out/A did not chaneg! 
 
+    @pytest.mark.skip # ppg2: no longer forbidden.
     def test_raises_if_generating_within_dataload(self):
         ppg.util.global_pipegraph.quiet = False
         write_job = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "aa"))
@@ -294,6 +300,8 @@ class TestJobGeneratingJob:
         ppg.run_pipegraph()
         assert read("out/C") == "c"
 
+    @pytest.mark.skip # you may muck up the graph as you wish in ppg2. We don't look at it
+    # till we run it again
     def test_jobgenerating_is_not_dependency_injection(self):
         old = ppg.FileGeneratingJob("out/D", lambda: write("out/D", "D"))
 
@@ -372,6 +380,7 @@ class TestJobGeneratingJob:
         assert counter[0] == 3
 
 
+@pytest.mark.skip # dependency injections are gone.
 @pytest.mark.usefixtures("ppg1_compability_test")
 class TestDependencyInjectionJob:
     def test_basic(self, ppg1_compability_test):

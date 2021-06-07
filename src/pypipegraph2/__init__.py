@@ -64,6 +64,7 @@ def new(
     log_level=reuse_last_or_default,
     allow_short_filenames=reuse_last_or_default,
     log_retention=reuse_last_or_default,
+    cache_dir=reuse_last_or_default,
 ):
     """create a new pipegraph.
     You may pass reuse_last_or_default to all values
@@ -82,17 +83,18 @@ def new(
             ("error_dir", Path(".ppg/errors")),
             ("history_dir", Path(".ppg/history")),
             ("run_dir", Path(".ppg/run")),
-            ("log_level", logging.INFO),
+            ("log_level", logging.DEBUG),  # that's the one for the log file
             ("allow_short_filenames", False),
             ("run_mode", RunMode.CONSOLE),
             ("log_retention", 3),
+            ("cache_dir", Path("cache")),
         ]
     }
     global_pipegraph = PyPipeGraph(**arguments)
     return global_pipegraph
 
 
-global_pipegraph = new()
+global_pipegraph = None
 
 
 def run(print_failures=True, raise_on_job_error=True, event_timeout=5):
@@ -104,6 +106,12 @@ def run(print_failures=True, raise_on_job_error=True, event_timeout=5):
         raise_on_job_error=raise_on_job_error,
         event_timeout=event_timeout,
     )
+
+
+def inside_ppg():
+    from . import global_pipegraph
+
+    return global_pipegraph is not None
 
 
 def job_trace(msg):
@@ -123,6 +131,34 @@ def _with_changed_global_pipegraph(new):
         yield new
     finally:
         global_pipegraph = old
+
+
+def replace_ppg1():
+    """Turn all ppg1 references into actual ppg2
+    objects.
+    Best effort, but the commonly used API should be well supported.
+    Try to do this before anything imports ppg1.
+
+
+    One notably exception is in cores_needed/use_cores,
+    where ppg2 only supports 1/almost_all/all, and ppg1 also supported
+    a number of cores > 1. This get's convert to almost_all (-1 in ppg1 parlance)
+
+    Also jobs often throw TypeError, instead of ValueError if you pass the arguments
+    in the wrong order. This shouldn't affect any working code though.
+    """
+    from . import ppg1_compability
+
+    ppg1_compability.replace_ppg1()
+
+
+def unreplace_ppg1():
+    """undo replace_ppg1."""
+    from . import ppg1_compability
+
+    ppg1_compability.unreplace_ppg1()
+
+from .util import assert_uniqueness_of_object
 
 
 __all__ = [
@@ -156,4 +192,8 @@ __all__ = [
     "JobError",
     "Resources",
     "RunMode",
+    "replace_ppg1",
+    "unreplace_ppg1",
+    'inside_ppg',
+    'assert_uniqueness_of_object',
 ]

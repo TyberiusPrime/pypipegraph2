@@ -31,6 +31,7 @@ python_version = ".".join(
 
 DependsOnInvariant = namedtuple("DependsOnInvariant", ["invariant", "self"])
 CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
+PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
 
 
 def _dedup_job(cls, job_id):
@@ -47,6 +48,17 @@ def _dedup_job(cls, job_id):
         return global_pipegraph.jobs[job_id]
     else:
         return object.__new__(cls)
+
+
+def _mark_function_wrapped(outer, inner, desc = 'callback'):
+    """mark a function as 'wrapped' - ie. the FunctionInvariant
+    is being created on the callback, but what the graph calls is outer
+    (which is supposed to call inner!)
+    """
+    if not callable(inner):
+        raise TypeError(f"{desc} function must be callable")
+    outer.wrapped_function = inner
+    return outer
 
 
 class Job:
@@ -92,12 +104,23 @@ class Job:
         """
         from . import global_pipegraph
 
-        logger.job_trace(f"adding {self.job_id}")
+        logger.job_trace(f"adding {type(self)} {self.job_id}")
 
         if global_pipegraph is None:
             raise ValueError("Must instantiate a pipegraph before creating any Jobs")
 
         global_pipegraph.add(self)
+
+    def _handle_function_dependency(self, func):
+        while hasattr(
+            func, "wrapped_function"
+        ):  # the actual function is just an adaptor, ignore it for the wrapped function
+            # e.g. FileGeneratingJob ppg1 compatibility with 'no-output-filename parameter'.
+            func = func.wrapped_function
+            logger.debug(f"FAlling back to wrapped function {self.job_id}")
+        func_invariant = FunctionInvariant(func, self.job_id)
+        self.func_invariant = func_invariant  # we only store it so ppg1.compatibility ignore_code_changes can prune it
+        self.depends_on(func_invariant)
 
     def use_resources(self, resources: Resources):
         if not isinstance(resources, Resources):
@@ -122,7 +145,8 @@ class Job:
         from . import global_pipegraph
 
         if other_job is False and not other_jobs:
-            raise ValueError("You have to pass in at least one job")
+            # raise ValueError("You have to pass in at least one job")
+            return self  # this is how ppg1 did it
 
         if isinstance(other_job, list):
             for x in other_job:
@@ -170,7 +194,8 @@ class Job:
 
     def depends_on_func(self, function, name=None):
         """Create a function invariant.
-        Return a NamedTumple (function_invariant, function_invariant, self)
+        Return a NamedTumple (invariant, self)
+        (so you can change with job.depends_on_func(func)[1].depends_on(...))
         """
         if isinstance(function, str):
             function, name = name, function
@@ -209,6 +234,18 @@ class Job:
 
     def _call_result(self):  # pragma: no cover
         return None
+
+    @property
+    def exception(self): 
+        """Interrogate global pipegraph for this job's exception.
+        Mostly for the ppg1 tests...
+        """
+        from . import global_pipegraph
+        e = global_pipegraph.last_run_result[self.job_id].error
+        if isinstance(e, exceptions.JobError):
+            return e.args[0]
+        else:
+            return e
 
 
 class _DownstreamNeedsMeChecker(Job):
@@ -316,8 +353,7 @@ class MultiFileGeneratingJob(Job):
     def readd(self):
         super().readd()
         if self.depend_on_function:
-            func_invariant = FunctionInvariant(self.generating_function, self.job_id)
-            self.depends_on(func_invariant)
+            self._handle_function_dependency(self.generating_function)
 
     def run(self, runner, _historical_output):  # noqa:C901
         self.files = [self._map_filename(fn) for fn in self.org_files]
@@ -349,10 +385,12 @@ class MultiFileGeneratingJob(Job):
                 suffix=f"__{self.job_number}.exception",
             )
 
+
             def aborted(sig, stack):
                 raise KeyboardInterrupt()
 
             try:
+                error_exit_code = 1
                 self.pid = os.fork()
                 if (
                     self.pid == 0
@@ -389,19 +427,19 @@ class MultiFileGeneratingJob(Job):
                                 )
                             else:
                                 raise
-                        finally:
-                            stdout.flush()
-                            stderr.flush()
-                            sys.stdout = stdout_
-                            sys.stderr = stderr_
+                    except SystemExit as e:
+                        error_exit_code = e.code
+                        raise
                     except (Exception, KeyboardInterrupt) as e:
                         captured_tb = None  # if the capturing fails for any reason...
+                        traceback_dumped = False
                         try:
                             exception_type, exception_value, tb = sys.exc_info()
                             captured_tb = ppg_traceback.Trace(
                                 exception_type, exception_value, tb
                             )
                             pickle.dump(captured_tb, exception_out)
+                            traceback_dumped = True
                             pickle.dump(e, exception_out)
                             exception_out.flush()
                         except Exception as e2:
@@ -409,13 +447,19 @@ class MultiFileGeneratingJob(Job):
                             # traceback is already dumped
                             # exception_out.seek(0,0) # might have dumped the traceback already, right?
                             # pickle.dump(captured_tb, exception_out)
+                            if not traceback_dumped:
+                                pickle.dump(None, exception_out)
                             pickle.dump(
                                 exceptions.JobDied(repr(e), repr(e2)), exception_out
                             )
                             exception_out.flush()
                             raise
-                        finally:
-                            os._exit(1)
+                    finally:
+                        stdout.flush()
+                        stderr.flush()
+                        sys.stdout = stdout_
+                        sys.stderr = stderr_
+                        os._exit(error_exit_code)
                 else:
                     sleep_time = 0.01  # which is the minimum time a job can take...
                     time.sleep(sleep_time)
@@ -451,21 +495,26 @@ class MultiFileGeneratingJob(Job):
                                 stdout, stderr
                             )
                             exception_out.seek(0, 0)
+                            raw = exception_out.read()
+                            # logger.info(f"Raw exception result {raw}")
+                            exception_out.seek(0, 0)
 
                             tb = None
                             exception = None
                             try:
                                 tb = pickle.load(exception_out)
                                 exception = pickle.load(exception_out)
-                            except Exception:
+                            except Exception as e:
                                 logger.error(
-                                    f"Job died (=exitcode != 0): {self.job_id}"
+                                    f"Job died (=exitcode == {exitcode}): {self.job_id}"
                                 )
+                                logger.error(f"stdout: {self.stdout} {self.stderr}")
                                 exception = exceptions.JobDied(
-                                    f"Job {self.job_id} died but did not return an exception object.",
+                                    f"Job {self.job_id} died but did not return an exception object. Decoding exception {e}",
                                     None,
                                     exitcode,
                                 )
+                                exception.exit_code = exitcode
                             finally:
                                 raise exceptions.JobError(exception, tb)
                         elif self.always_capture_output:
@@ -689,7 +738,51 @@ class _FileInvariantMixin:
     def calculate(
         self, file, stat
     ):  # so that FileInvariant and FunctionInvariant can reuse it
-        return hashers.hash_file(file)
+
+        # ppg1 had the option of using an external .md5sum file for the hash
+        # provided the filetime was exactly the same as the files'
+        # it would accept it instead of calculating it's own.
+        # todo:  decide wether we want to keep this here,
+        # or move it into it's own class?
+        # the pro argument is basically, ppg1. compability.
+        # the draw back is the complexity for the common case,
+        # and the weakness of the md5 algorithm (can't easily upgrade though)
+        md5sum_path = Path(file.with_name(file.name + ".md5sum"))
+        if md5sum_path.exists():
+            new_stat = file.stat
+            st_md5 = os.stat(md5sum_path)
+            if stat.st_mtime == st_md5.st_mtime:
+                checksum = md5sum_path.read_text()
+            else:
+                checksum = self._md5_fallback(file)
+                with open(md5sum_path, "wb") as op:
+                    op.write(checksum.encode("utf-8"))
+                os.utime(md5sum_path, (stat.st_mtime, stat.st_mtime))
+
+            stat = file.stat()
+            return {
+                "hash": checksum,
+                "mtime": int(stat.st_mtime),
+                "size": stat.st_size,
+            }
+        else:
+            return hashers.hash_file(file)
+
+    def _md5_fallback(self, filename):
+        import hashlib
+
+        file_size = filename.stat().st_size
+        if file_size > 200 * 1024 * 1024:  # pragma: no cover
+            print("Taking md5 of large file", filename)
+        with open(filename, "rb") as op:
+            block_size = 1024 ** 2 * 10
+            block = op.read(block_size)
+            _hash = hashlib.md5()
+            while block:
+                _hash.update(block)
+                block = op.read(block_size)
+            res = _hash.hexdigest()
+        return res
 
 
 class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
@@ -852,7 +945,10 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if function.__doc__:
             for prefix in ['"""', "'''", '"', "'"]:
                 if prefix + function.__doc__ + prefix in source:
-                    source = source.replace(prefix + function.__doc__ + prefix, "",)
+                    source = source.replace(
+                        prefix + function.__doc__ + prefix,
+                        "",
+                    )
         return source
 
     @classmethod
@@ -1265,74 +1361,77 @@ class DataLoadingJob(Job):
     def __new__(cls, job_id, *args, **kwargs):
         return _dedup_job(cls, job_id)
 
-    def __init__(self, job_id, data_callback, depend_on_function=True):
+    def __init__(self, job_id, load_function, depend_on_function=True):
         self.depend_on_function = depend_on_function
-        self.callback = data_callback
+        self.load_function = load_function
         super().__init__([job_id])
 
     def readd(self):
         super().readd()
         if self.depend_on_function:
-            func_invariant = FunctionInvariant(self.callback, self.job_id)
-            self.depends_on(func_invariant)
+            self._handle_function_dependency(self.load_function)
 
     def run(self, runner, historical_output):
-        self.callback()
+        self.load_function()
 
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
         }  # so the downstream get's invalidated
 
         # todo: there is a judgment call here
-        # we could also invalidate on a hash based on the return of callback.
+        # we could also invalidate on a hash based on the return of load_function.
         # (which is more naturally available in an AttributeLoadingJob
         # that would be more inline with the 'only-recalc-if-the-input-actually-changed'
         # philosopy.
         # but it will cause false positives if you return things that have an instable str
         # (or what ever hash source we use)
-        # and it will cause false negatives if the callback is just for the side effects...
+        # and it will cause false negatives if the load_function is just for the side effects...
         # option a) separate into calculate and store, so that we always have the actual value?
         # that's of course an API change compared to the pypipegraph. Hm.
 
 
 def CachedDataLoadingJob(
     cache_filename,
-    calc_callback,
-    load_callback,
+    calc_function,
+    load_function,
     depend_on_function=True,
     resources: Resources = Resources.SingleCore,
 ):
     cache_filename = Path(cache_filename)
+    # early func definition & checking so we don't create a calc job if the load job will fail 
 
     def do_cache(output_filename):  # pragma: no cover - spawned job
         with open(output_filename, "wb") as op:
-            pickle.dump(calc_callback(), op, pickle.HIGHEST_PROTOCOL)
-
-    cache_job = FileGeneratingJob(
-        cache_filename, do_cache, depend_on_function=False, resources=resources
-    )
+            pickle.dump(calc_function(), op, pickle.HIGHEST_PROTOCOL)
 
     def load():
         try:
             with open(cache_filename, "rb") as op:
                 res = pickle.load(op)
-                load_callback(res)
+                load_function(res)
         except pickle.UnpicklingError as e:
             raise pickle.UnpicklingError(
                 f"Unpickling error in file {cache_filename}", e
             )
 
+    _mark_function_wrapped(load, load_function ,'load')
+    _mark_function_wrapped(do_cache, calc_function ,'calc')
+
+    cache_job = FileGeneratingJob(
+        cache_filename,
+        do_cache,
+        depend_on_function=depend_on_function,
+        resources=resources,
+    )
+
+
     load_job = DataLoadingJob(
-        "load" + str(cache_filename), load, depend_on_function=False,
+        "load" + str(cache_filename),
+        load,
+        depend_on_function=depend_on_function,
     )
     load_job.depends_on(cache_job)
     # do this after you have sucessfully created both jobs
-    if depend_on_function:
-        load_job.depends_on(
-            FunctionInvariant("load" + str(cache_filename), load_callback)
-        )
-        cache_job.depends_on(FunctionInvariant(cache_filename, calc_callback))
-
     return CachedJobTuple(load_job, cache_job)
 
 
@@ -1343,7 +1442,7 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
         return _dedup_job(cls, job_id)
 
     def __init__(
-        self, job_id, object, attribute_name, data_callback, depend_on_function=True
+        self, job_id, object, attribute_name, data_function, depend_on_function=True
     ):
         from . import global_pipegraph
 
@@ -1356,13 +1455,13 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
                         job_id, "attribute_name changed"
                     )
                 elif not FunctionInvariant.functions_equal(
-                    self.callback, data_callback
+                    self.callback, data_function
                 ) or (
                     hasattr(
-                        self.callback, "inner_callback"
+                        self.callback, "wrapped_function"
                     )  # CachedAttributeLoadingJob
                     and not FunctionInvariant.functions_equal(
-                        self.callback.inner_callback, data_callback.inner_callback
+                        self.callback.wrapped_function, data_function.wrapped_function
                     )
                 ):
                     raise exceptions.JobRedefinitionError(job_id, "callback changed")
@@ -1372,15 +1471,14 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
         self.depend_on_function = depend_on_function
         self.object = object
         self.attribute_name = attribute_name
-        self.callback = data_callback
+        self.callback = data_function
         super().__init__([job_id])
         self.cleanup_job_class = _AttributeCleanupJob
 
     def readd(self):  # Todo: refactor
         super().readd()
         if self.depend_on_function:
-            func_invariant = FunctionInvariant(self.callback, self.job_id)
-            self.depends_on(func_invariant)
+            self._handle_function_dependency(self.callback)
 
     def run(self, _runner, historical_output):
         setattr(self.object, self.attribute_name, self.callback())
@@ -1393,7 +1491,7 @@ def CachedAttributeLoadingJob(
     cache_filename,
     object,
     attribute_name,
-    data_callback,
+    data_function,
     depend_on_function=True,
     resources: Resources = Resources.SingleCore,
 ):
@@ -1401,13 +1499,7 @@ def CachedAttributeLoadingJob(
 
     def do_cache(output_filename):  # pragma: no cover
         with open(output_filename, "wb") as op:
-            pickle.dump(data_callback(), op, pickle.HIGHEST_PROTOCOL)
-
-    cache_job = FileGeneratingJob(
-        cache_filename, do_cache, depend_on_function=False, resources=resources
-    )
-    if depend_on_function:
-        cache_job.depends_on(FunctionInvariant(cache_filename, data_callback))
+            pickle.dump(data_function(), op, pickle.HIGHEST_PROTOCOL)
 
     def load():
         try:
@@ -1418,14 +1510,21 @@ def CachedAttributeLoadingJob(
                 f"Unpickling error in file {cache_filename}", e
             )
 
-    load.inner_callback = data_callback
+    _mark_function_wrapped(do_cache, data_function, 'data')
+    _mark_function_wrapped(load, data_function, 'data')
 
+    cache_job = FileGeneratingJob(
+        cache_filename,
+        do_cache,
+        depend_on_function=depend_on_function,
+        resources=resources,
+    )
     load_job = AttributeLoadingJob(
         "load" + str(cache_filename),
         object,
         attribute_name,
         load,
-        depend_on_function=False,
+        depend_on_function=depend_on_function,
     )
     load_job.depends_on(cache_job)
     return CachedJobTuple(load_job, cache_job)
@@ -1480,8 +1579,7 @@ class JobGeneratingJob(Job):
     def readd(self):  # Todo: refactor
         super().readd()
         if self.depend_on_function:
-            func_invariant = FunctionInvariant(self.callback, self.job_id)
-            self.depends_on(func_invariant)
+            self._handle_function_dependency(self.callback)
 
     def output_needed(self, runner):
         if runner.run_id != self.last_run_id:
@@ -1553,6 +1651,8 @@ def PlotJob(  # noqa:C901
     If create_table is set, the third one is a FileGeneratingJob
     writing (output_filename + '.tsv').
     """
+    from . import global_pipegraph
+
     if render_args is None:
         render_args = {}
     output_filename = Path(output_filename)
@@ -1569,10 +1669,13 @@ def PlotJob(  # noqa:C901
         plot = plot_function(plot_job.data_)
         _save_plot(plot, output_filename, render_args)
 
-    plot_job = FileGeneratingJob(output_filename, do_plot, depend_on_function=False)
-    if depend_on_function:
-        plot_job.depends_on(FunctionInvariant(str(output_filename), plot_function))
+    _mark_function_wrapped(do_plot, plot_function, 'plot')
+
+    plot_job = FileGeneratingJob(
+        output_filename, do_plot, depend_on_function=depend_on_function
+    )
     param_job = ParameterInvariant(output_filename, render_args)
+    print(param_job.job_id, render_args)
     plot_job.depends_on(param_job)
 
     def _call_result():
@@ -1605,16 +1708,31 @@ def PlotJob(  # noqa:C901
                     )
             return df
 
+        _mark_function_wrapped(do_cache, calc_function, 'calc')
+
         cache_filename.parent.mkdir(exist_ok=True, parents=True)
         cache_job = CachedAttributeLoadingJob(
-            cache_filename, plot_job, "data_", do_cache, depend_on_function=False
+            cache_filename,
+            plot_job,
+            "data_",
+            do_cache,
+            depend_on_function=depend_on_function,
         )
-        if depend_on_function:
-            cache_job.calc.depends_on(FunctionInvariant(cache_filename, calc_function))
-        plot_job.depends_on(cache_job.load)
+        Job.depends_on(
+            plot_job, cache_job.load
+        )  # necessary because the ppg1 compability layer messes with this
     else:
-        cache_job = None
 
+        cache_job = None
+        if str(cache_filename) in global_pipegraph.jobs:
+            raise ValueError(
+                "Redefining PlotJob and removing caching in the process "
+                "not supported. Once cached, always cached. "
+                "At least until somebody fixes job deletion "
+                "or makes this a warning instead"
+            )
+
+    table_filename = output_filename.with_suffix(output_filename.suffix + ".tsv")
     if create_table:
 
         def dump_table(output_filename):  # pragma: no cover - runs in spawned job
@@ -1632,14 +1750,21 @@ def PlotJob(  # noqa:C901
                         dataframe.to_csv(op, sep="\t")
 
         table_job = FileGeneratingJob(
-            output_filename.with_suffix(output_filename.suffix + ".tsv"), dump_table
+            table_filename, dump_table, depend_on_function=depend_on_function
         )
         if cache_calc:
             table_job.depends_on(cache_job.load)
     else:
         table_job = None
+        if str(table_filename) in global_pipegraph.jobs:
+            raise ValueError(
+                "Redefining PlotJob and removing table in the process "
+                "not supported. Once cached, always cached. "
+                "At least until somebody fixes job deletion "
+                "or makes this a warning instead"
+            )
 
-    def add_another_plot(output_filename, plot_function, render_args=None):
+    def add_another_plot(output_filename, plot_function, render_args=None, depend_on_function=True):
         if render_args is None:
             render_args = {}
 
@@ -1649,14 +1774,14 @@ def PlotJob(  # noqa:C901
             plot = plot_function(plot_job.data_)
             _save_plot(plot, output_filename, render_args)
 
-        j = FileGeneratingJob(output_filename, do_plot_another_plot)
+        j = FileGeneratingJob(output_filename, do_plot_another_plot, depend_on_function=depend_on_function)
         if cache_calc:
             j.depends_on(cache_job.load)
         return j
 
     plot_job.add_another_plot = add_another_plot
 
-    return (plot_job, cache_job, table_job)
+    return PlotJobTuple(plot_job, cache_job, table_job)
 
 
 class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):

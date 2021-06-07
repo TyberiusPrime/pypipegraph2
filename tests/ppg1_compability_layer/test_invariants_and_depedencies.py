@@ -98,6 +98,7 @@ class TestInvariant:
         assert read(of) == "shu"  # has not been run again, for no change
 
         ppg1_compability_test.new_pipegraph()
+        print("secound round")
 
         def do_write2():
             append(of, "sha")
@@ -149,27 +150,33 @@ class TestInvariant:
     def test_depends_on_func(self):
         a = ppg.FileGeneratingJob("out/A", lambda: write("a"))
         b = a.depends_on_func("a123", lambda: 123)
-        assert b.job_id.startswith(a.job_id + "_")
-        assert b in a.prerequisites
+        # ppg2 adjustments
+        assert b[0].job_id.startswith("FI" + a.job_id)
+        # assert b in a.prerequisites
+        assert ppg.util.global_pipegraph.has_edge(b[0], a)
 
     def test_depends_on_file(self):
         a = ppg.FileGeneratingJob("out/A", lambda: write("a"))
         write("shu", "hello")
         b = a.depends_on_file("shu")
-        assert b in a.prerequisites
+        assert ppg.util.global_pipegraph.has_edge(b[0], a)
 
     def test_depends_on_params(self):
         a = ppg.FileGeneratingJob("out/A", lambda: write("a"))
         b = a.depends_on_params(23)
-        assert b.job_id == "PIout/A"
-        assert b.parameters == 23
-        assert b in a.prerequisites
+        assert b[0].job_id == "PIout/A"
+        assert b[0].parameters == 23
+        assert ppg.util.global_pipegraph.has_edge(b[0], a)
 
     def test_parameter_invariant_twice_different_values(self):
         ppg.ParameterInvariant("a", (1, 2, 3))
         with pytest.raises(ValueError):
             ppg.ParameterInvariant("a", (1, 2, 4))
 
+    @pytest.mark.skip  # ppg2 does not have 'accept_as_unchanged_func on ParameterInvariant
+    # if it really is a no-op-change it will terminate in the down stream jobs.
+    # if it is not a no-op-change, it will correctly recalculate.
+    # yes this trades brain power for computing power.
     def test_parameter_invariant_twice_different_accepts_func(self):
         def accept_as_unchanged(old):
             return True
@@ -178,6 +185,8 @@ class TestInvariant:
         with pytest.raises(ValueError):
             ppg.ParameterInvariant("a", (1, 2, 3), accept_as_unchanged)
 
+    @pytest.mark.skip  # ppg2 does not have 'accept_as_unchanged_func on ParameterInvariant
+    # see above
     def test_parameter_dependency_accepts_as_unchanged(self, ppg1_compability_test):
         write("out/A", "x")
         job = ppg.FileGeneratingJob("out/A", lambda: append("out/A", "A"))
@@ -246,6 +255,7 @@ class TestInvariant:
         )  # job does not get rerun - filetime invariant is now filechecksum invariant...
 
     def test_filechecksum_dependency_raises_on_too_short_a_filename(self):
+        assert not ppg.util.global_pipegraph.allow_short_filenames
         with pytest.raises(ValueError):
             ppg.RobustFileChecksumInvariant("a")
 
@@ -454,6 +464,8 @@ class TestInvariant:
         assert os.stat(ftfn)[stat.ST_MTIME] == os.stat(ftfn + ".md5sum")[stat.ST_MTIME]
 
     def test_invariant_dumping_on_job_failure(self, ppg1_compability_test):
+        ppg1_compability_test.new_pipegraph(log_level=6)
+
         def w():
             write("out/A", "A")
             append("out/B", "B")
@@ -466,8 +478,8 @@ class TestInvariant:
         fg.ignore_code_changes()  # no auto invariants for this test...
         fg.depends_on(func_dep)
         ppg.run_pipegraph()
-        assert func_dep.was_invalidated
-        assert fg.was_invalidated
+        # ppg2 assert func_dep.was_invalidated
+        # ppg2 assert fg.was_invalidated
         assert read("out/A") == "A"
         assert read("out/B") == "B"
         ppg1_compability_test.new_pipegraph()
@@ -486,8 +498,8 @@ class TestInvariant:
             ppg.run_pipegraph()
         except ppg.RuntimeError:
             pass
-        assert func_dep.was_invalidated
-        assert fg.was_invalidated
+        # ppg2 assert func_dep.was_invalidated
+        # ppg2 assert fg.was_invalidated
         assert not (os.path.exists("out/A"))  # since it was removed, and not recreated
         assert read("out/B") == "B"
         ppg1_compability_test.new_pipegraph()
@@ -498,16 +510,20 @@ class TestInvariant:
         fg.ignore_code_changes()  # no auto invariants for this test...
         fg.depends_on(func_dep)
         ppg.run_pipegraph()
-        assert not (func_dep.was_invalidated)  # not invalidated
-        assert fg.was_invalidated  # yeah
+        # ppg2 assert not (func_dep.was_invalidated)  # not invalidated
+        # ppg2 assert fg.was_invalidated  # yeah
         assert read("out/A") == "A"
         assert read("out/B") == "BB"
 
+    @pytest.mark.skip  # ppg1 implementation internals test, ppg2 must do it's own testing
     def test_invariant_dumping_on_graph_exception(self, ppg1_compability_test):
         # when an exception occurs not within a job
         # but within the pipegraph itself (e.g. when the user hit's CTRL-C
         # which we simulate here
-        class ExplodingJob(ppg.FileGeneratingJob):
+        # compability layer does not support subclassing
+        import pypipegraph2 as ppg2
+
+        class ExplodingJob(ppg2.FileGeneratingJob):
             def __setattr__(self, name, value):
                 if (
                     name == "stdout"
@@ -519,20 +535,20 @@ class TestInvariant:
                 else:
                     self.__dict__[name] = value
 
-        def w():
-            write("out/A", "A")
+        def w(of):
+            write(of, "A")
             append("out/B", "B")
 
         def func_c():
             append("out/C", "C")
 
         func_dep = ppg.FunctionInvariant("func_c", func_c)
-        fg = ExplodingJob("out/A", w)
-        fg.ignore_code_changes()  # no auto invariants for this test...
+        fg = ExplodingJob("out/A", w, depend_on_function=False)
+        # ppg2 fg.ignore_code_changes()  # no auto invariants for this test...
         fg.depends_on(func_dep)
         ppg.run_pipegraph()
-        assert func_dep.was_invalidated
-        assert fg.was_invalidated
+        # assert func_dep.was_invalidated
+        # assert fg.was_invalidated
         assert read("out/A") == "A"
         assert read("out/B") == "B"
         ppg1_compability_test.new_pipegraph()
@@ -540,13 +556,13 @@ class TestInvariant:
         def func_c1():
             append("out/C", "D")
 
-        def w2():
+        def w2(of):
             raise ValueError()  # so there is an error in a job...
 
         func_dep = ppg.FunctionInvariant("func_c", func_c1)  # so this invariant changes
-        fg = ExplodingJob("out/A", w2)  # and this job crashes
+        fg = ExplodingJob("out/A", w2, depend_on_function=False)  # and this job crashes
         fg.do_explode = True
-        fg.ignore_code_changes()  # no auto invariants for this test...
+        # ppg2 #fg.ignore_code_changes()  # no auto invariants for this test...
         fg.depends_on(func_dep)
         ki_raised = False
         try:
@@ -575,6 +591,7 @@ class TestInvariant:
         assert read("out/A") == "A"
         assert read("out/B") == "BB"
 
+    @pytest.mark.skip  # ppg1 implementation internal, no longer releevant to ppg2
     def test_job_not_setting_invalidated_after_was_invalidated_raises(self):
         class BadJob(ppg.FileGeneratingJob):
             def invalidated(self, reason):
@@ -616,6 +633,7 @@ class TestInvariant:
 
         assertRaises(ppg.JobContractError, inner)
 
+    @pytest.mark.skip  # ppg2 no longer uses pickle, but hashing
     def test_unpickable_raises(self):
         class Unpickable(object):
             def __getstate__(self):
@@ -636,7 +654,10 @@ class TestInvariant:
         write("out/b", "a")
         import pickle
 
-        with open(ppg.util.global_pipegraph.invariant_status_filename, "wb") as op:
+        ppg.util.global_pipegraph.get_history_filename().parent.mkdir(
+            exist_ok=True, parents=True
+        )
+        with open(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             op.write(b"This breaks")
         with pytest.raises(ppg.PyPipeGraphError):
@@ -664,17 +685,22 @@ class TestInvariant:
         b.depends_on(a)
         write("out/b", "a")
 
-        with open(ppg.util.global_pipegraph.invariant_status_filename, "wb") as op:
+        # ppg2
+        ppg.util.global_pipegraph.get_history_filename().parent.mkdir(
+            exist_ok=True, parents=True
+        )
+        with open(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(Undepickable(), op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(c.job_id, op, pickle.HIGHEST_PROTOCOL)
-            pickle.dump(23, op, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(
+                ({"a": 23}, {"c": 23}), op, pickle.HIGHEST_PROTOCOL
+            )  # ppg2 expects inputs, outputs
         with pytest.raises(ppg.RuntimeError):
             ppg.run_pipegraph()
         assert read("out/b") == "b"  # job was run
-        print(ppg.util.global_pipegraph.invariant_status)
         assert a.job_id in ppg.util.global_pipegraph.invariant_loading_issues
-        assert ppg.util.global_pipegraph.invariant_status["PIc"] == 23
+        assert ppg.util.global_pipegraph._load_history()["PIc"] == ({}, {"PIc": "23"})
 
     def test_invariant_loading_issues_on_key(self):
         a = ppg.DataLoadingJob("a", lambda: 5)
@@ -683,7 +709,11 @@ class TestInvariant:
         b.depends_on(a)
         write("out/b", "a")
 
-        with open(ppg.util.global_pipegraph.invariant_status_filename, "wb") as op:
+        # ppg2
+        ppg.util.global_pipegraph.get_history_filename().parent.mkdir(
+            exist_ok=True, parents=True
+        )
+        with open(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
             op.write(b"key breaks already")
             op.write(b"This breaks")
         with pytest.raises(ppg.PyPipeGraphError):
@@ -697,6 +727,8 @@ class TestFunctionInvariant:
     # but these are more specialized.
 
     def test_generator_expressions(self):
+        import pypipegraph2 as ppg2
+
         def get_func(r):
             def shu():
                 return sum(i + 0 for i in r)
@@ -722,14 +754,16 @@ class TestFunctionInvariant:
         c = ppg.FunctionInvariant(
             "c", get_func3(100)
         )  # and this invariant should be different
-        av = a.get_invariant(False, [])
-        bv = b.get_invariant(False, [])
-        cv = c.get_invariant(False, [])
-        assert a.get_invariant(False, [])
+        av = a.run(None, None)["FIa"][ppg2.jobs.python_version]
+        bv = b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        cv = c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        assert a.run(None, None)
         assert bv == av
         assert not (av == cv)
 
     def test_lambdas(self):
+        import pypipegraph2 as ppg2
+
         def get_func(x):
             def inner():
                 arg = lambda y: x + x + x  # noqa:E731
@@ -758,15 +792,18 @@ class TestFunctionInvariant:
         c = ppg.FunctionInvariant(
             "c", get_func3(100)
         )  # and this invariant should be different
-        av = a.get_invariant(False, [])
-        bv = b.get_invariant(False, [])
-        cv = c.get_invariant(False, [])
+        av = a.run(None, None)["FIa"][ppg2.jobs.python_version]
+        bv = b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        cv = c.run(None, None)["FIc"][ppg2.jobs.python_version]
+
         self.maxDiff = 20000
-        assert a.get_invariant(False, [])
+        assert av
         assert bv == av
         assert not (av == cv)
 
     def test_inner_functions(self):
+        import pypipegraph2 as ppg2
+
         def get_func(x):
             def inner():
                 return 23
@@ -792,15 +829,17 @@ class TestFunctionInvariant:
         c = ppg.FunctionInvariant(
             "c", get_func3(100)
         )  # and this invariant should be different
-        av = a.get_invariant(False, [])
-        bv = b.get_invariant(False, [])
-        cv = c.get_invariant(False, [])
-        assert a.get_invariant(False, [])
+        av = a.run(None, None)["FIa"][ppg2.jobs.python_version]
+        bv = b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        cv = c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        assert av
         assert bv == av
         assert not (av == cv)
 
     def test_nested_inner_functions(self):
-        def get_func(x):
+        import pypipegraph2 as ppg2
+
+        def get_func(xv):
             def inner():
                 def shu():
                     return 23
@@ -834,14 +873,16 @@ class TestFunctionInvariant:
         c = ppg.FunctionInvariant(
             "c", get_func3(100)
         )  # and this invariant should be different
-        av = a.get_invariant(False, [])
-        bv = b.get_invariant(False, [])
-        cv = c.get_invariant(False, [])
-        assert a.get_invariant(False, [])
+        av = a.run(None, None)["FIa"][ppg2.jobs.python_version]
+        bv = b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        cv = c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        assert av
         assert bv == av
         assert not (av == cv)  # constat value is different
 
     def test_inner_functions_with_parameters(self):
+        import pypipegraph2 as ppg2
+
         def get_func(x):
             def inner():
                 return x
@@ -855,10 +896,10 @@ class TestFunctionInvariant:
         c = ppg.FunctionInvariant(
             "c", get_func(2000)
         )  # and this invariant should be different
-        av = a.get_invariant(False, [])
-        bv = b.get_invariant(False, [])
-        cv = c.get_invariant(False, [])
-        assert a.get_invariant(False, [])
+        av = a.run(None, None)["FIa"][ppg2.jobs.python_version]
+        bv = b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        cv = c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        assert av
         assert bv == av
         assert not (av == cv)
 
@@ -866,7 +907,9 @@ class TestFunctionInvariant:
         def inner():
             ppg.FunctionInvariant("out/a", "shu")
 
-        assertRaises(ValueError, inner)
+        # assertRaises(ValueError, inner)
+        # ppg2
+        assertRaises(TypeError, inner)
 
     def test_passing_none_as_function_is_ok(self):
         job = ppg.FunctionInvariant("out/a", None)
@@ -895,12 +938,16 @@ class TestFunctionInvariant:
         assertRaises(ppg.JobContractError, inner)
 
     def test_raises_on_duplicate_with_different_functions(self):
+        import pypipegraph2 as ppg2
+
         def shu():
             return "a"
 
         ppg.FunctionInvariant("A", shu)
         ppg.FunctionInvariant("A", shu)  # ok.
-        with pytest.raises(ppg.JobContractError):
+        # with pytest.raises(ppg.JobContractError):
+        # ppg2
+        with pytest.raises(ppg2.JobRedefinitionError):
             ppg.FunctionInvariant("A", lambda: "b")  # raises ValueError
 
         def sha():
@@ -938,12 +985,12 @@ class TestFunctionInvariant:
         y = shu("B")
         j1 = y.get_job()
         j2 = y.get_job()
-        assert j1 is j2
-        assert j1.callback is j2.callback
+        assert j1.__wrapped__ is j2.__wrapped__ #ppg2
+        assert j1.generating_function is j2.generating_function
 
     def test_invariant_build_in_function(self):
         a = ppg.FunctionInvariant("test", sorted)
-        a._get_invariant(None, [])
+        a.run(None, None)
 
     def test_buildin_function(self):
         a = ppg.FunctionInvariant("a", open)
@@ -956,9 +1003,11 @@ class TestFunctionInvariant:
 
         a = ppg.FunctionInvariant("a", CallMe)
         with pytest.raises(ValueError):
-            a._get_invariant([], None)
+            a.run(None, None)
 
     def test_closure_capturing(self):
+        import pypipegraph2 as ppg2
+
         def func(da_list):
             def f():
                 return da_list
@@ -972,10 +1021,11 @@ class TestFunctionInvariant:
         c = ppg.FunctionInvariant(
             "c", func([1, 2, 3, 4])
         )  # and this invariant should be different
-        av = a.get_invariant(False, [])
-        bv = b.get_invariant(False, [])
-        cv = c.get_invariant(False, [])
-        assert a.get_invariant(False, [])
+        av = a.run(None, None)["FIa"][ppg2.jobs.python_version]
+        bv = b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        cv = c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        assert av
+
         assert bv == av
         assert not (av == cv)
 
@@ -983,6 +1033,8 @@ class TestFunctionInvariant:
         assert ppg.job.function_to_str(open) == "<built-in function open>"
 
     def test_closure_capturing_dict(self):
+        import pypipegraph2 as ppg2
+
         def func(da_list):
             def f():
                 return da_list
@@ -996,14 +1048,16 @@ class TestFunctionInvariant:
         c = ppg.FunctionInvariant(
             "c", func({"1": "a", "3": "b", "2": "d"})
         )  # and this invariant should be different
-        av = a.get_invariant(False, [])
-        bv = b.get_invariant(False, [])
-        cv = c.get_invariant(False, [])
-        assert a.get_invariant(False, [])
+        av = a.run(None, None)["FIa"][ppg2.jobs.python_version]
+        bv = b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        cv = c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        assert av
         assert bv == av
         assert not (av == cv)
 
     def test_closure_capturing_set(self):
+        import pypipegraph2 as ppg2
+
         def func(da_list):
             def f():
                 return da_list
@@ -1021,14 +1075,16 @@ class TestFunctionInvariant:
         c = ppg.FunctionInvariant(
             "c", func({"3", "2"})
         )  # and this invariant should be different
-        av = a.get_invariant(False, [])
-        bv = b.get_invariant(False, [])
-        cv = c.get_invariant(False, [])
-        assert a.get_invariant(False, [])
+        av = a.run(None, None)["FIa"][ppg2.jobs.python_version]
+        bv = b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        cv = c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        assert av
         assert bv == av
         assert not (av == cv)
 
     def test_closure_capturing_frozen_set(self):
+        import pypipegraph2 as ppg2
+
         def func(da_list):
             def f():
                 return da_list
@@ -1046,14 +1102,15 @@ class TestFunctionInvariant:
         c = ppg.FunctionInvariant(
             "c", func(frozenset({"3", "2"}))
         )  # and this invariant should be different
-        av = a.get_invariant(False, [])
-        bv = b.get_invariant(False, [])
-        cv = c.get_invariant(False, [])
-        assert a.get_invariant(False, [])
+        av = a.run(None, None)["FIa"][ppg2.jobs.python_version]
+        bv = b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        cv = c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        assert av
         assert bv == av
         assert not (av == cv)
 
-    @pytest.mark.xfail
+    @pytest.mark.skip  # ppg2 does it's own smart thing - no need to test here
+    # @pytest.mark.xfail was marked fail
     def test_invariant_caching(self):
 
         a = ppg.FunctionInvariant("a", ppg.inside_ppg)
@@ -1144,6 +1201,7 @@ class TestFunctionInvariant:
         assert len(ppg.util.global_pipegraph.func_hashes) == 1
         assert ivb[:3] == ivc[:3]
 
+    @pytest.mark.skip  # no longer relevant - ppg2 needs to recalc ppg1 projects anyhow
     def test_37_dis_changes(self):
         # starting with python 3.7
         # dis can go into functions - we used to do this manually.
@@ -1169,7 +1227,7 @@ class TestFunctionInvariant:
             )
             assert expected_new != old
             with pytest.raises(ppg.NothingChanged) as e:
-                a._get_invariant(old, [])
+                a.run(None, None)
             assert e.value.new_value == expected_new
             del old["source"]
             res = a._get_invariant(old, [])
@@ -1186,27 +1244,31 @@ class TestMultiFileInvariant:
         with pytest.raises(TypeError):
             alist = ["out/A", "out/B"]
             ppg.MultiFileInvariant((x for x in alist), lambda: write("out/A", "A"))
-        with pytest.raises(ValueError):
+        # with pytest.raises(ValueError):
+        # ppg2
+        with pytest.raises(TypeError):
             ppg.MultiFileInvariant(["out/A", "out/A"], lambda: write("out/A", "A"))
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             ppg.MultiFileInvariant([], lambda: write("out/A", "A"))
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_new_raises_unchanged(self):
         write("out/a", "hello")
         write("out/b", "world")
         jobA = ppg.MultiFileInvariant(["out/a", "out/b"])
 
         def inner():
-            jobA.get_invariant(False, {})
+            jobA.run(None, None)
 
         assertRaises(ppg.NothingChanged, inner)
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_no_raise_on_no_change(self):
         write("out/a", "hello")
         write("out/b", "world")
         jobA = ppg.MultiFileInvariant(["out/a", "out/b"])
         try:
-            jobA.get_invariant(False, {})
+            jobA.run(None, None)
             self.fail("should not be reached")
         except ppg.NothingChanged as e:
             cs = e.new_value
@@ -1217,6 +1279,7 @@ class TestMultiFileInvariant:
             cs2 = e.new_value
         assert cs2 == cs
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_filetime_changed_contents_the_same(self):
         write("out/a", "hello")
         write("out/b", "world")
@@ -1237,6 +1300,7 @@ class TestMultiFileInvariant:
         assert [x[2] for x in cs2] == [x[2] for x in cs]  # sizes did not
         assert [x[3] for x in cs2] == [x[3] for x in cs]
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_changed_file(self):
         write("out/a", "hello")
         write("out/b", "world")
@@ -1254,6 +1318,7 @@ class TestMultiFileInvariant:
         assert not ([x[2] for x in cs2] == [x[2] for x in cs])  # sizes changed
         assert not ([x[3] for x in cs2] == [x[2] for x in cs])  # checksums changed
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_changed_file_same_size(self):
         write("out/a", "hello")
         write("out/b", "world")
@@ -1271,6 +1336,7 @@ class TestMultiFileInvariant:
         assert [x[2] for x in cs2] == [x[2] for x in cs]  # sizes the same
         assert not ([x[3] for x in cs2] == [x[2] for x in cs])  # checksums changed
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_rehome_no_change(self):
         write("out/a", "hello")
         write("out/b", "world")
@@ -1296,6 +1362,7 @@ class TestMultiFileInvariant:
 
         assertRaises(ppg.NothingChanged, inner)
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_rehome_and_change(self):
         write("out/a", "hello")
         write("out/b", "world")
@@ -1319,11 +1386,13 @@ class TestMultiFileInvariant:
         assert not ([x[3] for x in cs2] == [x[2] for x in cs3])  # checksums changed
 
     def test_non_existant_file_raises(self):
-        def inner():
-            ppg.MultiFileInvariant(["out/a"])
+        # ppg2 does not raise until run.
+        mfi = ppg.MultiFileInvariant(["out/a"])
+        ppg.FileGeneratingJob("out/B", lambda of: of.write("b")).depends_on(mfi)
+        with pytest.raises(ppg.RuntimeError):
+            ppg.run_pipegraph()
 
-        assertRaises(ValueError, inner)
-
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_rehome_and_additional_file(self):
         write("out/a", "hello")
         write("out/b", "world")
@@ -1347,6 +1416,7 @@ class TestMultiFileInvariant:
         cs3 = jobB.get_invariant(False, {jobA.job_id: cs})
         assert not ([x[3] for x in cs2] == [x[2] for x in cs3])  # checksums changed
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_rehome_and_missing_file(self):
         write("out/a", "hello")
         write("out/b", "world")
@@ -1395,7 +1465,9 @@ class TestMultiFileInvariant:
         jobB = ppg.FileGeneratingJob("out/x", of)
         jobB.depends_on(jobA)
         ppg.run_pipegraph()
-        assert read("out/counter") == "0xx"
+        # ppg2 now does *not* give up
+        # assert read("out/counter") == "0xx"
+        assert read("out/counter") == "0x"  # so no rerun
 
 
 @pytest.mark.usefixtures("ppg1_compability_test")
@@ -1506,9 +1578,17 @@ class TestDependency:
 
         assert os.path.exists(ofB)
         assert os.path.exists(ofC)
-        assert read(ofA) == "1111"
+        # ppg2 - ppg2 runs the job at least once! and captures the hash afterwards
+        # this might seem a disadvantag, but it's the only way to gurantee the code actually
+        # produces the output.
+        # on the plus side, you can swap in a FileInvariant inplace without trouble
+        # (the FileGeneratingJob produces the same 'output'))
+        # assert read(ofA) == "1111"
+        assert read(ofA) == "hello"
 
-    def test_invariant_violation_redoes_deps_but_not_nondeps(self, ppg1_compability_test):
+    def test_invariant_violation_redoes_deps_but_not_nondeps(
+        self, ppg1_compability_test
+    ):
         def get_job(name):
             fn = "out/" + name
 
@@ -1598,7 +1678,9 @@ class TestDependency:
         def inner():
             jobA.depends_on("SHU")
 
-        assertRaises(ValueError, inner)
+        assertRaises(KeyError, inner)
+        with pytest.raises(ppg.CycleError):
+            jobA.depends_on(jobA.job_id)
 
     def test_depends_on_instant_cycle_check(self):
         jobA = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "A"))
@@ -1620,23 +1702,24 @@ class TestDependency:
         )
         jobD = ppg.FileGeneratingJob("out/D", lambda: write("out/D", "D"))
         jobC.depends_on([jobA, [jobB, jobD]])
-        assert jobD in jobC.prerequisites
-        assert jobA in jobC.prerequisites
-        assert jobB in jobC.prerequisites
+        assert ppg.util.global_pipegraph.has_edge(jobD, jobC)
+        assert ppg.util.global_pipegraph.has_edge(jobA, jobC)
+        assert ppg.util.global_pipegraph.has_edge(jobB, jobC)
         ppg.run_pipegraph()
-        assert jobC.prerequisites is None
+        # assert jobC.prerequisites is None ppg2
         assert read("out/A") == "A"
         assert read("out/B") == "B"
         assert read("out/C") == "ABD"
         assert read("out/D") == "D"
 
     def test_invariant_job_depends_on_raises(self):
-        from pypipegraph.job import _InvariantJob
 
         with pytest.raises(ppg.JobContractError):
-            _InvariantJob("A").depends_on(ppg.Job("B"))
-        with pytest.raises(ppg.JobContractError):
-            ppg.FinalJob("A").depends_on(ppg.Job("B"))
+            ppg.ParameterInvariant("A", "a").depends_on(
+                ppg.Job(["B"])
+            )  # ppg, don't rely on internals
+        # with pytest.raises(ppg.JobContractError): # no final job in ppg2
+        # ppg.FinalJob("A").depends_on(ppg.Job("B"))
 
     def test_cached_job_depends_on(self):
         class Dummy:
@@ -1644,16 +1727,23 @@ class TestDependency:
 
         o = Dummy()
         jobA = ppg.CachedAttributeLoadingJob("cache/A", o, "a", lambda: 23)
-        jobB = ppg.Job("B")
-        jobC = ppg.Job("C")
-        jobD = ppg.Job("D")
+        # jobA is the loading job,
+        # jobA.lfg is the calculating job
+        # but joba.depends_on goes to the .lfg...
+        jobB = ppg.Job(["B"])
+        jobC = ppg.Job(["C"])
+        jobD = ppg.Job(["D"])
         jobA.depends_on([jobB], jobC, jobD)
-        assert jobB not in jobA.prerequisites
-        assert jobC not in jobA.prerequisites
-        assert jobD not in jobA.prerequisites
-        assert jobB in jobA.lfg.prerequisites
-        assert jobC in jobA.lfg.prerequisites
-        assert jobD in jobA.lfg.prerequisites
+        has_edge = ppg.util.global_pipegraph.has_edge
+        assert not has_edge(jobB, jobA)
+        assert not has_edge(jobC, jobA)
+        assert not has_edge(jobD, jobA)
+        assert has_edge(jobB, jobA.lfg)
+        assert has_edge(jobC, jobA.lfg)
+        assert has_edge(jobD, jobA.lfg)
+
+        ppg.Job.depends_on(jobA, jobC)
+        assert has_edge(jobC, jobA)
 
     def test_dependency_placeholder(self):
         jobA = ppg.FileGeneratingJob(
@@ -1699,18 +1789,17 @@ class TestDependency:
         assert read("out/A") == "ABC"
 
     def test_dependency_placeholder_dynamic_auto_invariants(self):
+        from loguru import logger
         jobA = ppg.FileGeneratingJob(
             "out/A", lambda: write("out/A", "A" + read("out/B"))
         )
 
         def check_function_invariant():
             write("out/B", "B")
-            preqs = ppg.util.global_pipegraph.jobs["out/B"].prerequisites
-            for x in preqs:
-                if isinstance(x, ppg.FunctionInvariant):
-                    break
-            else:
-                raise ValueError("no function invariant for gen_deps created job")
+            print()
+
+            #ppg2
+            assert ppg.util.global_pipegraph.has_edge('FIout/B', 'out/B')
 
         def gen_deps():
             jobB = ppg.FileGeneratingJob("out/B", check_function_invariant)
@@ -1732,31 +1821,37 @@ class TestDefinitionErrors:
         def inner():
             ppg.FunctionInvariant("a", b)
 
-        assertRaises(ppg.JobContractError, inner)
+        #assertRaises(ppg.JobContractError, inner)
+        #ppg2
+        assertRaises(ValueError, inner)
+        import pypipegraph2 as ppg2
+        assertRaises(ppg2.JobRedefinitionError, inner)
 
+    @pytest.mark.skip # in ppg2, you can't have a collision, they have different prefixes
     def test_defining_function_and_parameter_invariant_with_same_name(self):
         a = lambda: 55  # noqa:E731
-        b = lambda: 66  # noqa:E731
-        ppg.FunctionInvariant("PIa", a)
+        b = 66
+        ja = ppg.FunctionInvariant("PIa", a)
 
-        def inner():
-            ppg.ParameterInvariant("a", b)
+        #def inner():
+        jb = ppg.ParameterInvariant("a", b)
+        assert ja.job_id == jb.job_id
 
-        assertRaises(ppg.JobContractError, inner)
-
+    @pytest.mark.skip # in ppg2, you can't have a collision, they have different prefixes
     def test_defining_function_and_parameter_invariant_with_same_name_reversed(self):
         a = lambda: 55  # noqa:E731
-        b = lambda: 66  # noqa:E731
-        ppg.ParameterInvariant("a", b)
+        #b = lambda: 66  # noqa:E731
+        #ppg2
+        ja = ppg.ParameterInvariant("a", 66)
 
-        def inner():
-            ppg.FunctionInvariant("PIa", a)
+        ppg.FunctionInvariant(ja.job_id, a)
 
-        assertRaises(ppg.JobContractError, inner)
+        #assertRaises(ppg.JobContractError, inner)
 
 
 @pytest.mark.usefixtures("ppg1_compability_test")
 class TestFunctionInvariantDisChanges_BetweenVersions:
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_lambda(self):
         source = """def test(arg1, arg2):
         l = lambda: arg1 + 123
@@ -1843,6 +1938,7 @@ RETURN_VALUE"""
                 {"source": source, (3, 6): (py369, ""), (3, 7): ("", "")},  #
             )
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_compare_with_old_style(self):
         shu = 10
 
@@ -1867,6 +1963,7 @@ RETURN_VALUE"""
                 old,
             )
 
+    @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_compare_with_old_old_style(self):
         shu = 10
 
@@ -1886,6 +1983,7 @@ RETURN_VALUE"""
             )
 
     def test_function_name_is_irrelevant(self):
+        import pypipegraph2 as ppg2
         def test_a():
             return 55
 
@@ -1898,10 +1996,11 @@ RETURN_VALUE"""
         a = ppg.FunctionInvariant("a", test_a)
         b = ppg.FunctionInvariant("b", test_b)
         c = ppg.FunctionInvariant("c", test_c)
-        assert a.get_invariant(False, []) == b.get_invariant(False, [])
-        assert a.get_invariant(False, []) != c.get_invariant(False, [])
+        assert a.run(None,None)['FIa'][ppg2.jobs.python_version] == b.run(None,None)['FIb'][ppg2.jobs.python_version]
+        assert a.run(None,None)['FIa'][ppg2.jobs.python_version] != c.run(None,None)['FIc'][ppg2.jobs.python_version]
 
     def test_docstring_is_irrelevant(self):
+        import pypipegraph2 as ppg2
         def test():
             """A"""
             return 55
@@ -1927,14 +2026,16 @@ RETURN_VALUE"""
 
         d = ppg.FunctionInvariant("d", test)
 
-        assert a.get_invariant(False, []) == b.get_invariant(False, [])
-        assert a.get_invariant(False, []) != c.get_invariant(False, [])
-        assert c.get_invariant(False, []) == d.get_invariant(False, [])
+        assert a.run(None,None)['FIa'][ppg2.jobs.python_version]  == b.run(None,None)['FIb'][ppg2.jobs.python_version] 
+        assert a.run(None,None)['FIa'][ppg2.jobs.python_version]  != c.run(None,None)['FIc'][ppg2.jobs.python_version] 
+        assert c.run(None,None)['FIc'][ppg2.jobs.python_version]  == d.run(None,None)['FId'][ppg2.jobs.python_version] 
 
 
 @pytest.mark.usefixtures("ppg1_compability_test")
+#ppg2: actual ppg2 source is without final newline. tests adjusted.
 class TestCythonCompability:
     def test_just_a_function(self):
+        import pypipegraph2 as ppg2
         import cython
 
         src = """
@@ -1945,13 +2046,13 @@ def b():
     return 5
 """
         func = cython.inline(src)["a"]
-        actual = ppg.FunctionInvariant("a", func).get_invariant(None, {})
+        actual = ppg.FunctionInvariant("a", func).run(None, None)['FIa']['source']
         should = """    def a():
-        return 1
-    """
+        return 1"""
         assert actual == should
 
     def test_nested_function(self):
+        import pypipegraph2 as ppg2
         import cython
 
         src = """
@@ -1964,12 +2065,13 @@ def c():
     return 5
 """
         func = cython.inline(src)["a"]()
-        actual = ppg.FunctionInvariant("a", func).get_invariant(None, {})
+        actual = ppg.FunctionInvariant("a", func).run(None, None)['FIa']['source']
         should = """        def b():
             return 1"""
         assert actual == should
 
     def test_class(self):
+        import pypipegraph2 as ppg2
         import cython
 
         src = """
@@ -1978,17 +2080,16 @@ class A():
         return 55
 
 def c():
-    return 5
-"""
+    return 5"""
 
         func = cython.inline(src)["A"]().b
-        actual = ppg.FunctionInvariant("a", func).get_invariant(None, {})
+        actual = ppg.FunctionInvariant("a", func).run(None, None)['FIa']['source']
         should = """        def b(self):
-            return 55
-    """
+            return 55"""
         assert actual == should
 
     def test_class_inner_function(self):
+        import pypipegraph2 as ppg2
         import cython
 
         src = """
@@ -1999,11 +2100,10 @@ class A():
         return c
 
 def d():
-    return 5
-"""
+    return 5"""
 
         func = cython.inline(src)["A"]().b()
-        actual = ppg.FunctionInvariant("a", func).get_invariant(None, {})
+        actual = ppg.FunctionInvariant("a", func).run(None, None)['FIa']['source']
         should = """            def c():
                 return 55"""
         assert actual == should

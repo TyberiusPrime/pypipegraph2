@@ -70,7 +70,13 @@ class ConsoleInteractive:
             try:
                 if self.stopped:
                     break
-                input = bool(select.select([sys.stdin], [], [], 1)[0])
+                try:
+                    input = bool(select.select([sys.stdin], [], [], 1)[0])
+                except io.UnsupportedOperation as e:
+                    if 'redirected stdin is pseudofile' in str(e): # running under pytest - no interactivity, but suport requesting it?
+                        input = False
+                    else:
+                        raise 
                 if input:
                     value = sys.stdin.read(1)
                     # logger.info(f"received {repr(value)}")

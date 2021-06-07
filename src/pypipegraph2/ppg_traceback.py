@@ -87,13 +87,19 @@ class Trace:
                         source = op.read().decode("utf-8", errors="replace")
                 except Exception:  # pragma: no cover
                     source = ""
+                # this needs to be 'robust'
+                # exceptions here tend to not leave a decent stack trace
+                my_locals = {}
+                for key, value in frame_summary.f_locals.items():
+                    try:
+                        my_locals[key] = str(value)
+                    except Exception as e:
+                        my_locals[key] = f"Could not str() local: {e}"
                 frame = Frame(
                     filename=filename,
                     lineno=line_no,
                     name=frame_summary.f_code.co_name,
-                    locals={
-                        key: str(value) for key, value in frame_summary.f_locals.items()
-                    },
+                    locals=my_locals,
                     source=source,
                 )
                 append(frame)

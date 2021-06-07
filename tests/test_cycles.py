@@ -3,7 +3,7 @@ import pypipegraph2 as ppg
 from .shared import write
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestCycles:
     def test_simple_cycle(self):
         with pytest.raises(ppg.exceptions.NotADag):

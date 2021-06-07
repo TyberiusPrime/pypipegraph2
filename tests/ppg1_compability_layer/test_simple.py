@@ -31,9 +31,10 @@ class TestSimple:
         with pytest.raises(ValueError):
             ppg.run_pipegraph()
 
+    @pytest.mark.skip # ppg2 can run twice
     def test_can_not_run_twice(self):
 
-        ppg.new_pipegraph(dump_graph=False)
+        ppg.new_pipegraph(dump_graph=False, interactive=False)
         ppg.run_pipegraph()
         try:
             ppg.run_pipegraph()
@@ -42,6 +43,7 @@ class TestSimple:
             print(e)
             assert "Each pipegraph may be run only once." in str(e)
 
+    @pytest.mark.skip # ppg2 can run again, even with more jobs
     def test_can_not_add_jobs_after_run(self):
 
         ppg.new_pipegraph(dump_graph=False)
@@ -56,6 +58,7 @@ class TestSimple:
                 in str(e)
             )
 
+    @pytest.mark.skip # ppg2 can run again, even with more jobs
     def test_job_creation_after_pipegraph_run_raises(self):
         def inner():
             ppg.FileGeneratingJob("A", lambda: None)
@@ -64,6 +67,7 @@ class TestSimple:
         ppg.run_pipegraph()
         assertRaises(ValueError, inner)
 
+    @pytest.mark.skip # ppg2 can run again, even with more jobs
     def test_run_may_be_called_only_once(self):
         ppg.new_pipegraph(quiet=True, dump_graph=False)
         ppg.run_pipegraph()

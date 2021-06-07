@@ -1,8 +1,33 @@
+"""
+The MIT License (MIT)
+
+Copyright (c) 2012, Florian Finkernagel <finkernagel@imt.uni-marburg.de>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
 import pytest
-import pypipegraph2 as ppg
+import pypipegraph as ppg
+from .shared import assertRaises
 
 
-@pytest.mark.usefixtures("ppg2_per_test")
+@pytest.mark.usefixtures("ppg1_compability_test")
 class TestUtils:
     def test_assert_uniqueness_simple(self):
         class Dummy:
@@ -12,8 +37,10 @@ class TestUtils:
 
         Dummy("shu")
 
-        with pytest.raises(ValueError):
+        def inner():
             Dummy("shu")
+
+        assertRaises(ValueError, inner)
 
     def test_assert_uniqueness_ok(self):
         class Dummy:
@@ -24,8 +51,10 @@ class TestUtils:
         Dummy("shu")
         Dummy("sha")
 
-        with pytest.raises(ValueError):
+        def inner():
             Dummy("shu")
+
+        assertRaises(ValueError, inner)
 
     def test_assert_uniqueness_ok_multi_classes(self):
         class Dummy:
@@ -41,8 +70,10 @@ class TestUtils:
         Dummy("shu")
         Dummy2("shu")
 
-        with pytest.raises(ValueError):
+        def inner():
             Dummy("shu")
+
+        assertRaises(ValueError, inner)
 
     def test_assert_uniqueness_raises_slashes(self):
         class Dummy:
@@ -52,8 +83,10 @@ class TestUtils:
 
         Dummy("shu")
 
-        with pytest.raises(ValueError):
+        def inner():
             Dummy("shu/sha")
+
+        assertRaises(ValueError, inner)
 
     def test_assert_uniqueness_raises_also_check(self):
         class Dummy:
@@ -68,8 +101,10 @@ class TestUtils:
 
         Dummy("shu")
 
-        with pytest.raises(ValueError):
+        def inner():
             Dummy2("shu")
+
+        assertRaises(ValueError, inner)
 
     def test_assert_uniqueness_raises_also_check_no_instance_of_second_class(self):
         class Dummy:
@@ -86,8 +121,10 @@ class TestUtils:
         # does not raise of course...
         Dummy2("shu")
 
-        with pytest.raises(ValueError):
+        def inner():
             Dummy2("shu")
+
+        assertRaises(ValueError, inner)
 
     def test_assert_uniqueness_raises_also_check_list(self):
         class Dummy:
@@ -102,27 +139,20 @@ class TestUtils:
 
         Dummy("shu")
 
-        with pytest.raises(ValueError):
+        def inner():
             Dummy2("shu")
 
+        assertRaises(ValueError, inner)
+
     def test_exception_on_run_without_previous_new_pipegraph(self):
-        ppg.global_pipegraph = None
+        ppg.util.global_pipegraph = None
         with pytest.raises(ValueError):
-            ppg.run()
+            ppg.run_pipegraph()
 
     def test_flatten_jobs(self):
-        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
-        j1 = ppg.FileGeneratingJob("A", lambda of: "A")
-        j2 = ppg.FileGeneratingJob("B", lambda of: "B")
-        j3 = ppg.FileGeneratingJob("B", lambda of: "C")
+        j1 = ppg.FileGeneratingJob("A", lambda: "A")
+        j2 = ppg.FileGeneratingJob("B", lambda: "B")
+        j3 = ppg.FileGeneratingJob("Bc", lambda: "C")
         res = [j1, [j2, [j3, j1]]]
         # no dedup on this.
         assert list(ppg.util.flatten_jobs(res)) == [j1, j2, j3, j1]
-
-
-    def test_inside_ppg(self):
-        assert ppg.global_pipegraph is not None
-        assert ppg.inside_ppg()
-        ppg.global_pipegraph = None
-        assert not ppg.inside_ppg()
-

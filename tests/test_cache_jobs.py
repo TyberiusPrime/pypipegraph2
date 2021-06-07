@@ -6,7 +6,7 @@ import pypipegraph2 as ppg
 from .shared import read, write, append, Dummy
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestCachedDataLoadingJob:
     def test_simple(self):
         o = Dummy()
@@ -207,7 +207,7 @@ class TestCachedDataLoadingJob:
         assert ca.resources is ppg.Resources.AllCores
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestCachedAttributeJob:
     def test_simple(self):
         o = Dummy()

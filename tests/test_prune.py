@@ -4,7 +4,7 @@ import pypipegraph2 as ppg
 from .shared import write, read
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestPruning:
     def test_basic_prune(self, job_trace_log):
         ppg.FileGeneratingJob("A", lambda of: write("A", "A"))

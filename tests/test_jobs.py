@@ -7,7 +7,7 @@ from .shared import write, read, Dummy, append, counter
 global_test = 0
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestJobs:
     def test_assert_singletonicity_of_jobs(self):
         ppg.new()
@@ -82,7 +82,7 @@ class TestJobs:
         assert hasattr(jobA, "__hash__")
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestJobs2:
     def test_str(self):
         a = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "hello"))
@@ -96,7 +96,7 @@ class TestJobs2:
 
 
 @pytest.mark.usefixtures("create_out_dir")
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestFileGeneratingJob:
     def test_basic(self):
         of = "out/a"
@@ -546,7 +546,7 @@ class TestFileGeneratingJob:
 
 
 @pytest.mark.usefixtures("create_out_dir")
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestMultiFileGeneratingJob:
     def test_basic(self):
         of = ["out/a", "out/b"]
@@ -718,7 +718,7 @@ shared_value = ""
 
 
 @pytest.mark.usefixtures("create_out_dir")
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestDataLoadingJob:
     def test_modifies_worker(self):
         # global shared
@@ -1033,7 +1033,7 @@ class TestDataLoadingJob:
 
 
 @pytest.mark.usefixtures("create_out_dir")
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestAttributeJob:
     def test_basic_attribute_loading(self):
         o = Dummy()
@@ -1285,7 +1285,7 @@ class TestAttributeJob:
 
 
 @pytest.mark.usefixtures("create_out_dir")
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestTempFileGeneratingJob:
     def test_basic(self):
         temp_file = "out/temp"
@@ -1611,7 +1611,7 @@ class TestTempFileGeneratingJob:
 
 
 @pytest.mark.usefixtures("create_out_dir")
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestMultiTempFileGeneratingJob:
     def test_basic(self):
         temp_files = ["out/temp", "out/temp2"]

@@ -691,29 +691,42 @@ class Runner:
         self._fail_downstream_by_outputs(job.outputs, job_id)
         # logger.error(f"Failed {job_id}")
         if not self._job_failed_last_time(job_id):
+            if hasattr(job_state.error.args[1],'stacks'):
+                stacks = job_state.error.args[1]
+            else:
+                stacks = None
             if self.job_graph.error_dir is not None:
                 error_file = self.job_graph.error_dir / self.job_graph.time_str / (
                     str(job.job_number) + "_exception.txt"
                 )
                 with open(error_file, "w") as ef:
-                    c = Console(file=ef, record=True)
+                    c = Console(file=ef, record=True, width=120)
                     c.print(f"{job_id}\n")
-                    c.log(
-                        self._format_rich_traceback_fallback(
-                            job_state.error.args[1], True
+                    if stacks is not None:
+                        c.log(
+                            self._format_rich_traceback_fallback(
+                                stacks, True
+                            )
                         )
-                    )
+
+                    else:
+                        c.log(job_state.error)
+                        c.log("no stack available")
                     # ef.write(self._format_rich_traceback_fallback(job_state.error.args[1]))
                 logger.error(
                     f"Failed after {job_state.run_time:.2}s: [bold]{job_id}[/bold]. Exception (incl. locals) logged to {error_file}"
                 )
             else:
                 logger.error(f"Failed job: {job_id}")
-            logger.error(
+            if stacks is not None:
+                logger.error(
                 escape_logging(
-                    self._format_rich_traceback_fallback(job_state.error.args[1], False)
+                    self._format_rich_traceback_fallback(stacks, False)
                 )
             )
+            else:
+                logger.error(job_state.error)
+                logger.error("no stack available")
 
     def _format_rich_traceback_fallback(self, tb, include_locals):
         """Pretty print a traceback.

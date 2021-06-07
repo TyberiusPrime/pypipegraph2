@@ -1,6 +1,10 @@
 import os
+import sys
 from rich.console import Console
-console = Console()
+console_args = {}
+if "pytest" in sys.modules:
+    console_args['width'] = 120
+console = Console(**console_args)
 
 cpu_count = None
 
@@ -108,3 +112,5 @@ def flatten_jobs(j):
     else:
         for sj in j:
             yield from flatten_jobs(sj)
+
+

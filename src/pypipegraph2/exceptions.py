@@ -28,7 +28,7 @@ class JobRedefinitionError(ValueError):
     pass
 
 
-class RunFailed(PPGException):
+class RunFailed(FatalGraphException):
     pass
 
 

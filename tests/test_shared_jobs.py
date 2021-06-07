@@ -5,7 +5,7 @@ import pypipegraph2 as ppg
 from .shared import write, read, counter
 
 
-@pytest.mark.usefixtures("ppg_per_test")
+@pytest.mark.usefixtures("ppg2_per_test")
 class TestSharedJob:
     def test_simple(self):
         def doit(output_files):
@@ -305,12 +305,18 @@ class TestSharedJob:
     def test_simple_one_file(self):
         def doit(output_file):
             count = counter("doit")
-            write(output_file, "a" + str(count))
+            write(output_file[0], "a" + str(count))
 
         job = ppg.SharedMultiFileGeneratingJob(
-            "out", ["a"], doit, depend_on_function=False, remove_unused=False
+            "out", ["a"], doit, depend_on_function=False, remove_unused=False,
+            remove_build_dir_on_error=False
         )
-        ppg.run()
+        try:
+            ppg.run()
+        except Exception as e:
+            print('stdout', job.stdout)
+            print('stderr', job.stderr)
+            raise
         assert read("out/done_no_input/a") == "a0"
 
 
