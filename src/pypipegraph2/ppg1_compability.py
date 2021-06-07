@@ -104,9 +104,10 @@ with ppg2 objects. Aspires to be a drop-in replacement.
     sys.modules["pypipegraph.job"] = job
     # todo: list unpatched...
     new_entries = set(dir(ppg1))
-    for k in set(old_entries).difference(new_entries):
-        if not k.startswith("__") and k != "all":
-            warnings.warn(f"not yet ppg1-compability layer implemented: {k}")
+    # this was used to find unported code.
+    # for k in set(old_entries).difference(new_entries): # pragma: no cover
+    # if not k.startswith("__") and k != "all":
+    # warnings.warn(f"not yet ppg1-compability layer implemented: {k}")
     patched = True
 
 
@@ -211,7 +212,7 @@ def new_pipegraph(
         kwargs["error_dir"] = invariant_status_filename / "errors"
         kwargs["history_dir"] = invariant_status_filename / "history"
         kwargs["run_dir"] = invariant_status_filename / "run"
-    kwargs['allow_short_filenames'] = False # as was the default for ppg1
+    kwargs["allow_short_filenames"] = False  # as was the default for ppg1
 
     res = ppg2.new(
         cores=cores,
@@ -231,7 +232,6 @@ def run_pipegraph(*args, **kwargs):
     if util.global_pipegraph is None:
         raise ValueError("You need to call new_pipegraph first")
     ppg2.run()
-
 
 
 def _ignore_code_changes(job):
@@ -258,11 +258,11 @@ class PPG1Adaptor(wrapt.ObjectProxy):
     def cores_needed(self):
         res = None
         if self.resources == ppg2.Resources.AllCores:
-            res =  -1
+            res = -1
         elif self.resources == ppg2.Resources.Exclusive:
-            res =  -2
+            res = -2
         else:
-            res =  1
+            res = 1
         return res
 
     @cores_needed.setter
@@ -275,7 +275,6 @@ class PPG1Adaptor(wrapt.ObjectProxy):
             self.use_resources(ppg2.Resources.SingleCore)
 
 
-
 def assert_ppg_created():
     if not util.global_pipegraph:
         raise ValueError("Must instantiate a pipegraph before creating any Jobs")
@@ -286,7 +285,7 @@ def FileGeneratingJob(output_filename, function, rename_broken=False, empty_ok=F
     sig = inspect.signature(function)
     if len(sig.parameters) == 0:
 
-        def wrapper(of):
+        def wrapper(of):  # pragma: no cover - runs in spawned process
             function()
             if not of.exists():
                 raise ppg2.exceptions.JobContractError(
@@ -315,7 +314,7 @@ def MultiFileGeneratingJob(
     sig = inspect.signature(function)
     if len(sig.parameters) == 0:
 
-        def wrapper(ofs):
+        def wrapper(ofs):  # pragma: no cover - runs in spawned process
             function()
             for of in ofs:
                 if not of.exists():
@@ -329,8 +328,8 @@ def MultiFileGeneratingJob(
                         )
                     )
 
-        wrapper.wrapped_function = function
-        func = wrapper
+        func = ppg2.jobs._mark_function_wrapped(wrapper, function)
+
     else:
         func = function
 
@@ -343,7 +342,8 @@ def TempFileGeneratingJob(output_filename, function, rename_broken=False):
     sig = inspect.signature(function)
     if len(sig.parameters) == 0:
 
-        def wrapper(of):
+        def wrapper(of):  # pragma: no cover - runs in spawned process
+
             function()
             if not of.exists():
                 raise ppg2.exceptions.JobContractError(
@@ -356,8 +356,7 @@ def TempFileGeneratingJob(output_filename, function, rename_broken=False):
                     )
                 )
 
-        wrapper.wrapped_function = function
-        func = wrapper
+        func = ppg2.jobs._mark_function_wrapped(wrapper, function)
     else:
         func = function
 
@@ -370,7 +369,8 @@ def MultiTempFileGeneratingJob(output_filenames, function, rename_broken=False):
     sig = inspect.signature(function)
     if len(sig.parameters) == 0:
 
-        def wrapper(ofs):
+        def wrapper(ofs):  # pragma: no cover - runs in spawned process
+
             function()
             for of in ofs:
                 if not of.exists():
@@ -384,8 +384,7 @@ def MultiTempFileGeneratingJob(output_filenames, function, rename_broken=False):
                         )
                     )
 
-        wrapper.wrapped_function = function
-        func = wrapper
+        func = ppg2.jobs._mark_function_wrapped(wrapper, function)
     else:
         func = function
 
@@ -444,8 +443,6 @@ def PlotJob(
     else:
         res.cache_job = pj.cache
     res.table_job = pj.table
-    # do we need this??
-    res.add_another_job = types.MethodType(_plot_job_add_another_job, res)
     res = PPG1Adaptor(res)
 
     def depends_on(
@@ -478,45 +475,17 @@ def PlotJob(
     return res
 
 
-def _plot_job_add_another_job(self, output_filename, plot_function, render_args=None):
-    if render_args is None:
-        render_args = {}
-
-    def run_plot():
-        df = self.get_data()
-        plot = plot_function(df)
-        if not hasattr(plot, "render"):
-            raise ppg2.JobContractError(
-                "%s.plot_function did not return a plot with a render function"
-                % (output_filename)
-            )
-        if "width" not in render_args and hasattr(plot, "width"):
-            render_args["width"] = plot.width
-        if "height" not in render_args and hasattr(plot, "height"):
-            render_args["height"] = plot.height
-        plot.render(output_filename, **render_args)
-
-    run_plot.wrapped_function = plot_function
-
-    job = FileGeneratingJob(output_filename, run_plot)
-    job.depends_on(
-        ppg2.ParameterInvariant(self.output_filename + "_params", render_args)
-    )
-    job.depends_on(self.cache_job)
-    return PPG1Adaptor(job)
-
-
 def wrap_old_style_lfg_cached_job(job):
     # adapt new style to old style
-    if hasattr(job.load, '__wrapped__'):
+    if hasattr(job.load, "__wrapped__"): # pragma: no cover
         res = job.load
-        res.lfg = job.calc # just assume it's a PPG1Adaptor
+        res.lfg = job.calc  # just assume it's a PPG1Adaptor
     else:
         res = PPG1Adaptor(job.load)
         res.lfg = PPG1Adaptor(job.calc)
 
     def depends_on(self, *args, **kwargs):
-        if args and args[0] == self.lfg: # repeated definition, I suppose
+        if args and args[0] == self.lfg:  # repeated definition, I suppose
             # must not call self.__wrapped__.depends_on - that's a recursion for some reason?
             ppg2.Job.depends_on(self, *args, **kwargs)
         else:
@@ -528,6 +497,7 @@ def wrap_old_style_lfg_cached_job(job):
     def use_cores(self, cores):
         self.lfg.use_cores(cores)
         return self
+
     res.use_cores = types.MethodType(use_cores, res)
 
     return res
