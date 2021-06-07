@@ -16,6 +16,7 @@ import inspect
 import sys
 import os
 from dataclasses import dataclass, field
+import textwrap
 
 _load_cwd = os.path.abspath(os.getcwd())
 
@@ -118,3 +119,89 @@ class Trace:
             break  # pragma: no cover
 
         self.stacks = stacks[::-1]
+
+
+    def __str__(self):
+        return self._format_rich_traceback_fallback(False)
+
+    def _format_rich_traceback_fallback(self, include_locals=False):
+        """Pretty print a traceback.
+
+        We don't use rich's own facility, since it is
+        not time-bounded /  does not cut the output
+        """
+        if include_locals:
+
+            def render_locals(frame):
+                out.append("[bold]Locals[/bold]:")
+                scope = frame.locals
+                items = sorted(scope.items())
+                len_longest_key = max((len(x[0]) for x in items))
+                for key, value in items:
+                    v = str(value)
+                    if len(v) > 1000:
+                        v = v[:1000] + "…"
+                    v = textwrap.indent(v, "\t   " + " " * len_longest_key).lstrip()
+                    out.append(f"\t{key.rjust(len_longest_key, ' ')} = {v}")
+
+        else:
+
+            def render_locals(frame):
+                pass
+
+        first_stack = True
+        out = []
+        if self is None:
+            out = ["# no traceback was captured"]
+        else:
+            for stack in self.stacks:
+                if not first_stack:
+                    out.append("")
+                    if stack.is_cause:
+                        out.append("The above exception cause to the following one")
+                first_stack = False
+                exc_value = str(stack.exc_value)
+                if len(exc_value) > 1000:
+                    exc_value = exc_value[:1000] + "…"
+                out.append(
+                    f"[bold]Exception[/bold]: [red][bold]{stack.exc_type}[/bold] {exc_value}[/red]"
+                )
+                out.append("[bold]Traceback[/bold] (most recent call last):")
+
+                for frame in stack.frames:
+                    out.append(f'{frame.filename}":{frame.lineno}, in {frame.name}')
+                    # if frame.filename.startswith("<"): # pragma: no cover # - interactive, I suppose
+                    # render_locals(frame)
+                    # continue
+                    extra_lines = 3
+                    if frame.source:
+                        code = frame.source
+                        line_range = (
+                            frame.lineno - extra_lines,
+                            frame.lineno + extra_lines,
+                        )
+                        # leading empty lines get filtered from the output
+                        # but to actually show the correct section & highlight
+                        # we need to adjust the line range accordingly.
+                        code = code.split("\n")
+                        for ii, line in zip(
+                            range(*line_range), code[line_range[0] : line_range[1]]
+                        ):
+                            if ii == frame.lineno - 1:
+                                c = "> "
+                            else:
+                                c = "  "
+                            out.append(f"\t{c}{ii} {line}")
+                        if frame.locals:
+                            render_locals(frame)
+                        continue
+                    else:
+                        out.append("# no source available")
+                        if frame.locals:
+                            render_locals(frame)
+                out.append(
+                    f"[bold]Exception[/bold] (repeated from above): [red][bold]{stack.exc_type}[/bold] {exc_value}[/red]"
+                )
+        return "\n".join(out)
+
+

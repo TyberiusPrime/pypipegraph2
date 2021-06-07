@@ -50,7 +50,7 @@ def _dedup_job(cls, job_id):
         return object.__new__(cls)
 
 
-def _mark_function_wrapped(outer, inner, desc = 'callback'):
+def _mark_function_wrapped(outer, inner, desc="callback"):
     """mark a function as 'wrapped' - ie. the FunctionInvariant
     is being created on the callback, but what the graph calls is outer
     (which is supposed to call inner!)
@@ -236,16 +236,30 @@ class Job:
         return None
 
     @property
-    def exception(self): 
+    def exception(self):
         """Interrogate global pipegraph for this job's exception.
         Mostly for the ppg1 tests...
         """
         from . import global_pipegraph
+
         e = global_pipegraph.last_run_result[self.job_id].error
         if isinstance(e, exceptions.JobError):
             return e.args[0]
-        else:
+        else: # pragma: no cover
             return e
+
+    @property
+    def stack_trace(self):
+        """Interrogate global pipegraph for this job's exception stacktrace.
+        Mostly for the ppg1 tests...
+        """
+        from . import global_pipegraph
+
+        e = global_pipegraph.last_run_result[self.job_id].error
+        if isinstance(e, exceptions.JobError):
+            return e.args[1]
+        else: # pragma: no cover - defensive
+            raise ValueError("No stacktrace available")
 
 
 class _DownstreamNeedsMeChecker(Job):
@@ -385,9 +399,8 @@ class MultiFileGeneratingJob(Job):
                 suffix=f"__{self.job_number}.exception",
             )
 
-
             def aborted(sig, stack):
-                raise KeyboardInterrupt()
+                raise KeyboardInterrupt() # pragma: no cover  todo: interactive testing
 
             try:
                 error_exit_code = 1
@@ -471,7 +484,7 @@ class MultiFileGeneratingJob(Job):
                                 sleep_time = 1
                             time.sleep(sleep_time)
                             wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
-                    except KeyboardInterrupt:
+                    except KeyboardInterrupt: # pragma: no cover  todo: interactive testing
                         logger.info(
                             f"Keyboard interrupt in {self.job_id} - sigbreak spawned process"
                         )
@@ -604,7 +617,7 @@ class MultiFileGeneratingJob(Job):
             # break the graph execution
             if str(fn) not in runner.job_states[self.job_id].historical_output:
                 return True
-        False
+        return False
 
     def _call_result(self):
         if self._lookup:
@@ -615,7 +628,7 @@ class MultiFileGeneratingJob(Job):
     def _map_filename(self, f):
         return f
 
-    def kill_if_running(self):
+    def kill_if_running(self): # pragma: no cover - todo: interactive testing
         if self.pid is not None:
             os.kill(self.pid, signal.SIGTERM)
 
@@ -1093,7 +1106,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
     @staticmethod
     def get_cython_source(cython_func):
-        """Attemp to get the cython source for a function.
+        """Attempt to get the cython source for a function.
         Requires cython code to be compiled with -p or #embed_pos_in_docstring=True in the source file
 
         Unfortunatly, finding the right module (to get an absolute file path) is not straight forward,
@@ -1398,7 +1411,7 @@ def CachedDataLoadingJob(
     resources: Resources = Resources.SingleCore,
 ):
     cache_filename = Path(cache_filename)
-    # early func definition & checking so we don't create a calc job if the load job will fail 
+    # early func definition & checking so we don't create a calc job if the load job will fail
 
     def do_cache(output_filename):  # pragma: no cover - spawned job
         with open(output_filename, "wb") as op:
@@ -1414,8 +1427,8 @@ def CachedDataLoadingJob(
                 f"Unpickling error in file {cache_filename}", e
             )
 
-    _mark_function_wrapped(load, load_function ,'load')
-    _mark_function_wrapped(do_cache, calc_function ,'calc')
+    _mark_function_wrapped(load, load_function, "load")
+    _mark_function_wrapped(do_cache, calc_function, "calc")
 
     cache_job = FileGeneratingJob(
         cache_filename,
@@ -1423,7 +1436,6 @@ def CachedDataLoadingJob(
         depend_on_function=depend_on_function,
         resources=resources,
     )
-
 
     load_job = DataLoadingJob(
         "load" + str(cache_filename),
@@ -1510,8 +1522,8 @@ def CachedAttributeLoadingJob(
                 f"Unpickling error in file {cache_filename}", e
             )
 
-    _mark_function_wrapped(do_cache, data_function, 'data')
-    _mark_function_wrapped(load, data_function, 'data')
+    _mark_function_wrapped(do_cache, data_function, "data")
+    _mark_function_wrapped(load, data_function, "data")
 
     cache_job = FileGeneratingJob(
         cache_filename,
@@ -1669,7 +1681,7 @@ def PlotJob(  # noqa:C901
         plot = plot_function(plot_job.data_)
         _save_plot(plot, output_filename, render_args)
 
-    _mark_function_wrapped(do_plot, plot_function, 'plot')
+    _mark_function_wrapped(do_plot, plot_function, "plot")
 
     plot_job = FileGeneratingJob(
         output_filename, do_plot, depend_on_function=depend_on_function
@@ -1708,7 +1720,7 @@ def PlotJob(  # noqa:C901
                     )
             return df
 
-        _mark_function_wrapped(do_cache, calc_function, 'calc')
+        _mark_function_wrapped(do_cache, calc_function, "calc")
 
         cache_filename.parent.mkdir(exist_ok=True, parents=True)
         cache_job = CachedAttributeLoadingJob(
@@ -1764,7 +1776,9 @@ def PlotJob(  # noqa:C901
                 "or makes this a warning instead"
             )
 
-    def add_another_plot(output_filename, plot_function, render_args=None, depend_on_function=True):
+    def add_another_plot(
+        output_filename, plot_function, render_args=None, depend_on_function=True
+    ):
         if render_args is None:
             render_args = {}
 
@@ -1774,7 +1788,9 @@ def PlotJob(  # noqa:C901
             plot = plot_function(plot_job.data_)
             _save_plot(plot, output_filename, render_args)
 
-        j = FileGeneratingJob(output_filename, do_plot_another_plot, depend_on_function=depend_on_function)
+        j = FileGeneratingJob(
+            output_filename, do_plot_another_plot, depend_on_function=depend_on_function
+        )
         if cache_calc:
             j.depends_on(cache_job.load)
         return j
@@ -1853,7 +1869,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         self.files.append(self._output_name_history_name)
         Job.__init__(self, [str(x) for x in self.files], resources)
         self.files.remove(self._output_name_history_name)
-        self._single_file = False
         self.empty_ok = empty_ok
         self.always_capture_output = always_capture_output
         self.stdout = "not captured"
@@ -1863,9 +1878,26 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         self.remove_unused = remove_unused
         # todo refactor
 
+    def depends_on(self, *args, **kwargs):
+        if hasattr(self, "_target_folder"):
+            delattr(self, "_target_folder")
+        super().depends_on(*args, **kwargs)
+
+    @property
+    def target_folder(self):
+        """read the target folder as of the last ppg run,
+        so you can find your actual files
+        """
+        if hasattr(self, "_target_folder"):
+            return self._target_folder
+        else:
+            raise AttributeError(
+                "Target folder is only available after a run (and disappears on .depends_on)"
+            )
+
     def run(self, runner, _historical_output):
         output_name = self._derive_output_name(runner)
-        self.target_folder = self.output_dir_prefix / output_name
+        self._target_folder = self.output_dir_prefix / output_name
 
         if all((self._map_filename(fn).exists() for fn in self.org_files)):
             logger.job_trace(f"{self.job_id} -  all files existed - just hashing")
@@ -1878,16 +1910,16 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
             logger.job_trace(f"{self.job_id} - output files missing, building them")
             # temp replace for the actual run
-            self.target_folder = (
+            self._target_folder = (
                 self.output_dir_prefix
                 / f"build_{socket.gethostname()}_{os.getpid()}_{time.time()}"
             )
-            self.target_folder.mkdir(exist_ok=True, parents=True)
+            self._target_folder.mkdir(exist_ok=True, parents=True)
             try:
                 res = MultiFileGeneratingJob.run(self, runner, _historical_output)
             except:  # noqa:E722
                 if self.remove_build_dir_on_error:
-                    shutil.rmtree(self.target_folder)
+                    shutil.rmtree(self._target_folder)
                 raise
 
             real_target = self.output_dir_prefix / output_name
@@ -1895,9 +1927,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 real_target.exists()
             ):  # either a previous partial, or parallel build. -> clobber
 
-                shutil.rmtree(real_target)
-            self.target_folder.rename(real_target)
-            self.target_folder = real_target
+                shutil.rmtree(real_target)  # pragma: no cover - too much work to figure out how to trigger it
+            self._target_folder.rename(real_target)
+            self._target_folder = real_target
             self.files = [self._map_filename(fn) for fn in self.org_files]
         self._log_and_cleanup(runner, output_name)
         res[self._output_name_history_name] = {
@@ -1909,29 +1941,31 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
     def _map_filename(self, filename):
         parts = filename.parts
-        if not hasattr(self, "target_folder"):
+        if not hasattr(self, "_target_folder"):
             tf = "__never_placed_here__"
         else:
-            tf = self.target_folder.name
+            tf = self._target_folder.name
         parts = [tf if x == "__never_placed_here__" else x for x in parts]
         return Path(*parts)
 
     def get_input(self):  # todo: fold in?
-        if self._single_file:
-            return self._map_filename(self.files[0])
+        # if self._single_file:
+        # return self._map_filename(self.files[0])
+        # else:
+        if self._lookup:
+            return {k: self._map_filename(f) for (k, f) in self._lookup.items()}
         else:
-            if self._lookup:
-                return {k: self._map_filename(f) for (k, f) in self._lookup.items()}
-            else:
-                return [self._map_filename(f) for f in self.files]
+            return [self._map_filename(f) for f in self.files]
 
     def output_needed(self, runner):
         output_name = self._derive_output_name(runner)
-        self.target_folder = self.output_dir_prefix / output_name
-        if not self.target_folder.exists():
+        self._target_folder = self.output_dir_prefix / output_name
+        if not self._target_folder.exists():
             return True
         for fn in self.org_files:
-            if not self._map_filename(fn).exists():
+            if not self._map_filename(fn).exists(): # pragma: no cover
+                # this case is unlikely ( same hash, but additional outputfiles?)
+                # but it could happen...
                 return True
             if (
                 str(fn) not in runner.job_states[self.job_id].historical_output

@@ -11,17 +11,29 @@ class TestBuildInCompabilty:
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestCythonCompability:
+    def __init__(self):
+        self.counter = 0
+
     def source_via_func_invariant(self, name, func):
-        return ppg.FunctionInvariant(name, func).run(None, None)["FIa"]["source"]
+        self.counter += 1
+        return ppg.FunctionInvariant(name, func).run(None, None)[
+            "FIa" + str(self.counter)
+        ]["source"]
 
     def test_just_a_function(self):
         import cython
 
         src = """
 def a():
+    '''single line docstring'''
     return 1
 
 def b():
+    '''Multi
+    line 
+    docstring
+    '''
+
     return 5
 """
         func = cython.inline(src)["a"]
@@ -29,6 +41,11 @@ def b():
         actual = self.source_via_func_invariant("a", func)
         should = """    def a():
         return 1"""
+        assert actual == should
+
+        actual = self.source_via_func_invariant("b", func2)
+        should = """    def b():
+        return 5"""
         assert actual == should
 
         ppg.FunctionInvariant("a", func)  # not a redefinition

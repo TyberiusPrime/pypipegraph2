@@ -311,6 +311,8 @@ class TestSharedJob:
             "out", ["a"], doit, depend_on_function=False, remove_unused=False,
             remove_build_dir_on_error=False
         )
+        with pytest.raises(AttributeError):
+            job.target_folder
         try:
             ppg.run()
         except Exception as e:
@@ -318,6 +320,48 @@ class TestSharedJob:
             print('stderr', job.stderr)
             raise
         assert read("out/done_no_input/a") == "a0"
+        assert read("doit") == "1"
+        ppg.run()
+        assert read("out/done_no_input/a") == "a0"
+        assert read("doit") == "1"
+        before = job.target_folder
+        job.depends_on(ppg.ParameterInvariant("B", 'shu'))
+        with pytest.raises(AttributeError):
+            job.target_folder
+        ppg.run()
+        after = job.target_folder
+        assert before != after
+
+    def test_remove_and_keep_build_dir(self):
+       def dofail(ofs):
+            raise ValueError()
+       jobKeep = ppg.SharedMultiFileGeneratingJob(
+            "out", ["a"], dofail, depend_on_function=False, remove_unused=False,
+            remove_build_dir_on_error=False
+       )
+       jobTrash = ppg.SharedMultiFileGeneratingJob(
+            "outB", ["a"], dofail, depend_on_function=False, remove_unused=False,
+            remove_build_dir_on_error=True
+       )
+       with pytest.raises(ppg.RunFailed):
+           ppg.run()
+       assert jobKeep.target_folder.exists()
+       assert not jobTrash.target_folder.exists()
+       assert '/build_' in str(jobKeep.target_folder)
+
+
+    def test_direct_call(self):
+        def doit(output_file):
+            count = counter("doit")
+            write(output_file[0], "a" + str(count))
+
+        job = ppg.SharedMultiFileGeneratingJob(
+            "out", ["a"], doit, depend_on_function=False, remove_unused=False,
+            remove_build_dir_on_error=False
+        )
+        job()
+        assert (job.target_folder / 'a').read_text() == 'a0'
+
 
 
 

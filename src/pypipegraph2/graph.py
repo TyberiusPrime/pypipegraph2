@@ -209,7 +209,7 @@ class PyPipeGraph:
             if print_failures:
                 self._print_failures()
             self._restore_signals()
-            if self._restart_afterwards:
+            if self._restart_afterwards: # pragma: no cover - todo: test with interactive
                 logger.info(
                     "Restart again issued - restarting via subprocess.check_call"
                 )
@@ -349,10 +349,10 @@ class PyPipeGraph:
                         pass
             except exceptions.RunFailed:
                 raise
-            except Exception as e:
-                raise exceptions.FatalGraphException( # that's pretty terminal
-                    "Could not load history data", e, fn.absolute()
-                )
+            # except Exception as e: coverage indicates this never runs.
+                # raise exceptions.FatalGraphException( # that's pretty terminal
+                    # "Could not load history data", e, fn.absolute()
+                # )
 
         return history
 
@@ -430,7 +430,7 @@ class PyPipeGraph:
         def sigint(*args, **kwargs):
             if self.run_mode is (RunMode.CONSOLE):
                 logger.info("CTRL-C has been disabled")
-            else:
+            else: # pragma: no cover - todo: interactive
                 logger.info("CTRL-C received. Killing all running jobs.")
                 if hasattr(self, "runner"):
                     print("calling abort")
@@ -509,4 +509,4 @@ class PyPipeGraph:
         """Restart the whole python program afterwards?
         Used by the interactive console
         """
-        self._restart_afterwards = True
+        self._restart_afterwards = True # pragma: no cover - todo: interactive

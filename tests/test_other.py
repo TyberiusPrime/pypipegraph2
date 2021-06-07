@@ -347,3 +347,26 @@ def test_job_generating_job_changing_cwd(ppg2_per_test):
     assert isinstance(
         ppg.global_pipegraph.last_run_result["b"].error.args[0], ppg.JobContractError
     )
+
+
+def test_capturing_locals_when_they_have_throwing_str(ppg2_per_test):
+    class NoStr:
+        def __str__(self):
+            raise ValueError("Cant string this")
+    def inner(of):
+        a = NoStr()
+        raise ValueError("expected") # trace check
+    j = ppg.FileGeneratingJob('a', inner)
+    with pytest.raises(ppg.RunFailed):
+        ppg.run()
+    assert 'expected' in str(j.exception)
+    assert 'trace check' in str(j.stack_trace)  # we captured teh relevant line
+
+
+def test_cache_dir(ppg2_per_test):
+    ppg.new(cache_dir = 'shu')
+    assert Path('shu').exists()
+    ppg.new(cache_dir = None)
+    a = ppg.FileGeneratingJob('a', lambda of: of.write_text("A"))
+    ppg.run()
+    assert Path('a').read_text() == 'A'
