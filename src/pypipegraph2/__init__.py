@@ -77,7 +77,7 @@ def new(
     Log retention is how many old logs (+ the current one) we 
     keep.
     """
-    global global_pipegraph
+    global global_pipegraph, do_jobtrace_log
     locs = locals()
     arguments = {
         name: _last_or_default(name, locs[name], default_arg)
@@ -94,6 +94,7 @@ def new(
             ("cache_dir", Path("cache")),
         ]
     }
+    do_job_trace_log = arguments['log_level'] <= 6
     global_pipegraph = PyPipeGraph(**arguments)
     return global_pipegraph
 
