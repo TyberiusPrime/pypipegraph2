@@ -29,9 +29,9 @@ from .shared import write, assertRaises
 
 @pytest.mark.usefixtures("ppg1_compability_test")
 class TestCycles:
-    def test_simple_cycle(self):
+    def test_simple_cycle(self, ppg1_compability_test):
         def inner():
-            ppg.new_pipegraph(quiet=True, dump_graph=False)
+            ppg1_compability_test.new_pipegraph()
             jobA = ppg.FileGeneratingJob("A", lambda: write("A", "A"))
             jobB = ppg.FileGeneratingJob("B", lambda: write("B", "A"))
             jobA.depends_on(jobB)
@@ -40,8 +40,8 @@ class TestCycles:
 
         assertRaises(ppg.CycleError, inner)
 
-    def test_indirect_cicle(self):
-        ppg.new_pipegraph(quiet=True, dump_graph=False)
+    def test_indirect_cicle(self, ppg1_compability_test):
+        ppg1_compability_test.new_pipegraph()
         jobA = ppg.FileGeneratingJob("A", lambda: write("A", "A"))
         jobB = ppg.FileGeneratingJob("B", lambda: write("B", "A"))
         jobC = ppg.FileGeneratingJob("C", lambda: write("C", "A"))
