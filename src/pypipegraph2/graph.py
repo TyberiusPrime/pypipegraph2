@@ -115,7 +115,9 @@ class PyPipeGraph:
         """Run the jobgraph - possibly focusing on a subset of jobs (ie. ignoring
         anything that's not necessary to calculate them - activated by calling a Job
         """
-        self.time_str = datetime.datetime.now().strftime(time_format)
+        ts = str(time.time()) # include subsecond in log names - usefull for the testing, I suppose.
+        ts = ts[ts.rfind('.'):]
+        self.time_str = datetime.datetime.now().strftime(time_format) + ts
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
             print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
             raise exceptions.NotADag()

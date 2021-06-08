@@ -72,6 +72,10 @@ def new(
     or default to use the true default
 
     (or load defaults)
+
+
+    Log retention is how many old logs (+ the current one) we 
+    keep.
     """
     global global_pipegraph
     locs = locals()

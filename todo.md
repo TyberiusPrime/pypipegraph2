@@ -13,16 +13,11 @@ Open stuff
 	 
 	- write test case with our regular object structure
 	 
-	-ppg1 compatibility layer
-	
 	- tests for the interactive (console) parts.
 
 	- a solution for the quadratic parts in modify_dag
 	
-	- logs/errors are not stored in per-run folders -are not being cleared.
-	
 	- test case for cache_folder
-
 	 
 	 - would it make sense to put the cleanups into the outputs, so the outputs 
 	   can say 'and remove this file' - that way we could do a TempFilePlusGeneratingJob again?
@@ -33,8 +28,8 @@ Open stuff
 	- # bump version above ppg1
 
 	
-	- should be not create a ppg at startup - like ppg1 did, and for interactive use?
-
 	
 	- test what happens if you have two fileinvariants as input and you swap them. No recalc, right?
 	  what if they were foreground/background? this could be a problem
+	- 
+	- testing fixtures? (also in compability code?)

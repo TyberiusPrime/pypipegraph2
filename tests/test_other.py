@@ -353,20 +353,49 @@ def test_capturing_locals_when_they_have_throwing_str(ppg2_per_test):
     class NoStr:
         def __str__(self):
             raise ValueError("Cant string this")
+
     def inner(of):
         a = NoStr()
-        raise ValueError("expected") # trace check
-    j = ppg.FileGeneratingJob('a', inner)
+        raise ValueError("expected")  # trace check
+
+    j = ppg.FileGeneratingJob("a", inner)
     with pytest.raises(ppg.RunFailed):
         ppg.run()
-    assert 'expected' in str(j.exception)
-    assert 'trace check' in str(j.stack_trace)  # we captured teh relevant line
+    assert "expected" in str(j.exception)
+    assert "trace check" in str(j.stack_trace)  # we captured teh relevant line
 
 
 def test_cache_dir(ppg2_per_test):
-    ppg.new(cache_dir = 'shu')
-    assert Path('shu').exists()
-    ppg.new(cache_dir = None)
-    a = ppg.FileGeneratingJob('a', lambda of: of.write_text("A"))
+    ppg.new(cache_dir="shu")
+    assert Path("shu").exists()
+    ppg.new(cache_dir=None)
+    a = ppg.FileGeneratingJob("a", lambda of: of.write_text("A"))
     ppg.run()
-    assert Path('a').read_text() == 'A'
+    assert Path("a").read_text() == "A"
+
+
+class TestCleanup:
+    def test_error_cleanup(self, ppg2_per_test):
+        ppg2_per_test.new(log_retention=2)
+
+        def fail(of):
+            raise ValueError()
+
+        job = ppg.FileGeneratingJob("A", fail)
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 1
+        assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 1
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 2
+        assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 2
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        # we keep  log_retention old ones + the current one
+        assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 3
+        assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 3
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 3
+        assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 3
