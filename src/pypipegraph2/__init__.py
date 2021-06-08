@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__version__ = "0.1"
+__version__ = "2.0"
 
 from pathlib import Path
 import logging
@@ -119,9 +119,7 @@ def inside_ppg():
 
 
 def job_trace(msg):
-    """log at the JobTrace level"""
     logger.opt(depth=1).log("JobTrace", msg)
-
 
 logger.job_trace = job_trace
 
