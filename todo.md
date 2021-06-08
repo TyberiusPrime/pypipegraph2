@@ -81,6 +81,31 @@ Open stuff
 	total test suite in 75s... not too bad.
 	I have at least one test that's running interactively though?
 	
+	but utterly disabling the logging is not an option :)
+	
+	
+	ok, disabling job_trace_log if not needed, redirecting all logging trough my own custom functions,
+	we're at 112 s for the whole testsuite, 45s for the compatibility tests.
+	Not sure why the later does anything, but it does seem to help?
+	early returning from that we're back at 33.51s.
+	
+	Still 10 seconds more than without any logging.
+	just warning & error -> 41.7s
+	just info & debug -> 29.79 (huh)
+	 error & info & debug-> 44s
+	 warning & info & debug ->  44s
+	 
+	 those 10s are rich's doing btw.
+	 full logging, but no rich: 36s.
+	 seems rich is mostly those 10s one time overhead...
+	 actually, that's the 'rich-to file', not the 'rich to terminal'...
+	 
+	 no logging, no rich: 24.43
+	 no rich, but logging:  27.77s
+	 
+	 total without rich:  77s
+	 
+	
 
 	
 	 

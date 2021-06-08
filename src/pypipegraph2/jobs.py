@@ -12,7 +12,6 @@ import sys
 import inspect
 import types
 from typing import Union, List, Dict, Optional, Tuple, Callable
-from loguru import logger  # noqa:F401
 from pathlib import Path
 from io import StringIO
 from collections import namedtuple
@@ -21,6 +20,7 @@ from .enums import JobKind, Resources
 from .util import escape_logging
 import hashlib
 import shutil
+from .util import log_info, log_error, log_warning, log_debug, log_job_trace
 
 module_type = type(sys)
 
@@ -104,7 +104,7 @@ class Job:
         """
         from . import global_pipegraph
 
-        logger.job_trace(f"adding {type(self)} {self.job_id}")
+        log_job_trace(f"adding {type(self)} {self.job_id}")
 
         if global_pipegraph is None:
             raise ValueError("Must instantiate a pipegraph before creating any Jobs")
@@ -117,7 +117,7 @@ class Job:
         ):  # the actual function is just an adaptor, ignore it for the wrapped function
             # e.g. FileGeneratingJob ppg1 compatibility with 'no-output-filename parameter'.
             func = func.wrapped_function
-            logger.debug(f"FAlling back to wrapped function {self.job_id}")
+            log_debug(f"FAlling back to wrapped function {self.job_id}")
         func_invariant = FunctionInvariant(func, self.job_id)
         self.func_invariant = func_invariant  # we only store it so ppg1.compatibility ignore_code_changes can prune it
         self.depends_on(func_invariant)
@@ -381,7 +381,7 @@ class MultiFileGeneratingJob(Job):
             Resources.Exclusive,
         ):
             # que = multiprocessing.Queue() # replace by pipe
-            logger.job_trace(f"Forking for {self.job_id}")
+            log_job_trace(f"Forking for {self.job_id}")
             # these only get closed by the parent process
             stdout = tempfile.NamedTemporaryFile(
                 mode="w+",
@@ -414,7 +414,7 @@ class MultiFileGeneratingJob(Job):
                             x.delete = False  # that's the parent's job!
                             x._closer.delete = False  # that's the parent's job!
 
-                        # logger.info(f"tempfilename: {stderr.name}")
+                        # log_info(f"tempfilename: {stderr.name}")
                         stdout_ = sys.stdout
                         stderr_ = sys.stderr
                         sys.stdout = stdout
@@ -485,17 +485,17 @@ class MultiFileGeneratingJob(Job):
                             time.sleep(sleep_time)
                             wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                     except KeyboardInterrupt: # pragma: no cover  todo: interactive testing
-                        logger.info(
+                        log_job_trace(
                             f"Keyboard interrupt in {self.job_id} - sigbreak spawned process"
                         )
                         os.kill(self.pid, signal.SIGUSR1)
                         time.sleep(1)
-                        logger.info(
+                        log_job_trace(
                             f"Keyboard interrupt in {self.job_id} - checking spawned process"
                         )
                         wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                         if wp1 == 0 and waitstatus == 0:
-                            logger.info(
+                            log_job_trace(
                                 f"Keyboard interrupt in {self.job_id} - sigkill spawned process"
                             )
                             os.kill(self.pid, signal.SIGKILL)
@@ -509,7 +509,7 @@ class MultiFileGeneratingJob(Job):
                             )
                             exception_out.seek(0, 0)
                             raw = exception_out.read()
-                            # logger.info(f"Raw exception result {raw}")
+                            # log_info(f"Raw exception result {raw}")
                             exception_out.seek(0, 0)
 
                             tb = None
@@ -518,10 +518,10 @@ class MultiFileGeneratingJob(Job):
                                 tb = pickle.load(exception_out)
                                 exception = pickle.load(exception_out)
                             except Exception as e:
-                                logger.error(
+                                log_error(
                                     f"Job died (=exitcode == {exitcode}): {self.job_id}"
                                 )
-                                logger.error(f"stdout: {self.stdout} {self.stderr}")
+                                log_error(f"stdout: {self.stdout} {self.stderr}")
                                 exception = exceptions.JobDied(
                                     f"Job {self.job_id} died but did not return an exception object. Decoding exception {e}",
                                     None,
@@ -541,7 +541,7 @@ class MultiFileGeneratingJob(Job):
                                 stdout, stderr
                             )
                             # don't bother to retrieve an exception, there won't be anay
-                            logger.error(f"Job killed by signal: {self.job_id}")
+                            log_error(f"Job killed by signal: {self.job_id}")
                             raise exceptions.JobDied(
                                 f"Job {self.job_id} was killed", None, exitcode
                             )
@@ -868,7 +868,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         else:
             line_no = self.function.__code__.co_firstlineno
         line_unchanged = line_no == historical_output.get("source_line_no", False)
-        logger.job_trace(
+        log_job_trace(
             f"{self.job_id}, {file_unchanged}, {line_unchanged}, {escape_logging(new_file_hash)}, {escape_logging(historical_output)}"
         )
 
@@ -906,13 +906,13 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     def compare_hashes(cls, old_hash, new_hash, python_version=python_version):
         if python_version in new_hash and python_version in old_hash:
             res = new_hash[python_version] == old_hash[python_version]
-            # logger.job_trace(f"Comparing based on bytecode: result {res}")
+            # log_job_trace(f"Comparing based on bytecode: result {res}")
             return res
         else:  # pragma: no cover
             # missing one python version, did the source change?
             # should we compare Closures here as well? todo
             res = new_hash["source"] == old_hash["source"]
-            # logger.job_trace(f"Comparing based on source: result {res}")
+            # log_job_trace(f"Comparing based on source: result {res}")
             return res
 
     def get_source_file(self):
@@ -1297,11 +1297,11 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             if mtime_the_same and size_the_same:
                 return historical_output
             else:
-                # logger.info("File changed -> recalc")
-                # logger.info(f"{historical_output}, ")
-                # logger.info(f"mtime: {int(stat.st_mtime)}, size: {stat.st_size}")
-                # logger.info(f"mtime the same: {mtime_the_same}")
-                # logger.info(f"size the same: {size_the_same}")
+                # log_info("File changed -> recalc")
+                # log_info(f"{historical_output}, ")
+                # log_info(f"mtime: {int(stat.st_mtime)}, size: {stat.st_size}")
+                # log_info(f"mtime the same: {mtime_the_same}")
+                # log_info(f"size the same: {size_the_same}")
                 self.did_hash_last_run = (mtime_the_same, size_the_same)
                 return {self.outputs[0]: self.calculate(self.file, stat)}
 
@@ -1599,7 +1599,7 @@ class JobGeneratingJob(Job):
         return False
 
     def run(self, runner, historical_output):
-        logger.job_trace(f"running jobgenerating {self.job_id}")
+        log_job_trace(f"running jobgenerating {self.job_id}")
         self.last_run_id = runner.run_id
         self.callback()
         # todo: is this the right approach
@@ -1900,7 +1900,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         self._target_folder = self.output_dir_prefix / output_name
 
         if all((self._map_filename(fn).exists() for fn in self.org_files)):
-            logger.job_trace(f"{self.job_id} -  all files existed - just hashing")
+            log_job_trace(f"{self.job_id} -  all files existed - just hashing")
             res = {
                 str(of): hashers.hash_file(self._map_filename(of))
                 for of in self.org_files
@@ -1908,7 +1908,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         else:
             import socket
 
-            logger.job_trace(f"{self.job_id} - output files missing, building them")
+            log_job_trace(f"{self.job_id} - output files missing, building them")
             # temp replace for the actual run
             self._target_folder = (
                 self.output_dir_prefix
@@ -1999,9 +1999,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             hasher.update(key.encode("utf-8"))
             hasher.update(str(ParameterInvariant.freeze(value)).encode("utf-8"))
         output_name = "done_" + hasher.hexdigest()
-        logger.info(
-            f"SharedMultiFileGeneratingJob{self.job_id} output_name {output_name}"
-        )
         return output_name
 
     def _log_and_cleanup(self, runner, output_name):
@@ -2012,21 +2009,21 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         if log_filename.exists():
             with open(log_filename) as op:
                 known = json.load(op)
-        logger.info(f"setting {history_filename} {output_name}")
+        log_job_trace(f"setting {history_filename} {output_name}")
         known[str(history_filename)] = output_name
         with open(log_filename, "w") as op:
             json.dump(known, op)
 
         if self.remove_unused:
             keep = set(known.values())
-            logger.info("Removing - keep {keep}")
+            log_job_trace("Removing - keep {keep}")
             remove = [
                 x
                 for x in self.output_dir_prefix.glob("*")
                 if x.name.startswith("done_") and x.is_dir() and not x.name in keep
             ]
             for dir in remove:
-                logger.info(
+                log_job_trace(
                     f"Identified {dir} as no longer in use by any PPG. Removing"
                 )
                 shutil.rmtree(dir)

@@ -466,19 +466,19 @@ class TestFileGeneratingJob:
 
     def test_multi_file_with_exing_files_rerun_to_capture_hashes(self):
         def callback(filenames):
-            counter('counter')
+            counter("counter")
             for f in filenames:
                 f.write_text("hello")
-        a = ppg.MultiFileGeneratingJob(['a','b'], callback)
-        Path('a').write_text('shu')
-        Path('b').write_text('shu')
-        ppg.run()
-        assert read('a') == 'hello'
-        assert read('b') == 'hello'
-        assert read('counter') == '1'
-        ppg.run()
-        assert read('counter') == '1'
 
+        a = ppg.MultiFileGeneratingJob(["a", "b"], callback)
+        Path("a").write_text("shu")
+        Path("b").write_text("shu")
+        ppg.run()
+        assert read("a") == "hello"
+        assert read("b") == "hello"
+        assert read("counter") == "1"
+        ppg.run()
+        assert read("counter") == "1"
 
     def test_invaliding_removes_file(self):
         of = "out/a"

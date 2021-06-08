@@ -3,7 +3,7 @@ import io
 import time
 import os
 import signal
-from loguru import logger
+from .util import log_info, log_error, log_warning, log_debug, log_job_trace
 import select
 import termios
 import tty
@@ -49,9 +49,9 @@ class ConsoleInteractive:
     def stop(self):
         self.stopped = True
         self._end_terminal_raw()
-        logger.job_trace("Terminating interactive thread")
+        log_job_trace("Terminating interactive thread")
         self.thread.join()
-        logger.job_trace("Terminated interactive thread")
+        log_job_trace("Terminated interactive thread")
         self.status.stop()
         del self.runner
 
@@ -65,7 +65,7 @@ class ConsoleInteractive:
         self.report_status(*self.last_report_status_args)
 
     def loop(self):
-        logger.info("Entering interactive loop")
+        log_info("Entering interactive loop")
         while True:
             try:
                 if self.stopped:
@@ -79,7 +79,7 @@ class ConsoleInteractive:
                         raise 
                 if input:
                     value = sys.stdin.read(1)
-                    # logger.info(f"received {repr(value)}")
+                    # log_info(f"received {repr(value)}")
                     if value == "\x03":  # ctrl-c:
                         self.cmd = ""
                     elif value == "\x1a":  # ctrl-z
@@ -104,13 +104,13 @@ class ConsoleInteractive:
                             else:
                                 self._cmd_default()
                         except Exception as e:
-                            logger.error(e)
+                            log_error(e)
                             self.cmd = ""
                             continue
 
             except KeyboardInterrupt:
                 break
-        logger.job_trace("Leaving interactive loop")
+        log_job_trace("Leaving interactive loop")
 
     def report_status(self, jobs_done, jobs_failed, jobs_total):
         self.last_report_status_args = jobs_done, jobs_failed, jobs_total
@@ -150,25 +150,25 @@ class ConsoleInteractive:
 
     def _cmd_abort(self, _args):
         """Kill current jobs and exit (safely) asap"""
-        logger.info("Run aborted by command")
+        log_info("Run aborted by command")
         self.runner.abort()
         self.stopped = True
 
     def _cmd_stop(self, _args):
         """Exit after current jobs finished"""
-        logger.info("Run stopped by command")
+        log_info("Run stopped by command")
         print(f"Having to wait for jobs: {self.runner.jobs_in_flight}")
         self.runner.stop()
         self.stopped = True
 
     def _cmd_again(self, _args):
         """Restart the current python program after all jobs have completed"""
-        logger.info("Again command issued")
+        log_info("Again command issued")
         self.runner.job_graph.restart_afterwards()
 
     def _cmd_stop_and_again(self, _args):
         "Stop after current jobs, then restart the current python program"
-        logger.info("Stop_and_again command issued")
+        log_info("Stop_and_again command issued")
         self.runner.stop()
         self.stopped = True
         self.runner.job_graph.restart_afterwards()
@@ -192,5 +192,5 @@ class ConsoleInteractive:
             print("Job is not running in an external process - can't kill")
             return
         print("ok, killing job", job.job_id)
-        logger.info(f"Command kill {job.job_id} ")
+        log_info(f"Command kill {job.job_id} ")
         job.kill_if_running()

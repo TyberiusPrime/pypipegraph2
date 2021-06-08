@@ -36,6 +36,7 @@ from .exceptions import (
     JobError,
 )
 from .enums import Resources, RunMode
+from . import util
 
 reuse_last_or_default = object()
 default = object()
@@ -77,7 +78,7 @@ def new(
     Log retention is how many old logs (+ the current one) we 
     keep.
     """
-    global global_pipegraph, do_jobtrace_log
+    global global_pipegraph
     locs = locals()
     arguments = {
         name: _last_or_default(name, locs[name], default_arg)
@@ -94,7 +95,7 @@ def new(
             ("cache_dir", Path("cache")),
         ]
     }
-    do_job_trace_log = arguments['log_level'] <= 6
+    util.do_job_trace_log = arguments['log_level'] <= 6
     global_pipegraph = PyPipeGraph(**arguments)
     return global_pipegraph
 
@@ -118,14 +119,6 @@ def inside_ppg():
 
     return global_pipegraph is not None
 
-
-do_jobtrace_log = False
-
-def job_trace(msg):
-    if do_jobtrace_log:
-        logger.opt(depth=1).log("JobTrace", msg)
-
-logger.job_trace = job_trace
 
 
 @contextlib.contextmanager

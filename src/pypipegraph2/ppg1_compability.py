@@ -1,6 +1,5 @@
 from pathlib import Path
 import warnings
-from loguru import logger
 import types
 import inspect
 import os
@@ -9,6 +8,7 @@ import logging
 import pypipegraph as ppg1
 import pypipegraph2 as ppg2
 import wrapt
+from .util import log_info, log_error, log_warning, log_debug, log_job_trace
 
 
 old_entries = {}
@@ -237,7 +237,7 @@ def run_pipegraph(*args, **kwargs):
 def _ignore_code_changes(job):
     job.depend_on_function = False
     if hasattr(job, "func_invariant"):
-        logger.info(f"ignoring changes for {job.job_id}")
+        log_job_trace(f"ignoring changes for {job.job_id}")
         util.global_pipegraph.job_dag.remove_node(job.func_invariant.job_id)
         for k in job.func_invariant.outputs:
             util.global_pipegraph.job_inputs[job.job_id].remove(k)
@@ -465,7 +465,6 @@ def PlotJob(
     def ignore_code_changes(self):
         _ignore_code_changes(self)
         if self.cache_job is not None:
-            logger.info("cache job ignore changes")
             _ignore_code_changes(self.cache_job)
         if self.table_job is not None:
             _ignore_code_changes(self.table_job)
