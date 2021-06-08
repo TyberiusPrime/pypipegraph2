@@ -118,8 +118,11 @@ def inside_ppg():
     return global_pipegraph is not None
 
 
+do_jobtrace_log = False
+
 def job_trace(msg):
-    logger.opt(depth=1).log("JobTrace", msg)
+    if do_jobtrace_log:
+        logger.opt(depth=1).log("JobTrace", msg)
 
 logger.job_trace = job_trace
 

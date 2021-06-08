@@ -14,6 +14,7 @@ import shutil
 import os
 import pypipegraph2 as ppg2
 import sys
+import plotnine # so it's available in the plot tests - saves about 10% of runtime
 from loguru import logger
 
 # support code to remove test created files
@@ -69,6 +70,7 @@ def ppg2_per_test(request):
                 # log_level=5,
                 allow_short_filenames=True,
                 run_mode=ppg2.RunMode.NONINTERACTIVE,
+                log_level = 40
             )
             g.new = np
             return g
@@ -276,6 +278,7 @@ def job_trace_log():
 
     logger.remove()
     handler_id = logger.add(sys.stderr, format=fmt, level=6)
+    ppg2.do_jobtrace_log = True
     yield
     logger.remove(handler_id)
 

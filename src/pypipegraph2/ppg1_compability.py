@@ -194,7 +194,7 @@ def new_pipegraph(
     interactive=True,
     cache_folder="cache",
     log_file=None,
-    log_level=logging.INFO,
+    log_level=logging.ERROR,
 ):
     cores = ppg2.ALL_CORES
     run_mode = ppg2.RunMode.CONSOLE

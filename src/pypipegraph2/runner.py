@@ -475,8 +475,11 @@ class Runner:
                 logger.info(msg)
             else:
                 logger.debug(msg)
+                pass
         else:
-                logger.debug(msg)
+            # this appears to be a dramatic slowdown. (factor 2!
+            # logger.debug(f"Done in {job_state.run_time:.2}s {job_id}")
+            pass
         # record our success
         # logger.job_trace(f"\t{escape_logging(str(job_outputs)[:500])}...")
         if set(job_outputs.keys()) != set(job.outputs):
@@ -690,28 +693,24 @@ class Runner:
         self._fail_downstream_by_outputs(job.outputs, job_id)
         # logger.error(f"Failed {job_id}")
         if not self._job_failed_last_time(job_id):
-            if hasattr(job_state.error.args[1],'stacks'):
+            if hasattr(job_state.error.args[1], "stacks"):
                 stacks = job_state.error.args[1]
             else:
                 stacks = None
             if self.job_graph.error_dir is not None:
-                error_file = self.job_graph.error_dir / self.job_graph.time_str / (
-                    str(job.job_number) + "_exception.txt"
+                error_file = (
+                    self.job_graph.error_dir
+                    / self.job_graph.time_str
+                    / (str(job.job_number) + "_exception.txt")
                 )
                 with open(error_file, "w") as ef:
-                    c = Console(file=ef, record=True, width=120)
-                    c.print(f"{job_id}\n")
+                    ef.write(f"{job_id}\n")
                     if stacks is not None:
-                        c.log(
-                            stacks._format_rich_traceback_fallback(
-                                True
-                            )
-                        )
+                        ef.write(stacks._format_rich_traceback_fallback(True))
 
                     else:
-                        c.log(job_state.error)
-                        c.log("no stack available")
-                    # ef.write(self._format_rich_traceback_fallback(job_state.error.args[1]))
+                        ef.write(str(job_state.error))
+                        ef.write("no stack available")
                 logger.error(
                     f"Failed after {job_state.run_time:.2}s: [bold]{job_id}[/bold]. Exception (incl. locals) logged to {error_file}"
                 )
@@ -719,10 +718,8 @@ class Runner:
                 logger.error(f"Failed job: {job_id}")
             if stacks is not None:
                 logger.error(
-                escape_logging(
-                    stacks._format_rich_traceback_fallback(False)
+                    escape_logging(stacks._format_rich_traceback_fallback(False))
                 )
-            )
             else:
                 logger.error(job_state.error)
                 logger.error("no stack available")
@@ -878,7 +875,10 @@ class Runner:
                             captured_tb = ppg_traceback.Trace(
                                 exception_type, exception_value, tb
                             )
-                            job_state.error = exceptions.JobError(e, captured_tb,)
+                            job_state.error = exceptions.JobError(
+                                e,
+                                captured_tb,
+                            )
                         e = job_state.error
                         self._push_event("JobFailed", (job_id, job_id))
                     finally:

@@ -613,6 +613,29 @@ class TestInvariant:
             ppg.run()
         assert read("out/b") == "a"  # job was not run
 
+    def test_file_invariant_swapping(self, ppg2_per_test):
+        Path("a").write_text("a")
+        Path("b").write_text("b")
+
+        def out(of):
+            counter("counter")
+            of.write_text(Path("a").read_text() + Path("b").read_text()),
+
+        job = ppg.FileGeneratingJob("c", out, depend_on_function=False)
+        job.depends_on_file("a")
+        job.depends_on_file("b")
+        ppg.run()
+        assert read("c") == "ab"
+        assert read("counter") == "1"
+        ppg.run()
+        assert read("counter") == "1"
+        ppg2_per_test.new()
+        job = ppg.FileGeneratingJob("c", out, depend_on_function=False)
+        job.depends_on_file("b")
+        job.depends_on_file("a")
+        ppg.run()
+        assert read("counter") == "1"
+
 
 def first_value(d):
     return list(d.values())[0]
