@@ -1136,13 +1136,22 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             # now eat up including the new line after the docstring
             text = text[text.find("\n") + 1 :]
         text = text.split("\n")
+        while (
+            text and text[0].strip() == ""
+        ):  # cut off empty lines between docstring and code
+            text = text[1:]
+        log_error(text)
         first_line_indent = len(head) - len(head.lstrip())
+        log_info(repr(head[:20]))
         body = []
         for line in text:
             indent = len(line) - len(line.lstrip())
-            if indent <= first_line_indent:
+            log_error(f"{indent}, {first_line_indent} {repr(line)}")
+            if indent <= first_line_indent and line.strip():
                 break
             body.append(line)
+        while body and body[-1].strip() == "":  # remove empty lines at end
+            body = body[:-1]
         return head + "\n" + "\n".join(body)
 
     def get_cython_filename_and_line_no(cython_func):

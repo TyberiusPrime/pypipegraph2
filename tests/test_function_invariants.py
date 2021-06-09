@@ -9,15 +9,18 @@ class TestBuildInCompabilty:
         assert a == "<built-in function sorted>"
 
 
+_cytohn_func_counter = 0
+
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestCythonCompability:
-    def __init__(self):
-        self.counter = 0
 
     def source_via_func_invariant(self, name, func):
-        self.counter += 1
-        return ppg.FunctionInvariant(name, func).run(None, None)[
-            "FIa" + str(self.counter)
+        global _cytohn_func_counter
+        _cytohn_func_counter =+ 1
+        r = ppg.FunctionInvariant(name + str(_cytohn_func_counter), func).run(None, None)
+        print(r)
+        return r[
+            "FI" + name + str(_cytohn_func_counter)
         ]["source"]
 
     def test_just_a_function(self):
@@ -30,11 +33,14 @@ def a():
 
 def b():
     '''Multi
-    line 
+    line
     docstring
     '''
 
-    return 5
+
+    shu = 55
+
+    return shu
 """
         func = cython.inline(src)["a"]
         func2 = cython.inline(src)["b"]
@@ -45,7 +51,9 @@ def b():
 
         actual = self.source_via_func_invariant("b", func2)
         should = """    def b():
-        return 5"""
+        shu = 55
+    
+        return shu"""
         assert actual == should
 
         ppg.FunctionInvariant("a", func)  # not a redefinition
