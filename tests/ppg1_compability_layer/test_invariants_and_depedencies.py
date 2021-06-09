@@ -985,7 +985,6 @@ class TestFunctionInvariant:
         y = shu("B")
         j1 = y.get_job()
         j2 = y.get_job()
-        assert j1.__wrapped__ is j2.__wrapped__ #ppg2
         assert j1.generating_function is j2.generating_function
 
     def test_invariant_build_in_function(self):

@@ -97,6 +97,10 @@ class Job:
     def _validate(self):
         pass
 
+    def __iter__(self):
+        """It yields self so you can use jobs and list of jobs uniformly"""
+        yield self
+
     def readd(self):
         """Readd this job to the current global pipegraph
         (possibly the *new* global pipegraph).
@@ -155,9 +159,9 @@ class Job:
             if isinstance(other_job, Job):
                 o_job = other_job
                 o_inputs = other_job.outputs
-            elif isinstance(other_job, CachedJobTuple):
+            elif isinstance(other_job, (CachedJobTuple, PlotJobTuple)):
                 raise TypeError(
-                    "You passed in a CachedJobTuple - unclear. Pass in either .load or .calc"
+                    "You passed in a CachedJobTuple/PlotJobTuple - unclear what to depend on. Pass in either .load/.calc or .plot/.cache/.table"
                 )
             elif other_job is None:
                 return self
@@ -245,7 +249,7 @@ class Job:
         e = global_pipegraph.last_run_result[self.job_id].error
         if isinstance(e, exceptions.JobError):
             return e.args[0]
-        else: # pragma: no cover
+        else:  # pragma: no cover
             return e
 
     @property
@@ -258,7 +262,7 @@ class Job:
         e = global_pipegraph.last_run_result[self.job_id].error
         if isinstance(e, exceptions.JobError):
             return e.args[1]
-        else: # pragma: no cover - defensive
+        else:  # pragma: no cover - defensive
             raise ValueError("No stacktrace available")
 
 
@@ -400,7 +404,7 @@ class MultiFileGeneratingJob(Job):
             )
 
             def aborted(sig, stack):
-                raise KeyboardInterrupt() # pragma: no cover  todo: interactive testing
+                raise KeyboardInterrupt()  # pragma: no cover  todo: interactive testing
 
             try:
                 error_exit_code = 1
@@ -484,7 +488,7 @@ class MultiFileGeneratingJob(Job):
                                 sleep_time = 1
                             time.sleep(sleep_time)
                             wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
-                    except KeyboardInterrupt: # pragma: no cover  todo: interactive testing
+                    except KeyboardInterrupt:  # pragma: no cover  todo: interactive testing
                         log_job_trace(
                             f"Keyboard interrupt in {self.job_id} - sigbreak spawned process"
                         )
@@ -628,7 +632,7 @@ class MultiFileGeneratingJob(Job):
     def _map_filename(self, f):
         return f
 
-    def kill_if_running(self): # pragma: no cover - todo: interactive testing
+    def kill_if_running(self):  # pragma: no cover - todo: interactive testing
         if self.pid is not None:
             os.kill(self.pid, signal.SIGTERM)
 
@@ -1123,6 +1127,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         op = open(filename, "rb")
         d = op.read().decode("utf-8").split("\n")
         op.close()
+        log_error(d)
 
         # extract the function at hand, minus doc string
         head = d[line_no - 1]
@@ -1354,7 +1359,7 @@ class ParameterInvariant(_InvariantMixin, Job):
         to get a hash value..
         """
 
-        if isinstance(obj, collections.Callable):
+        if callable(obj):
             raise TypeError(
                 "ParamaterInvariants do not store Functions. Use FunctionInvariant for that"
             )
@@ -1936,7 +1941,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 real_target.exists()
             ):  # either a previous partial, or parallel build. -> clobber
 
-                shutil.rmtree(real_target)  # pragma: no cover - too much work to figure out how to trigger it
+                shutil.rmtree(
+                    real_target
+                )  # pragma: no cover - too much work to figure out how to trigger it
             self._target_folder.rename(real_target)
             self._target_folder = real_target
             self.files = [self._map_filename(fn) for fn in self.org_files]
@@ -1972,7 +1979,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         if not self._target_folder.exists():
             return True
         for fn in self.org_files:
-            if not self._map_filename(fn).exists(): # pragma: no cover
+            if not self._map_filename(fn).exists():  # pragma: no cover
                 # this case is unlikely ( same hash, but additional outputfiles?)
                 # but it could happen...
                 return True

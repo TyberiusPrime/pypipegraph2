@@ -27,7 +27,7 @@ logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
 logger.configure(
     handlers=[
         {
-            "sink": sys.stderr, #RichHandler(markup=True, console=console),
+            "sink": sys.stderr,  # RichHandler(markup=True, console=console),
             "format": "{message}",
             "level": logging.INFO,
         }
@@ -99,6 +99,8 @@ class PyPipeGraph:
             self.cache_dir.mkdir(exist_ok=True, parents=True)
         else:
             self.cache_dir = None
+        self.cache_folder = self.cache_dir  # todo: change all occurances?
+        self.running = False
 
     def run(
         self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5
@@ -116,8 +118,10 @@ class PyPipeGraph:
         """Run the jobgraph - possibly focusing on a subset of jobs (ie. ignoring
         anything that's not necessary to calculate them - activated by calling a Job
         """
-        ts = str(time.time()) # include subsecond in log names - usefull for the testing, I suppose.
-        ts = ts[ts.rfind('.'):]
+        ts = str(
+            time.time()
+        )  # include subsecond in log names - usefull for the testing, I suppose.
+        ts = ts[ts.rfind(".") :]
         self.time_str = datetime.datetime.now().strftime(time_format) + ts
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
             print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
@@ -127,6 +131,7 @@ class PyPipeGraph:
             pass
         start_time = time.time()
         self._resolve_dependency_callbacks()
+        self.running = True  # must happen after dependency callbacks
         if self.error_dir:
             (self.error_dir / self.time_str).mkdir(exist_ok=True, parents=True)
         if self.log_dir:
@@ -135,15 +140,15 @@ class PyPipeGraph:
             logger.add(open(self.log_dir / f"{fn}-{self.time_str}.log", "w"))
             if False:
                 logger.add(
-                RichHandler(
-                    markup=False,
-                    console=Console(
-                        file=open(self.log_dir / f"{fn}-{self.time_str}.log", "w"), 
-                        width=120, # 
+                    RichHandler(
+                        markup=False,
+                        console=Console(
+                            file=open(self.log_dir / f"{fn}-{self.time_str}.log", "w"),
+                            width=120,  #
+                        ),
                     ),
-                ),
-                level=self.log_level,
-            )
+                    level=self.log_level,
+                )
             # if self.log_level != 20:  # logging.INFO:
             # logger.add(sink=sys.stdout, level=logging.INFO)  # pragma: no cover
             import threading
@@ -214,10 +219,11 @@ class PyPipeGraph:
             if print_failures:
                 self._print_failures()
             self._restore_signals()
-            if self._restart_afterwards: # pragma: no cover - todo: test with interactive
-                log_info(
-                    "Restart again issued - restarting via subprocess.check_call"
-                )
+            self.running = False
+            if (
+                self._restart_afterwards
+            ):  # pragma: no cover - todo: test with interactive
+                log_info("Restart again issued - restarting via subprocess.check_call")
                 subprocess.check_call([sys.executable] + sys.argv, cwd=start_cwd)
 
     def run_for_these(self, jobs):
@@ -355,9 +361,9 @@ class PyPipeGraph:
             except exceptions.RunFailed:
                 raise
             # except Exception as e: coverage indicates this never runs.
-                # raise exceptions.FatalGraphException( # that's pretty terminal
-                    # "Could not load history data", e, fn.absolute()
-                # )
+            # raise exceptions.FatalGraphException( # that's pretty terminal
+            # "Could not load history data", e, fn.absolute()
+            # )
 
         return history
 
@@ -435,7 +441,7 @@ class PyPipeGraph:
         def sigint(*args, **kwargs):
             if self.run_mode is (RunMode.CONSOLE):
                 log_info("CTRL-C has been disabled")
-            else: # pragma: no cover - todo: interactive
+            else:  # pragma: no cover - todo: interactive
                 log_info("CTRL-C received. Killing all running jobs.")
                 if hasattr(self, "runner"):
                     print("calling abort")
@@ -514,4 +520,4 @@ class PyPipeGraph:
         """Restart the whole python program afterwards?
         Used by the interactive console
         """
-        self._restart_afterwards = True # pragma: no cover - todo: interactive
+        self._restart_afterwards = True  # pragma: no cover - todo: interactive

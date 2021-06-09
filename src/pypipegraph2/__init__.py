@@ -96,11 +96,17 @@ def new(
         ]
     }
     util.do_job_trace_log = arguments['log_level'] <= 6
+    # if arguments['run_mode'] != RunMode.NONINTERACTIVE:
+        # raise ValueError()
     global_pipegraph = PyPipeGraph(**arguments)
     return global_pipegraph
 
 
 global_pipegraph = None
+
+def change_global_pipegraph(value):
+    global global_pipegraph
+    global_pipegraph = value
 
 
 def run(print_failures=True, raise_on_job_error=True, event_timeout=5):

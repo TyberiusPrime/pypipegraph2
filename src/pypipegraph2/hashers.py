@@ -20,8 +20,8 @@ def hash_file(path: Path):
     # (even on a very fast Samsung EVO equivalent SSD
     # (about 3gb/s), doing it from memory is 4 times faster)
     # so we shouldn't be stalling everything else much
-    # (except for memory bandwith. oh well, at least
-    # it shouldn't go into swap with the tiny buffer we use here)
+    # (except for memory bandwidth. oh well, at least
+    # it should not go into swap with the tiny buffer we use here)
     with open(path, "rb") as op:
         block = op.read(1024 * 512)
         while block:

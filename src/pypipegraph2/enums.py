@@ -44,9 +44,15 @@ class Resources(Enum):
     Exclusive = "Exclusive"
     # RateLimited = "RateLimited"  # todo, think web requests
     RunsHere = "RunsHere"  # in this process
+    _RaiseInCoreLock = "_RaiseInCoreLock ="  # for testing
+    _RaiseInToNumber = "_RaiseInToNumber ="  # for testing
 
     def is_external(self):
-        return self in (Resources.SingleCore, Resources.AllCores, Resources.Exclusive) # pragma: no cover - used by interactive
+        return self in (
+            Resources.SingleCore,
+            Resources.AllCores,
+            Resources.Exclusive,
+        )  # pragma: no cover - used by interactive
 
     def to_number(self, max_cores):
         if self is Resources.SingleCore:
@@ -57,5 +63,7 @@ class Resources(Enum):
             return max_cores
         elif self is Resources.RunsHere:
             return 1
-        else:  # pragma: no cover
-            raise ValueError("Not an external Resource with a given number of cores")
+        elif self is Resources._RaiseInCoreLock:
+            return 0 # which the core lock does not like!
+        else:
+            raise ValueError("Not a Resource with a given number of cores")

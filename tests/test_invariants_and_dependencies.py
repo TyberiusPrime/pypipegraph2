@@ -1209,6 +1209,11 @@ class TestDependency:
         assert read("out/B") == "B"
         assert read("out/C") == "C"
 
+    def test_job_iter(self):
+        jobA = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))
+        l = list(iter(jobA))
+        assert l[0] is jobA
+
     def test_depends_on_accepts_multiple_values(self):
         jobA = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))
         jobB = ppg.FileGeneratingJob("out/B", lambda of: write("out/B", "B"))

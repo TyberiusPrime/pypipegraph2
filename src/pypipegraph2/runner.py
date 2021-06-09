@@ -106,7 +106,7 @@ class Runner:
             if not networkx.algorithms.is_directed_acyclic_graph(
                 self.dag
             ):  # pragma: no cover - defensive
-                raise exceptions.NotADag("modify_dag error")
+                raise exceptions.NotADag("modify_dag error", list(networkx.simple_cycles(self.dag)))
             self.job_states = {}
 
             for job_id in self.jobs:
@@ -326,8 +326,8 @@ class Runner:
         log_job_trace(f"jobs: {self.jobs.keys()}")
         log_job_trace(f"skipped jobs: {skipped_jobs}")
         self.jobs_done = 0
-        self._interactive_start()
         try:
+            self._interactive_start()
             self._interactive_report()
             while todo:
                 try:
@@ -822,33 +822,35 @@ class Runner:
                 if job_id is ExitNow:
                     break
                 job = self.jobs[job_id]
-                c = job.resources.to_number(self.core_lock.max_cores)
-                log_job_trace(
-                    f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {len(self.jobs_in_flight)}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
-                )
-                if c > 1:
-                    # we could stall all SingleCores/RunsHere by having all_cores blocking all but one thread (which executes another all_core).
-                    # if we detect that situation, we spawn another one.
-                    self.jobs_all_cores_in_flight += 1
-                    if (
-                        self.jobs_all_cores_in_flight >= len(self.threads)
-                        and len(self.threads)
-                        <= self.job_graph.cores
-                        * 5  # at one point, we either have to let threads die again, or live with
-                        # the wasted time b y stalling.
-                    ):
-                        log_job_trace(
-                            "All threads blocked by Multi core jobs - starting another one"
-                        )
-                        self._start_another_thread()
+                job_state = self.job_states[job_id]
+                try:
+                    job.start_time = time.time() # assign it just in case anything fails before acquiring the lock
+                    c = job.resources.to_number(self.core_lock.max_cores)
+                    log_job_trace(
+                        f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {len(self.jobs_in_flight)}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
+                    )
+                    if c > 1:
+                        # we could stall all SingleCores/RunsHere by having all_cores blocking all but one thread (which executes another all_core).
+                        # if we detect that situation, we spawn another one.
+                        self.jobs_all_cores_in_flight += 1
+                        if (
+                            self.jobs_all_cores_in_flight >= len(self.threads)
+                            and len(self.threads)
+                            <= self.job_graph.cores
+                            * 5  # at one point, we either have to let threads die again, or live with
+                            # the wasted time b y stalling.
+                        ):
+                            log_job_trace(
+                                "All threads blocked by Multi core jobs - starting another one"
+                            )
+                            self._start_another_thread()
 
-                log_job_trace(f"wait for {job_id}")
-                with self.core_lock.using(c):
-                    log_job_trace(f"Go {job_id}")
-                    job_state = self.job_states[job_id]
-                    try:
+                    log_job_trace(f"wait for {job_id}")
+                    with self.core_lock.using(c):
+                        job.start_time = time.time() # the *actual* start time
+                        log_job_trace(f"Go {job_id}")
                         log_job_trace(f"\tExecuting {job_id}")
-                        job.start_time = time.time()
+
                         outputs = job.run(self, job_state.historical_output)
                         if os.getcwd() != cwd:
                             os.chdir(
@@ -861,37 +863,41 @@ class Runner:
                                 f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
                             )
                         self._push_event("JobSuccess", (job_id, outputs))
-                    except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
-                        log_job_trace(
-                            "SystemExit in spawned process -> converting to hard exit"
+                except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
+                    log_job_trace(
+                        "SystemExit in spawned process -> converting to hard exit"
+                    )
+                    if os.getpid() != my_pid:
+                        os._exit(e.args[0])
+                except Exception as e:
+                    if isinstance(e, KeyboardInterrupt):
+                        raise
+                    elif isinstance(e, exceptions.JobError):
+                        job_state.error = e
+                    else:
+                        exception_type, exception_value, tb = sys.exc_info()
+                        captured_tb = ppg_traceback.Trace(
+                            exception_type, exception_value, tb
                         )
-                        if os.getpid() != my_pid:
-                            os._exit(e.args[0])
-                    except Exception as e:
-                        if isinstance(e, exceptions.JobError):
-                            job_state.error = e
-                        else:
-                            exception_type, exception_value, tb = sys.exc_info()
-                            captured_tb = ppg_traceback.Trace(
-                                exception_type, exception_value, tb
-                            )
-                            job_state.error = exceptions.JobError(
-                                e,
-                                captured_tb,
-                            )
-                        e = job_state.error
-                        self._push_event("JobFailed", (job_id, job_id))
-                    finally:
-                        job.stop_time = time.time()
-                        job.run_time = job.stop_time - job.start_time
-                        self.job_states[job_id].run_time = job.run_time
-                        log_job_trace(f"end {job_id}")
-                        self.jobs_in_flight.remove(job_id)
-                        if c > 1:
-                            self.jobs_all_cores_in_flight -= 1
+                        job_state.error = exceptions.JobError(
+                            e,
+                            captured_tb,
+                        )
+                    e = job_state.error
+                    self._push_event("JobFailed", (job_id, job_id))
+                finally:
+                    job.stop_time = time.time()
+                    job.run_time = job.stop_time - job.start_time
+                    self.job_states[job_id].run_time = job.run_time
+                    log_job_trace(f"end {job_id}")
+                    self.jobs_in_flight.remove(job_id)
+                    if c > 1:
+                        self.jobs_all_cores_in_flight -= 1
         except (KeyboardInterrupt, SystemExit):
             log_job_trace(f"Keyboard Interrupt received {time.time() - self.abort_time}")
             pass
+        except Exception as e:
+            log_error(f"Captured exception outside of loop - should not happen {e}")
 
 
 class JobCollector:

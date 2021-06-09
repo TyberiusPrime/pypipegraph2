@@ -454,3 +454,29 @@ def test_job_generating_job_changing_cwd(ppg1_compability_test):
     assert Path('shu/b').exists()
     #assert read("a") == "hello"
     #assert read("shu/b") == "world"
+
+
+def test_inheritance_of_filegen(ppg1_compability_test, job_trace_log):
+    class MyJob(ppg.FileGeneratingJob):
+        def __init__(self, filename, func):
+            def wrapper(of):
+                append('counter', 'a')
+                func(of)
+            super().__init__(filename, wrapper)
+    a = MyJob('a', lambda of: of.write_text('hello'))
+    ppg.run_pipegraph()
+    assert read('a') == 'hello'
+    assert read('counter') == 'a'
+
+
+def test_util_checksum_file():
+    import hashlib
+    Path('a').write_text("hello world")
+    should = hashlib.md5(b'hello world').hexdigest()
+    assert ppg.util.checksum_file('a') == should
+
+
+def test_depends_on_mfg_keeps_wrapping(ppg1_compability_test):
+    a = ppg.MultiFileGeneratingJob(['a'], lambda ofs: 5)
+    b = ppg.FileGeneratingJob('b', lambda of: 5)
+    assert a.depends_on(b) is a

@@ -37,8 +37,8 @@ class ConsoleInteractive:
     def start(self, runner):
         self.runner = runner
         self.last_report_status_args = (0, 0, 0)
-        self._set_terminal_raw()
         self.thread = threading.Thread(target=self.loop)
+        self._set_terminal_raw()
         self.stopped = False
         self.thread.start()
         print("Type 'help<enter>' to receive a list of valid commands")
@@ -48,11 +48,12 @@ class ConsoleInteractive:
 
     def stop(self):
         self.stopped = True
-        self._end_terminal_raw()
-        log_job_trace("Terminating interactive thread")
-        self.thread.join()
-        log_job_trace("Terminated interactive thread")
-        self.status.stop()
+        if hasattr(self, 'thread'):
+            self._end_terminal_raw()
+            log_job_trace("Terminating interactive thread")
+            self.thread.join()
+            log_job_trace("Terminated interactive thread")
+            self.status.stop()
         del self.runner
 
     @property

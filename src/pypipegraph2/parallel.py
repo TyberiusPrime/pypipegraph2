@@ -39,6 +39,8 @@ class CoreLock:
         if count > self.max_cores:
             raise ValueError(f"Count {count} > max_cores {self.max_cores}")
         if count == 0:
+            with open("/home/finkernagel/shu.dat",'w') as op:
+                op.write("yes")
             raise ValueError("Count == 0")
         while True:
             with self.lock:

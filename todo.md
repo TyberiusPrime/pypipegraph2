@@ -115,8 +115,7 @@ Open stuff
 	 
 	  
 	   
+	- should I convert the history to json?
 	- 
-	- 
--
 	
-	- testing fixtures? (also in compability code?)
+	- - test case for running

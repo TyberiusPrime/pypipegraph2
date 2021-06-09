@@ -399,3 +399,25 @@ class TestCleanup:
             ppg.run()
         assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 3
         assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 3
+
+def test_exploding_core_lock_captured(ppg2_per_test):
+    """We had an issue where an exception in acquiring the core lock led to the thread dying
+    and the graph runner hanging
+    """
+    a = ppg.FileGeneratingJob('a', lambda of: of.write_text('a'), resources=ppg.Resources._RaiseInCoreLock)
+    with pytest.raises(ppg.FatalGraphException):
+        ppg.run()
+    assert 'Count == 0' in str(a.exception)
+
+def test_exploding_resources_to_number(ppg2_per_test):
+    """We had an issue where an exception in acquiring the core lock led to the thread dying
+    and the graph runner hanging
+    """
+    a = ppg.FileGeneratingJob('a', lambda of: of.write_text('a'), resources=ppg.Resources._RaiseInToNumber)
+    with pytest.raises(ppg.FatalGraphException):
+        ppg.run()
+    assert 'Not a Resource' in str(a.exception)
+
+
+
+

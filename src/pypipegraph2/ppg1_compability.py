@@ -6,8 +6,12 @@ import os
 import sys
 import logging
 import pypipegraph as ppg1
+import pypipegraph.testing
+import pypipegraph.testing.fixtures
 import pypipegraph2 as ppg2
+import pypipegraph2.testing
 import wrapt
+import importlib
 from .util import log_info, log_error, log_warning, log_debug, log_job_trace
 
 
@@ -38,8 +42,16 @@ def replace_ppg1():
     for x in dir(ppg1):
         old_entries[x] = getattr(ppg1, x)
         delattr(ppg1, x)
-    if "pypipegraph.job" in sys.modules:
-        old_modules["pypipegraph.job"] = sys.modules["pypipegraph.job"]
+    for module_name, replacement in {
+        "pypipegraph.job": job,
+        "pypipegraph.testing": ppg2.testing,
+        "pypipegraph.testing.fixtures": ppg2.testing.fixtures,
+    }.items():
+        if not module_name in sys.modules:
+            importlib.import_module(module_name)
+
+        old_modules[module_name] = sys.modules[module_name]
+        sys.modules[module_name] = replacement
 
     # ppg1.__name__ == "pypipegraph2"
     # ppg1.__file__ == __file__
@@ -101,7 +113,10 @@ with ppg2 objects. Aspires to be a drop-in replacement.
     ppg1.ppg_exceptions = ppg_exceptions
     ppg1.inside_ppg = ppg2.inside_ppg
     ppg1.assert_uniqueness_of_object = ppg2.assert_uniqueness_of_object
-    sys.modules["pypipegraph.job"] = job
+    ppg1.testing = ppg2.testing
+    ppg1.is_ppg2 = True
+    ppg1.testing = ppg2.testing
+    ppg1.testing.fixtures = ppg2.testing.fixtures
     # todo: list unpatched...
     new_entries = set(dir(ppg1))
     # this was used to find unported code.
@@ -112,7 +127,10 @@ with ppg2 objects. Aspires to be a drop-in replacement.
 
 
 def unreplace_ppg1():
-    """Turn ppg1 compability layer off, restoring ppg1"""
+    """Turn ppg1 compability layer off, restoring ppg1
+    not that well tested, I suppose...
+
+    """
     global patched
     if not patched:
         return
@@ -122,6 +140,8 @@ def unreplace_ppg1():
         setattr(ppg1, k, v)
     for k, v in old_modules.items():
         sys.modules[k] = v
+    ppg1.testing = old_modules['pypipegraph.testing']
+    ppg1.testing.fixtures = old_modules['pypipegraph.testing.fixtures']
     patched = False
 
 
@@ -136,8 +156,36 @@ class ResourceCoordinators:
 
 
 class Util:
+    @property
+    def global_pipegraph(self):
+        from . import global_pipegraph
 
-    global_pipegraph = None
+        return global_pipegraph
+
+    @global_pipegraph.setter
+    def global_pipegraph(self, value):
+        from . import change_global_pipegraph
+
+        change_global_pipegraph(value)
+
+    @staticmethod
+    def checksum_file(filename):
+        """was used by outside functions"""
+        import stat as stat_module
+        import hashlib
+
+        file_size = os.stat(filename)[stat_module.ST_SIZE]
+        if file_size > 200 * 1024 * 1024:  # pragma: no cover
+            print("Taking md5 of large file", filename)
+        with open(filename, "rb") as op:
+            block_size = 1024 ** 2 * 10
+            block = op.read(block_size)
+            _hash = hashlib.md5()
+            while block:
+                _hash.update(block)
+                block = op.read(block_size)
+            res = _hash.hexdigest()
+        return res
 
 
 util = Util()
@@ -246,7 +294,7 @@ def _ignore_code_changes(job):
         _ignore_code_changes(job.lfg)
 
 
-class PPG1Adaptor(wrapt.ObjectProxy):
+class PPG1AdaptorBase:
     def ignore_code_changes(self):
         _ignore_code_changes(self)
 
@@ -274,37 +322,50 @@ class PPG1Adaptor(wrapt.ObjectProxy):
         else:  # elif value == 1:
             self.use_resources(ppg2.Resources.SingleCore)
 
+    def depends_on(self, *args):  # keep the wrapper
+        res = self.__wrapped__.depends_on(*args)
+        return self
+
+
+class PPG1Adaptor(wrapt.ObjectProxy, PPG1AdaptorBase):
+    pass
+
 
 def assert_ppg_created():
     if not util.global_pipegraph:
         raise ValueError("Must instantiate a pipegraph before creating any Jobs")
 
 
-def FileGeneratingJob(output_filename, function, rename_broken=False, empty_ok=False):
-    assert_ppg_created()
-    sig = inspect.signature(function)
-    if len(sig.parameters) == 0:
+class FileGeneratingJob(ppg2.FileGeneratingJob, PPG1AdaptorBase):
+    def __new__(cls, *args, **kwargs):
+        log_error("new")
+        obj = ppg2.FileGeneratingJob.__new__(cls, *args, **kwargs)
+        return obj
 
-        def wrapper(of):  # pragma: no cover - runs in spawned process
-            function()
-            if not of.exists():
-                raise ppg2.exceptions.JobContractError(
-                    "%s did not create its file %s %s\n.Cwd: %s"
-                    % (
-                        of,
-                        function.__code__.co_filename,
-                        function.__code__.co_firstlineno,
-                        os.path.abspath(os.getcwd()),
+    def __init__(self, output_filename, function, rename_broken=False, empty_ok=False):
+        log_debug(f"FG init {output_filename}")
+        assert_ppg_created()
+        sig = inspect.signature(function)
+        if len(sig.parameters) == 0:
+
+            def wrapper(of):  # pragma: no cover - runs in spawned process
+                function()
+                if not of.exists():
+                    raise ppg2.exceptions.JobContractError(
+                        "%s did not create its file %s %s\n.Cwd: %s"
+                        % (
+                            of,
+                            function.__code__.co_filename,
+                            function.__code__.co_firstlineno,
+                            os.path.abspath(os.getcwd()),
+                        )
                     )
-                )
 
-        wrapper.wrapped_function = function
-        func = wrapper
-    else:
-        func = function
-
-    res = ppg2.FileGeneratingJob(output_filename, func, empty_ok=empty_ok)
-    return PPG1Adaptor(res)
+            wrapper.wrapped_function = function
+            func = wrapper
+        else:
+            func = function
+        super().__init__(output_filename, func, empty_ok=empty_ok)
 
 
 def MultiFileGeneratingJob(
@@ -334,7 +395,8 @@ def MultiFileGeneratingJob(
         func = function
 
     res = ppg2.MultiFileGeneratingJob(output_filenames, func, empty_ok=empty_ok)
-    return PPG1Adaptor(res)
+    res = PPG1Adaptor(res)
+    return res
 
 
 def TempFileGeneratingJob(output_filename, function, rename_broken=False):
@@ -476,7 +538,7 @@ def PlotJob(
 
 def wrap_old_style_lfg_cached_job(job):
     # adapt new style to old style
-    if hasattr(job.load, "__wrapped__"): # pragma: no cover
+    if hasattr(job.load, "__wrapped__"):  # pragma: no cover
         res = job.load
         res.lfg = job.calc  # just assume it's a PPG1Adaptor
     else:
