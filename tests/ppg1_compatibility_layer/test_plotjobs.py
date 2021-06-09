@@ -54,7 +54,7 @@ if has_pyggplot:  # noqa C901
         stdout, stderr = p.communicate()
         return stdout
 
-    @pytest.mark.usefixtures("ppg1_compability_test")
+    @pytest.mark.usefixtures("ppg1_compatibility_test")
     class TestPlotJob:
         def test_basic(self):
             def calc():
@@ -227,7 +227,7 @@ if has_pyggplot:  # noqa C901
             with pytest.raises(ValueError):
                 inner()
 
-        def test_reruns_just_plot_if_plot_changed(self, ppg1_compability_test):
+        def test_reruns_just_plot_if_plot_changed(self, ppg1_compatibility_test):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -245,7 +245,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "A"
             assert read("out/plot") == "B"
 
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
 
             def plot2(df):
                 append("out/plot", "B")
@@ -257,7 +257,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "A"
             assert read("out/plot") == "BB"
 
-        def test_no_rerun_if_ignore_code_changes_and_plot_changes(self, ppg1_compability_test):
+        def test_no_rerun_if_ignore_code_changes_and_plot_changes(self, ppg1_compatibility_test):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -278,7 +278,7 @@ if has_pyggplot:  # noqa C901
 
             from loguru import logger
             logger.error("Round two")
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
 
             def plot2(df):
                 append("out/plot", "B")
@@ -292,7 +292,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "A"
             assert read("out/plot") == "B"
 
-        def test_reruns_both_if_calc_changed(self, ppg1_compability_test, job_trace_log):
+        def test_reruns_both_if_calc_changed(self, ppg1_compatibility_test, job_trace_log):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -310,7 +310,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "A"
             assert read("out/plot") == "B"
 
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
 
             def calc2():
                 append("out/calc", "A")
@@ -325,7 +325,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "AA"
             assert read("out/plot") == "BB"
 
-        def test_no_rerun_if_calc_change_but_ignore_codechanges(self, ppg1_compability_test, job_trace_log):
+        def test_no_rerun_if_calc_change_but_ignore_codechanges(self, ppg1_compatibility_test, job_trace_log):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -344,7 +344,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "A"
             assert read("out/plot") == "B"
 
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
 
             def calc2():
                 append("out/calc", "A")
@@ -434,7 +434,7 @@ if has_pyggplot:  # noqa C901
             with pytest.raises(TypeError):
                 inner()
 
-        def test_unpickling_error(self, ppg1_compability_test):
+        def test_unpickling_error(self, ppg1_compatibility_test):
             def calc():
                 return pd.DataFrame(
                     {"X": list(range(0, 100)), "Y": list(range(50, 150))}
@@ -446,7 +446,7 @@ if has_pyggplot:  # noqa C901
             of = "out/test.png"
             p = ppg.PlotJob(of, calc, plot)
             ppg.run_pipegraph()
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
             p = ppg.PlotJob(of, calc, plot)
             with open("cache/out/test.png", "w") as op:
                 op.write("no unpickling")
@@ -481,7 +481,7 @@ if has_pyggplot:  # noqa C901
             assert isinstance(p2.exception, ppg.JobContractError)
 
     @pytest.mark.skip # no combinedplotjob
-    @pytest.mark.usefixtures("ppg1_compability_test")
+    @pytest.mark.usefixtures("ppg1_compatibility_test")
     class TestCombinedPlotJobs:
         def test_complete(self):
             def calc():

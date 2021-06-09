@@ -7,7 +7,7 @@ import pypipegraph as ppg1
 # to push test coverage...
 
 
-class TestCompabilityLayer:
+class TestcompatibilityLayer:
     def test_repeated_apply_unapply(self):
         fg1 = ppg1.FileGeneratingJob
         fg2 = ppg2.FileGeneratingJob
@@ -29,8 +29,8 @@ class TestCompabilityLayer:
         assert ppg1.FileGeneratingJob is fg1
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
-class TestCompabilityLayerMore:
+@pytest.mark.usefixtures("ppg1_compatibility_test")
+class TestcompatibilityLayerMore:
     def test_use_cores_exclusive(self):
         j = ppg1.FileGeneratingJob("shu", lambda of: of.write_text("j"))
         j.cores_needed = -2

@@ -32,13 +32,13 @@ from pathlib import Path
 
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestResourceCoordinator:
-    def test_jobs_that_need_all_cores_are_spawned_one_by_one(self, ppg1_compability_test):
+    def test_jobs_that_need_all_cores_are_spawned_one_by_one(self, ppg1_compatibility_test):
         # we'll determine this by the start respective end times..
         import time
 
-        ppg1_compability_test.new_pipegraph(
+        ppg1_compatibility_test.new_pipegraph(
             quiet=True,
             resource_coordinator=ppg.resource_coordinators.LocalSystem(max_cores_to_use=3, interactive=False),
             #ppg2: needs 3 cores. Two cores, second job is at 2-1 = 1 core, can still run...
@@ -68,9 +68,9 @@ class TestResourceCoordinator:
             raise ValueError("JobA did not run")
         assert first_job.stop_time < second_job.start_time
 
-    def test_jobs_concurrent_jobs_run_concurrently(self, ppg1_compability_test):
+    def test_jobs_concurrent_jobs_run_concurrently(self, ppg1_compatibility_test):
         # we'll determine this by the start respective end times..
-        ppg1_compability_test.new_pipegraph(
+        ppg1_compatibility_test.new_pipegraph(
             resource_coordinator=ppg.resource_coordinators.LocalSystem(max_cores_to_use=2, interactive=False),
             quiet=True,
             dump_graph=False,
@@ -112,7 +112,7 @@ class CantDepickle:
         raise TypeError("I can be pickled, but not unpickled")
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestingTheUnexpectedTests:
     def test_job_killing_python(self):
         def dies():
@@ -162,7 +162,7 @@ class TestingTheUnexpectedTests:
         assert fg.stderr == "I am stderr\n"
 
     @pytest.mark.skip # ParameterInvariant no longer uses pickle
-    def test_unpickle_bug_prevents_single_job_from_unpickling(self, ppg1_compability_test):
+    def test_unpickle_bug_prevents_single_job_from_unpickling(self, ppg1_compatibility_test):
         def do_a():
             write("out/A", "A")
             append("out/As", "A")
@@ -183,7 +183,7 @@ class TestingTheUnexpectedTests:
         assert read("out/B") == "A"
         assert read("out/Bs") == "A"
         print("second run")
-        ppg1_compability_test.new_pipegraph(dump_graph=False)
+        ppg1_compatibility_test.new_pipegraph(dump_graph=False)
 
         ppg.FileGeneratingJob("out/A", do_a)
         job_B = ppg.FileGeneratingJob("out/B", do_b)
@@ -212,10 +212,10 @@ class TestingTheUnexpectedTests:
         assert b"OK" in stdout
         os.chdir(old_dir)
 
-    def test_older_jobs_added_back_to_ppg1_compability_test(self, ppg1_compability_test):
+    def test_older_jobs_added_back_to_ppg1_compatibility_test(self, ppg1_compatibility_test):
         a = ppg.FileGeneratingJob("out/A", lambda of: write(of, "a"))
         ppg.util.global_pipegraph.run()
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         b = ppg.FileGeneratingJob("out/B", lambda of: write(of, "b"))
         with pytest.raises(KeyError): # ppg2 ppg.PyPipeGraphError):
             a.depends_on(b)
@@ -252,7 +252,7 @@ class TestsNotImplemented:
         raise NotImplementedError()
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestPathLib:
     def test_multifilegenerating_job_requires_string_filenames(self):
         import pathlib
@@ -337,13 +337,13 @@ class TestPathLib:
         #assert read("k") == "kkkk"
 
 
-def test_fixture_without_class(ppg1_compability_test):
+def test_fixture_without_class(ppg1_compatibility_test):
     import pathlib
 
     assert "run/.test_fixture_without_class" in str(pathlib.Path(".").absolute())
 
 
-def test_job_or_filename(ppg1_compability_test):
+def test_job_or_filename(ppg1_compatibility_test):
     a, dep_a = ppg.util.job_or_filename("out/A")
     assert a == Path("out/A") # ppg2 now returns Path
     assert len(dep_a) == 1
@@ -360,7 +360,7 @@ def test_job_or_filename(ppg1_compability_test):
 
 
 @pytest.mark.skip # ppg2 dos not have a stat caceh
-def test_stat_cache(ppg1_compability_test):
+def test_stat_cache(ppg1_compatibility_test):
     import time
 
     write("out/A", "A")
@@ -373,13 +373,13 @@ def test_stat_cache(ppg1_compability_test):
 
 
 @pytest.mark.skip #  ppg2 has it's own test suite
-def test_interactive_import(ppg1_compability_test):
+def test_interactive_import(ppg1_compatibility_test):
     # just so at least the import part of interactive is under coverage
     import pypipegraph.interactive  # noqa:F401
 
 
 @pytest.mark.skip # ppg2 changed this completely
-def test_logging(ppg1_compability_test):
+def test_logging(ppg1_compatibility_test):
     import logging
 
     my_logger = logging.getLogger("pypipegraph")
@@ -412,7 +412,7 @@ def test_version_is_correct():
     assert version == ppg.__version__
 
 
-def test_dataloading_job_changing_cwd(ppg1_compability_test):
+def test_dataloading_job_changing_cwd(ppg1_compatibility_test):
     from pathlib import Path
 
     os.mkdir("shu")
@@ -434,7 +434,7 @@ def test_dataloading_job_changing_cwd(ppg1_compability_test):
     #assert read("shu/b") == "world"
 
 
-def test_job_generating_job_changing_cwd(ppg1_compability_test):
+def test_job_generating_job_changing_cwd(ppg1_compatibility_test):
     from pathlib import Path
 
     os.mkdir("shu")
@@ -456,7 +456,7 @@ def test_job_generating_job_changing_cwd(ppg1_compability_test):
     #assert read("shu/b") == "world"
 
 
-def test_inheritance_of_filegen(ppg1_compability_test, job_trace_log):
+def test_inheritance_of_filegen(ppg1_compatibility_test, job_trace_log):
     class MyJob(ppg.FileGeneratingJob):
         def __init__(self, filename, func):
             def wrapper(of):
@@ -476,11 +476,11 @@ def test_util_checksum_file():
     assert ppg.util.checksum_file('a') == should
 
 
-def test_depends_on_mfg_keeps_wrapping(ppg1_compability_test):
+def test_depends_on_mfg_keeps_wrapping(ppg1_compatibility_test):
     a = ppg.MultiFileGeneratingJob(['a'], lambda ofs: 5)
     b = ppg.FileGeneratingJob('b', lambda of: 5)
     assert a.depends_on(b) is a
 
 
-def test_cores_available(ppg1_compability_test):
+def test_cores_available(ppg1_compatibility_test):
     assert ppg.util.global_pipegraph.rc.cores_available > 0

@@ -18,7 +18,7 @@ import plotnine # so it's available in the plot tests - saves about 10% of runti
 from loguru import logger
 
 # support code to remove test created files
-# only if the test suceeded
+# only if the test succeedd
 # ppg2.util._running_inside_test = True
 if "pytest" not in sys.modules:
     raise ValueError("fixtures can only be used together with pytest")
@@ -146,125 +146,6 @@ def create_out_dir(request):
 
 
 @pytest.fixture
-def both_ppg2_and_no_ppg2(request):
-    """Create both an inside and an outside ppg2 test case.
-    don't forgot to add this to your conftest.py
-
-    Use together with run_ppg2 and force_load
-
-    ```
-    def pytest_generate_tests(metafunc):
-        if "both_ppg2_and_no_ppg2" in metafunc.fixturenames:
-            metafunc.parametrize("both_ppg2_and_no_ppg2", [True, False], indirect=True)
-    ```
-    """
-    raise ValueError("check implementation")
-
-    if request.param:
-        if request.cls is None:
-            target_path = (
-                Path(request.fspath).parent
-                / "run"
-                / ("." + request.node.name + str(request.param))
-            )
-        else:
-            target_path = (
-                Path(request.fspath).parent
-                / "run"
-                / (request.cls.__name__ + "." + request.node.name)
-            )
-        if target_path.exists():  # pragma: no cover
-            shutil.rmtree(target_path)
-        target_path = target_path.absolute()
-        old_dir = Path(os.getcwd()).absolute()
-        try:
-            first = [False]
-
-            def np():
-                if not first[0]:
-                    Path(target_path).mkdir(parents=True, exist_ok=True)
-                    os.chdir(target_path)
-                    first[0] = True
-
-                rc = ppg2.resource_coordinators.LocalSystem()
-                ppg2.new_pipegraph(rc, quiet=True, dump_graph=False)
-                ppg2.util.global_pipegraph.result_dir = Path("results")
-                g = ppg2.util.global_pipegraph
-                g.new_pipegraph = np
-                return g
-
-            def finalize():
-                if hasattr(request.node, "rep_setup"):
-
-                    if request.node.rep_setup.passed and (
-                        hasattr(request.node, "rep_call")
-                        and (
-                            request.node.rep_call.passed
-                            or request.node.rep_call.outcome == "skipped"
-                        )
-                    ):
-                        try:
-                            shutil.rmtree(target_path)
-                        except OSError:  # pragma: no cover
-                            pass
-
-            request.addfinalizer(finalize)
-            yield np()
-
-        finally:
-            os.chdir(old_dir)
-    else:
-        if request.cls is None:
-            target_path = (
-                Path(request.fspath).parent
-                / "run"
-                / ("." + request.node.name + str(request.param))
-            )
-        else:
-            target_path = (
-                Path(request.fspath).parent
-                / "run"
-                / (request.cls.__name__ + "." + request.node.name)
-            )
-        if target_path.exists():  # pragma: no cover
-            shutil.rmtree(target_path)
-        target_path = target_path.absolute()
-        target_path.mkdir()
-        old_dir = Path(os.getcwd()).absolute()
-        os.chdir(target_path)
-        try:
-
-            def np():
-                ppg2.util.global_pipegraph = None
-
-                class Dummy:
-                    pass
-
-                d = Dummy
-                d.new_pipegraph = lambda: None
-                return d
-
-            def finalize():
-                if hasattr(request.node, "rep_setup"):
-
-                    if request.node.rep_setup.passed and (
-                        request.node.rep_call.passed
-                        or request.node.rep_call.outcome == "skipped"
-                    ):
-                        try:
-                            shutil.rmtree(target_path)
-                        except OSError:  # pragma: no cover
-                            pass
-
-            request.addfinalizer(finalize)
-            ppg2.util.global_pipegraph = None
-            yield np()
-
-        finally:
-            os.chdir(old_dir)
-
-
-@pytest.fixture
 def job_trace_log():
     def fmt(record):
         lvl = str(record["level"].name).ljust(8)
@@ -303,7 +184,7 @@ def trace_log():  # could not find out how to abstract pytest fixtures
 
 
 @pytest.fixture
-def ppg1_compability_test(request):
+def ppg1_compatibility_test(request):
     import sys
     import pypipegraph as ppg
     ppg2.replace_ppg1()

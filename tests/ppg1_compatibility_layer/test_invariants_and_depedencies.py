@@ -45,7 +45,7 @@ class Undepickable(object):
         raise pickle.UnpicklingError("SHU")
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestInvariant:
     def sentinel_count(self):
         sentinel = "out/sentinel"
@@ -60,7 +60,7 @@ class TestInvariant:
         op.close()
         return count
 
-    def test_filegen_jobs_detect_code_change(self, ppg1_compability_test):
+    def test_filegen_jobs_detect_code_change(self, ppg1_compatibility_test):
         of = "out/a"
 
         def do_write():
@@ -69,7 +69,7 @@ class TestInvariant:
         ppg.FileGeneratingJob(of, do_write)
         ppg.run_pipegraph()
         assert read(of) == "shu"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         ppg.FileGeneratingJob(of, do_write)
         ppg.run_pipegraph()
         assert read(of) == "shu"  # has not been run again...
@@ -77,12 +77,12 @@ class TestInvariant:
         def do_write2():
             append(of, "sha")
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         ppg.FileGeneratingJob(of, do_write2)
         ppg.run_pipegraph()
         assert read(of) == "sha"  # has been run again ;).
 
-    def test_filegen_jobs_ignores_code_change(self, ppg1_compability_test):
+    def test_filegen_jobs_ignores_code_change(self, ppg1_compatibility_test):
         of = "out/a"
 
         def do_write():
@@ -92,12 +92,12 @@ class TestInvariant:
         ppg.run_pipegraph()
 
         assert read(of) == "shu"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         ppg.run_pipegraph()
         assert read(of) == "shu"  # has not been run again, for no change
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         print("secound round")
 
         def do_write2():
@@ -108,14 +108,14 @@ class TestInvariant:
         ppg.run_pipegraph()
         assert read(of) == "shu"  # has not been run again, since we ignored the changes
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write2)
         ppg.run_pipegraph()
         assert (
             read(of) == "sha"
         )  # But the new code had not been stored, not ignoring => redoing.
 
-    def test_parameter_dependency(self, ppg1_compability_test):
+    def test_parameter_dependency(self, ppg1_compatibility_test):
         of = "out/a"
 
         def do_write():
@@ -126,13 +126,13 @@ class TestInvariant:
         job.depends_on(param_dep)
         ppg.run_pipegraph()
         assert read(of) == "shu"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         param_dep = ppg.ParameterInvariant("myparam", (1, 2, 3))
         job.depends_on(param_dep)
         ppg.run_pipegraph()
         assert read(of) == "shu"  # has not been run again...
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         param_dep = ppg.ParameterInvariant("myparam", (1, 2, 3, 4))
         job.depends_on(param_dep)
@@ -187,7 +187,7 @@ class TestInvariant:
 
     @pytest.mark.skip  # ppg2 does not have 'accept_as_unchanged_func on ParameterInvariant
     # see above
-    def test_parameter_dependency_accepts_as_unchanged(self, ppg1_compability_test):
+    def test_parameter_dependency_accepts_as_unchanged(self, ppg1_compatibility_test):
         write("out/A", "x")
         job = ppg.FileGeneratingJob("out/A", lambda: append("out/A", "A"))
         p = ppg.ParameterInvariant("myparam", (1, 2, 3))
@@ -195,7 +195,7 @@ class TestInvariant:
         ppg.run_pipegraph()
         assert read("out/A") == "A"  # invalidation unlinks!
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         def is_prefix(new):
             def inner(old):
@@ -219,7 +219,7 @@ class TestInvariant:
         assert read("out/A") == "A"  # no change
         assert read("inner_check") == "yes"
 
-    def test_filetime_dependency(self, ppg1_compability_test):
+    def test_filetime_dependency(self, ppg1_compatibility_test):
         of = "out/a"
 
         def do_write():
@@ -235,7 +235,7 @@ class TestInvariant:
         assert (
             read(of) == "shu"
         )  # job get's run though there is a file, because the FileTimeInvariant was not stored before...
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.FileTimeInvariant(ftfn)
         job.depends_on(dep)
@@ -245,7 +245,7 @@ class TestInvariant:
         time.sleep(1)  # so linux actually advances the file time in the next line
         write(ftfn, "hello")  # same content, different time
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.FileTimeInvariant(ftfn)
         job.depends_on(dep)
@@ -263,7 +263,7 @@ class TestInvariant:
             ppg.RobustFileChecksumInvariant("sh")
         ppg.RobustFileChecksumInvariant("shu")
 
-    def test_filechecksum_dependency(self, ppg1_compability_test):
+    def test_filechecksum_dependency(self, ppg1_compatibility_test):
         of = "out/a"
 
         def do_write():
@@ -283,7 +283,7 @@ class TestInvariant:
         assert (
             read(of) == "shu"
         )  # job get's run though there is a file, because the FileTimeInvariant was not stored before...
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.FileChecksumInvariant(ftfn)
         job.depends_on(dep)
@@ -294,7 +294,7 @@ class TestInvariant:
         # logging.info("NOW REWRITE")
         write(ftfn, "hello")  # same content, different time
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.FileChecksumInvariant(ftfn)
         job.depends_on(dep)
@@ -305,14 +305,14 @@ class TestInvariant:
         write(ftfn, "hello world!!")  # different time
         time.sleep(1)  # give the file system a second to realize the change.
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.FileChecksumInvariant(ftfn)
         job.depends_on(dep)
         ppg.run_pipegraph()
         assert read(of) == "shushu"  # job does get rerun
 
-    def test_robust_filechecksum_invariant(self, ppg1_compability_test):
+    def test_robust_filechecksum_invariant(self, ppg1_compatibility_test):
         of = "out/B"
 
         def do_write():
@@ -333,7 +333,7 @@ class TestInvariant:
             read(of) == "shu"
         )  # job get's run though there is a file, because the FileTimeInvariant was not stored before...
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.RobustFileChecksumInvariant(ftfn)
         job.depends_on(dep)
@@ -342,7 +342,7 @@ class TestInvariant:
 
         os.mkdir("out/moved_here")
         shutil.move(ftfn, os.path.join("out/moved_here", "ftdep"))
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.RobustFileChecksumInvariant(os.path.join("out/moved_here", "ftdep"))
         job.depends_on(dep)
@@ -350,7 +350,7 @@ class TestInvariant:
         ppg.run_pipegraph()
         assert read(of) == "shu"  # job does not get rerun...
 
-    def test_robust_filechecksum_invariant_after_normal(self, ppg1_compability_test):
+    def test_robust_filechecksum_invariant_after_normal(self, ppg1_compatibility_test):
         of = "out/a"
 
         def do_write():
@@ -372,7 +372,7 @@ class TestInvariant:
         )  # job get's run though there is a file, because the FileTimeInvariant was not stored before...
         assert read("out/sentinel") == "2"  # job does not get rerun...
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.FileChecksumInvariant(ftfn)
         job.depends_on(dep)
@@ -382,7 +382,7 @@ class TestInvariant:
 
         os.mkdir("out/moved_here")
         shutil.move(ftfn, os.path.join("out/moved_here", "ftdep"))
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.RobustFileChecksumInvariant(os.path.join("out/moved_here", "ftdep"))
         job.depends_on(dep)
@@ -393,7 +393,7 @@ class TestInvariant:
         assert read("out/sentinel") == "2"  # job does not get rerun...
         assert read(of) == "shu"  # job does not get rerun...
 
-    def test_file_invariant_with_md5sum(self, ppg1_compability_test):
+    def test_file_invariant_with_md5sum(self, ppg1_compatibility_test):
         of = "out/a"
 
         def do_write():
@@ -423,7 +423,7 @@ class TestInvariant:
         os.utime(ftfn + ".md5sum", (t, t))
         time.sleep(1)  # give the file system a second to realize the change.
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.FileChecksumInvariant(ftfn)
         job.depends_on(dep)
@@ -441,7 +441,7 @@ class TestInvariant:
         os.utime(ftfn + ".md5sum", (t, t))
         time.sleep(1)  # give the file system a second to realize the change.
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.FileChecksumInvariant(ftfn)
         job.depends_on(dep)
@@ -453,7 +453,7 @@ class TestInvariant:
             ftfn, (t, t)
         )  # I must change the one on the actual file, otherwise the 'size+filetime is the same' optimization bytes me
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         dep = ppg.FileChecksumInvariant(ftfn)
         job.depends_on(dep)
@@ -463,8 +463,8 @@ class TestInvariant:
         )  # job does get rerun, md5sum and file time mismatch
         assert os.stat(ftfn)[stat.ST_MTIME] == os.stat(ftfn + ".md5sum")[stat.ST_MTIME]
 
-    def test_invariant_dumping_on_job_failure(self, ppg1_compability_test):
-        ppg1_compability_test.new_pipegraph(log_level=6)
+    def test_invariant_dumping_on_job_failure(self, ppg1_compatibility_test):
+        ppg1_compatibility_test.new_pipegraph(log_level=6)
 
         def w():
             write("out/A", "A")
@@ -482,7 +482,7 @@ class TestInvariant:
         # ppg2 assert fg.was_invalidated
         assert read("out/A") == "A"
         assert read("out/B") == "B"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         def func_c1():
             append("out/C", "D")
@@ -502,7 +502,7 @@ class TestInvariant:
         # ppg2 assert fg.was_invalidated
         assert not (os.path.exists("out/A"))  # since it was removed, and not recreated
         assert read("out/B") == "B"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         func_dep = ppg.FunctionInvariant(
             "func_c", func_c1
         )  # no invariant change this time
@@ -516,11 +516,11 @@ class TestInvariant:
         assert read("out/B") == "BB"
 
     @pytest.mark.skip  # ppg1 implementation internals test, ppg2 must do it's own testing
-    def test_invariant_dumping_on_graph_exception(self, ppg1_compability_test):
+    def test_invariant_dumping_on_graph_exception(self, ppg1_compatibility_test):
         # when an exception occurs not within a job
         # but within the pipegraph itself (e.g. when the user hit's CTRL-C
         # which we simulate here
-        # compability layer does not support subclassing
+        # compatibility layer does not support subclassing
         import pypipegraph2 as ppg2
 
         class ExplodingJob(ppg2.FileGeneratingJob):
@@ -551,7 +551,7 @@ class TestInvariant:
         # assert fg.was_invalidated
         assert read("out/A") == "A"
         assert read("out/B") == "B"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         def func_c1():
             append("out/C", "D")
@@ -578,7 +578,7 @@ class TestInvariant:
         assert fg.was_invalidated
         assert not (os.path.exists("out/A"))  # since it was removed, and not recreated
         assert read("out/B") == "B"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         func_dep = ppg.FunctionInvariant(
             "func_c", func_c1
         )  # no invariant change this time
@@ -721,7 +721,7 @@ class TestInvariant:
         assert read("out/b") == "a"  # job was not run
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestFunctionInvariant:
     # most of the function invariant testing is handled by other test classes.
     # but these are more specialized.
@@ -959,7 +959,7 @@ class TestFunctionInvariant:
         ppg.FunctionInvariant("B", sha())
         ppg.FunctionInvariant("B", sha())
 
-    def test_instance_functions_ok(self, ppg1_compability_test):
+    def test_instance_functions_ok(self, ppg1_compatibility_test):
         class shu:
             def __init__(self, letter):
                 self.letter = letter
@@ -980,7 +980,7 @@ class TestFunctionInvariant:
         assert read("out/A") == "A"
         append("out/A", "A")
 
-        ppg1_compability_test.new_pipegraph(dump_graph=False)
+        ppg1_compatibility_test.new_pipegraph(dump_graph=False)
         x.get_job()
         y = shu("B")
         j1 = y.get_job()
@@ -1233,7 +1233,7 @@ class TestFunctionInvariant:
             assert res == expected_new
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestMultiFileInvariant:
     def test_input_checking(self):
         with pytest.raises(TypeError):
@@ -1437,7 +1437,7 @@ class TestMultiFileInvariant:
         cs3 = jobB.get_invariant(False, {jobA.job_id: cs})
         assert not ([x[3] for x in cs2] == [x[2] for x in cs3])  # checksums changed
 
-    def test_rehome_same_filenames_gives_up(self, ppg1_compability_test):
+    def test_rehome_same_filenames_gives_up(self, ppg1_compatibility_test):
         from pathlib import Path
 
         write("out/counter", "0")
@@ -1457,7 +1457,7 @@ class TestMultiFileInvariant:
         jobB.depends_on(jobA)
         ppg.run_pipegraph()
         assert read("out/counter") == "0x"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         shutil.move("out/A/A", "out/C/A")
         shutil.move("out/B/A", "out/D/A")
         jobA = ppg.MultiFileInvariant(["out/C/A", "out/D/A"])
@@ -1469,7 +1469,7 @@ class TestMultiFileInvariant:
         assert read("out/counter") == "0x"  # so no rerun
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestDependency:
     def test_simple_chain(self):
         o = Dummy()
@@ -1498,7 +1498,7 @@ class TestDependency:
 
         ppg.FileGeneratingJob(ofD, do_write_d).depends_on([jobA, jobB])
 
-    def test_failed_job_kills_those_after(self, ppg1_compability_test):
+    def test_failed_job_kills_those_after(self, ppg1_compatibility_test):
         ofA = "out/A"
 
         def write_a():
@@ -1529,7 +1529,7 @@ class TestDependency:
         assert os.path.exists(ofA)  # which was before the error
         assert not (os.path.exists(ofB))  # which was on the error
         assert not (os.path.exists(ofC))  # which was after the error
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         jobA = ppg.FileGeneratingJob(ofA, write_a)
         jobC = ppg.FileGeneratingJob(ofC, write_c)
 
@@ -1586,7 +1586,7 @@ class TestDependency:
         assert read(ofA) == "hello"
 
     def test_invariant_violation_redoes_deps_but_not_nondeps(
-        self, ppg1_compability_test
+        self, ppg1_compatibility_test
     ):
         def get_job(name):
             fn = "out/" + name
@@ -1614,7 +1614,7 @@ class TestDependency:
         assert read("out/B") == "B"
         assert read("out/C") == "C"
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         jobA = get_job("A")
         jobB = get_job("B")
         jobC = get_job("C")
@@ -1810,7 +1810,7 @@ class TestDependency:
         assert read("out/A") == "AB"
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestDefinitionErrors:
     def test_defining_function_invariant_twice(self):
         a = lambda: 55  # noqa:E731
@@ -1848,7 +1848,7 @@ class TestDefinitionErrors:
         #assertRaises(ppg.JobContractError, inner)
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestFunctionInvariantDisChanges_BetweenVersions:
     @pytest.mark.skip  # ppg1 implementation internals no longer relevant to ppg2
     def test_lambda(self):
@@ -2030,9 +2030,9 @@ RETURN_VALUE"""
         assert c.run(None,None)['FIc'][ppg2.jobs.python_version]  == d.run(None,None)['FId'][ppg2.jobs.python_version] 
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 #ppg2: actual ppg2 source is without final newline. tests adjusted.
-class TestCythonCompability:
+class TestCythoncompatibility:
     def test_just_a_function(self):
         import pypipegraph2 as ppg2
         import cython

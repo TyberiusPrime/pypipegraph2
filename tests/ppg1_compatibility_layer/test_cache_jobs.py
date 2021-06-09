@@ -29,7 +29,7 @@ import pypipegraph2 as ppg2
 from .shared import write, assertRaises, read, append, Dummy
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestCachedAttributeJob:
     def test_simple(self):
         o = Dummy()
@@ -78,7 +78,7 @@ class TestCachedAttributeJob:
         ppg.run_pipegraph()
         assert os.path.exists("out/mycalc")
 
-    def test_invalidation_redoes_output(self, ppg1_compability_test):
+    def test_invalidation_redoes_output(self, ppg1_compatibility_test):
         o = Dummy()
 
         def calc():
@@ -94,7 +94,7 @@ class TestCachedAttributeJob:
         ppg.run_pipegraph()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         def calc2():
             return ", ".join(str(x) for x in range(0, 200))
@@ -106,7 +106,7 @@ class TestCachedAttributeJob:
         ppg.run_pipegraph()
         assert read(of) == ", ".join(str(x) for x in range(0, 200))
 
-    def test_invalidation_ignored_does_not_redo_output(self, ppg1_compability_test):
+    def test_invalidation_ignored_does_not_redo_output(self, ppg1_compatibility_test):
         o = Dummy()
 
         def calc():
@@ -122,7 +122,7 @@ class TestCachedAttributeJob:
         ppg.run_pipegraph()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         def calc2():
             return ", ".join(str(x) for x in range(0, 200))
@@ -133,7 +133,7 @@ class TestCachedAttributeJob:
         ppg.run_pipegraph()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         job = ppg.CachedAttributeLoadingJob("out/mycalc", o, "a", calc2)
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run_pipegraph()
@@ -252,7 +252,7 @@ class TestCachedAttributeJob:
         # assert job.was_invalidated
 
     def test_cached_attribute_job_does_not_load_its_preqs_on_cached(
-        self, ppg1_compability_test
+        self, ppg1_compatibility_test
     ):
         o = Dummy()
 
@@ -277,7 +277,7 @@ class TestCachedAttributeJob:
         assert read("out/A") == "A"  # ran the dl job
         assert read("out/B") == "B"  # ran the calc job...
         os.unlink("out/D")  # so the filegen and the loadjob of cached should rerun...
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         dl = ppg.DataLoadingJob("out/A", a)
         ca = ppg.CachedAttributeLoadingJob("out/C", o, "c", calc)
         fg = ppg.FileGeneratingJob("out/D", output)
@@ -323,7 +323,7 @@ class TestCachedAttributeJob:
         assert ca.lfg.cores_needed == -1  # ppg2 - was 5
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestCachedDataLoadingJob:
     def test_simple(self):
         o = Dummy()
@@ -472,7 +472,7 @@ class TestCachedDataLoadingJob:
         assert ppg.util.global_pipegraph.has_edge(jobB, job.lfg)
 
     def test_cached_dataloading_job_does_not_load_its_preqs_on_cached(
-        self, ppg1_compability_test
+        self, ppg1_compatibility_test
     ):
         o = Dummy()
 
@@ -502,7 +502,7 @@ class TestCachedDataLoadingJob:
         assert read("out/B") == "B"  # ran the calc job...
         assert read("out/Cx") == "C"  # ran the load jobo
         os.unlink("out/D")  # so the filegen and the loadjob of cached should rerun...
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         dl = ppg.DataLoadingJob("out/A", a)
         ca = ppg.CachedDataLoadingJob("out/C", calc, load)
         fg = ppg.FileGeneratingJob("out/D", output)
@@ -573,7 +573,7 @@ if (  # noqa: C901
 
             assert not ("memmap" in dir(numpypy))
 
-        def test_memmap_job_creation_raises(self, ppg1_compability_test):
+        def test_memmap_job_creation_raises(self, ppg1_compatibility_test):
             import numpypy
 
             o = Dummy()
@@ -590,20 +590,20 @@ if (  # noqa: C901
             def inner():
                 ppg.MemMappedDataLoadingJob("out/A", calc, store, numpypy.uint32)
 
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
             assertRaises(NotImplementedError, inner)
 
 
 else:
 
     @pytest.mark.skip  # No MemMappedDataLoadingJob in ppg2
-    @pytest.mark.usefixtures("ppg1_compability_test")
+    @pytest.mark.usefixtures("ppg1_compatibility_test")
     class TestMemMappedDataLoadingJob:
         """Similar to a CachedDataLoadingJob, except that the data in question is a numpy
         array that get's memmapped in later on"""
 
-        def test_simple(self, ppg1_compability_test):
-            ppg1_compability_test.new_pipegraph()
+        def test_simple(self, ppg1_compatibility_test):
+            ppg1_compatibility_test.new_pipegraph()
             import numpy
 
             o = []
@@ -640,7 +640,7 @@ else:
             with pytest.raises(ValueError):
                 ppg.MemMappedDataLoadingJob("shu", lambda: 5, 5, numpy.uint32)
 
-        def test_ignore_code_changes(self, ppg1_compability_test):
+        def test_ignore_code_changes(self, ppg1_compatibility_test):
             import numpy
             import pathlib
 
@@ -668,7 +668,7 @@ else:
             ppg.run_pipegraph()
             assert read("out/B") == "0,1,2,3,4,5,6,7,8,9"
 
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
 
             def calc2():
                 return numpy.array(range(0, 10), dtype=numpy.uint32) + 1
@@ -681,7 +681,7 @@ else:
             ppg.run_pipegraph()
             assert read("out/B") == "1,2,3,4,5,6,7,8,9,10"
 
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
 
             def calc3():
                 return numpy.array(range(0, 10), dtype=numpy.uint32) + 1
@@ -695,7 +695,7 @@ else:
             ppg.run_pipegraph()
             assert read("out/B") == "1,2,3,4,5,6,7,8,9,10"  # jup, no rerun
 
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
 
             def store2(value):
                 o.append(value)
@@ -710,7 +710,7 @@ else:
             ppg.run_pipegraph()
             assert read("out/B") == "1,2,3,4,5,6,7,8,9,10"  # jup, no rerun
 
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
             dl = ppg.MemMappedDataLoadingJob("out/A", calc2, store2, numpy.uint32)
             dl.cleanup = cleanup
             of = "out/B"
@@ -719,7 +719,7 @@ else:
             write("out/B", "replace me")
             ppg.run_pipegraph()
             assert read("out/B") == "1,2,3,4,5,6,7,8,9,10"  # jup, no rerun
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
             dl = ppg.MemMappedDataLoadingJob(
                 pathlib.Path("out/A"), calc2, store2, numpy.uint32
             )
@@ -734,7 +734,7 @@ else:
             ppg.run_pipegraph()
             assert read("out/B") == "1,2,3,4,5,6,7,8,9,10"  # jup, no rerun
 
-        def test_invalidation(self, ppg1_compability_test):
+        def test_invalidation(self, ppg1_compatibility_test):
             import numpy
 
             o = {}
@@ -762,14 +762,14 @@ else:
             assert read("out/B") == "0,1,2,3,4,5,6,7,8,9"
             assert read("out/C") == "a"
             # now, no run...
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
             dl = ppg.MemMappedDataLoadingJob("out/A", calc, store, numpy.uint32)
             dl.cleanup = cleanup
             ppg.FileGeneratingJob(of, do_write).depends_on(dl)
             ppg.run_pipegraph()
             assert read("out/C") == "a"
 
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
 
             def calc2():
                 append("out/D", "a")

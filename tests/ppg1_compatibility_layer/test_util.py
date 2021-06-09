@@ -27,7 +27,7 @@ import pypipegraph as ppg
 from .shared import assertRaises
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestUtils:
     def test_assert_uniqueness_simple(self):
         class Dummy:

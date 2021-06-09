@@ -51,13 +51,13 @@ Open stuff
 	  profiling test_invariants_and_dependencies...
 	  says 50%  in logger.debug, handle_success, runner:462
 	  that would be 'logging runtime. Especially for jobs <= 1s, this is a factor of 2x on test_invariants_and_dependencies...
- 	  (but ppg1 compability is at 128s with the line removed. And at 128 with it. So important for some, but not all tests)
+ 	  (but ppg1 compatibility is at 128s with the line removed. And at 128 with it. So important for some, but not all tests)
 	  bumping the log level has dramatic effects on this file.
 	- error: 7.61
 	  Info: 11.53.
 	  Debug: 21.53
 	
-	ppg1 compability tests: 128s
+	ppg1 compatibility tests: 128s
 	with log_level = error:  87 seconds
 	what does the profiling with log_level == error say?
 	-lot's of waiting (25%)
@@ -76,7 +76,7 @@ Open stuff
 	- onether 0.2s in namedtuple
  
     ok, py-spy informed me that we spend much time importing plotnine - importing
-	it in conftest saves 10s on the ppg1_compability tests, which brings us 
+	it in conftest saves 10s on the ppg1_compatibility tests, which brings us 
 	at par with ppg1 (23s ppg2 vs 26s ppg1)
 	total test suite in 75s... not too bad.
 	I have at least one test that's running interactively though?

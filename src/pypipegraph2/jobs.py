@@ -761,7 +761,7 @@ class _FileInvariantMixin:
         # it would accept it instead of calculating it's own.
         # todo:  decide wether we want to keep this here,
         # or move it into it's own class?
-        # the pro argument is basically, ppg1. compability.
+        # the pro argument is basically, ppg1. compatibility.
         # the draw back is the complexity for the common case,
         # and the weakness of the md5 algorithm (can't easily upgrade though)
         md5sum_path = Path(file.with_name(file.name + ".md5sum"))
@@ -819,7 +819,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
     def __init__(
         self, function, name=None
-    ):  # must support the inverse calling with name, function, for compability to pypipegraph
+    ):  # must support the inverse calling with name, function, for compatibility to pypipegraph
         name, function = self._parse_args(function, name)
         self.verify_arguments(name, function)
         self.function = function  # must assign after verify!
@@ -1746,7 +1746,7 @@ def PlotJob(  # noqa:C901
         )
         Job.depends_on(
             plot_job, cache_job.load
-        )  # necessary because the ppg1 compability layer messes with this
+        )  # necessary because the ppg1 compatibility layer messes with this
     else:
 
         cache_job = None

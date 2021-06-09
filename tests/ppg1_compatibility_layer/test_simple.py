@@ -19,7 +19,7 @@ def destroy_global_pipegraph():
     ppg.util.global_pipegraph = None
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestSimple:
     def test_job_creation_before_pipegraph_creation_raises(self):
         destroy_global_pipegraph()

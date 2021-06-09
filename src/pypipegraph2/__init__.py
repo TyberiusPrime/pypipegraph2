@@ -152,16 +152,16 @@ def replace_ppg1():
     Also jobs often throw TypeError, instead of ValueError if you pass the arguments
     in the wrong order. This shouldn't affect any working code though.
     """
-    from . import ppg1_compability
+    from . import ppg1_compatibility
 
-    ppg1_compability.replace_ppg1()
+    ppg1_compatibility.replace_ppg1()
 
 
 def unreplace_ppg1():
     """undo replace_ppg1."""
-    from . import ppg1_compability
+    from . import ppg1_compatibility
 
-    ppg1_compability.unreplace_ppg1()
+    ppg1_compatibility.unreplace_ppg1()
 
 from .util import assert_uniqueness_of_object
 

@@ -28,7 +28,7 @@ import pypipegraph as ppg
 from .shared import write, read
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestPruning:
     def test_basic_prune(self):
         ppg.FileGeneratingJob("A", lambda: write("A", "A"))

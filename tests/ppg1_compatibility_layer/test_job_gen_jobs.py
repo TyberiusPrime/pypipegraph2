@@ -30,7 +30,7 @@ from .shared import write, assertRaises, read, append, writeappend, Dummy
 shu = None
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestJobGeneratingJob:
     def test_basic(self):
         def gen():
@@ -100,7 +100,7 @@ class TestJobGeneratingJob:
         assert read("out/D") == "D"
 
     def test_generated_job_depending_on_each_other_one_of_them_is_Invariant(
-        self, ppg1_compability_test
+        self, ppg1_compatibility_test
     ):
         # basic idea. You have jobgen A,
         # it not only creates filegenB, but also ParameterDependencyC that A depends on
@@ -115,7 +115,7 @@ class TestJobGeneratingJob:
         ppg.run_pipegraph()
         assert read("out/B") == "B"
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         def gen2():
             jobB = ppg.FileGeneratingJob("out/B", lambda: write("out/B", "C"))
@@ -127,7 +127,7 @@ class TestJobGeneratingJob:
         ppg.run_pipegraph()
         assert read("out/B") == "B"  # no rerun
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         def gen3():
             jobB = ppg.FileGeneratingJob("out/B", lambda: write("out/B", "C"))
@@ -140,7 +140,7 @@ class TestJobGeneratingJob:
         assert read("out/B") == "C"  # did get rerun
 
     def test_generated_job_depending_on_job_that_cant_have_finished(
-        self, ppg1_compability_test
+        self, ppg1_compatibility_test
     ):
         # basic idea. You have jobgen A, and filegen B.
         # filegenB depends on jobgenA.
@@ -175,7 +175,7 @@ class TestJobGeneratingJob:
             assert read("out/C") == "C"
 
         a()
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         b()
 
     def test_generated_job_depending_on_each_other(self):
@@ -246,7 +246,7 @@ class TestJobGeneratingJob:
 
     #ppg2 name no longer applies
     def test_filegen_invalidated_jobgen_created_filegen_later_also_invalidated(
-        self, ppg1_compability_test
+        self, ppg1_compatibility_test
     ):
         a = ppg.FileGeneratingJob("out/A", lambda: writeappend("out/A", "out/Ac", "A"))
         p = ppg.ParameterInvariant("p", "p")
@@ -264,7 +264,7 @@ class TestJobGeneratingJob:
         assert read("out/Ac") == "A"
         assert read("out/C") == "C"
         assert read("out/Cx") == "C"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         a = ppg.FileGeneratingJob("out/A", lambda: writeappend("out/A", "out/Ac", "A"))
         p = ppg.ParameterInvariant("p", "p2")
@@ -318,14 +318,14 @@ class TestJobGeneratingJob:
         assert not os.path.exists("out/C")  # that job never makes it to the pipeline
         assert read("out/D") == "D"
 
-    def test_invalidation(self, ppg1_compability_test):
+    def test_invalidation(self, ppg1_compatibility_test):
         def gen():
             ppg.FileGeneratingJob("out/D", lambda: write("out/D", "D"))
 
         ppg.JobGeneratingJob("A", gen)
         ppg.run_pipegraph()
         assert read("out/D") == "D"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         def gen():
             ppg.FileGeneratingJob("out/D", lambda: write("out/D", "E"))
@@ -334,7 +334,7 @@ class TestJobGeneratingJob:
         ppg.run_pipegraph()
         assert read("out/D") == "E"
 
-    def test_invalidation_multiple_stages(self, ppg1_compability_test):
+    def test_invalidation_multiple_stages(self, ppg1_compatibility_test):
         counter = [0]
 
         def count():
@@ -356,13 +356,13 @@ class TestJobGeneratingJob:
         assert read("out/D") == "D"
         assert counter[0] == 1
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         ppg.JobGeneratingJob("A", gen)
         ppg.run_pipegraph()
         assert read("out/D") == "D"
         assert counter[0] == 2
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         def gen():
             def genB():
@@ -381,9 +381,9 @@ class TestJobGeneratingJob:
 
 
 @pytest.mark.skip # dependency injections are gone.
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestDependencyInjectionJob:
-    def test_basic(self, ppg1_compability_test):
+    def test_basic(self, ppg1_compatibility_test):
         # TODO: there is a problem with this apporach. The AttributeLoadingJob
         # references different objects, since it get's pickled alongside with the method,
         # and depickled again, and then it's not the same object anymore,
@@ -395,7 +395,7 @@ class TestDependencyInjectionJob:
         # dependency data (and new job name).
         # that way, we can still execute on any worker, and all the pointers should be
         # right.
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
 
         o = Dummy()
         of = "out/A"
@@ -558,7 +558,7 @@ class TestDependencyInjectionJob:
 
         assertRaises(TypeError, inner)
 
-    def test_injecting_into_data_loading_does_not_retrigger(self, ppg1_compability_test):
+    def test_injecting_into_data_loading_does_not_retrigger(self, ppg1_compatibility_test):
         o = Dummy()
 
         def do_write():
@@ -588,7 +588,7 @@ class TestDependencyInjectionJob:
         do_run()
         assert read("out/A") == "AB"
         assert read("out/B") == "X"
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         do_run()
         assert read("out/A") == "AB"  # same data
         assert read("out/B") == "X"  # no rerun!
@@ -611,14 +611,14 @@ class TestDependencyInjectionJob:
             job_dl.depends_on(job_inject)
             ppg.run_pipegraph()
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         do_run2()
         assert read("out/A") == "AC"  # same data
         assert read("out/B") == "XX"  # one rerun...
 
-    def test_generated_job_depends_on_failing_job(self, ppg1_compability_test):
+    def test_generated_job_depends_on_failing_job(self, ppg1_compatibility_test):
         # import logging
-        # ppg1_compability_test.new_pipegraph(log_file="debug.log", log_level=logging.DEBUG)
+        # ppg1_compatibility_test.new_pipegraph(log_file="debug.log", log_level=logging.DEBUG)
         def fn_a():
             raise ValueError()
 
@@ -637,9 +637,9 @@ class TestDependencyInjectionJob:
         assert b.error_reason == "no error"
         assert ppg.util.global_pipegraph.jobs["c"].error_reason == "Indirect"
 
-    def test_generated_job_depends_on_failing_job_inverse(self, ppg1_compability_test):
+    def test_generated_job_depends_on_failing_job_inverse(self, ppg1_compatibility_test):
         # import logging
-        # ppg1_compability_test.new_pipegraph(log_file="debug.log", log_level=logging.DEBUG)
+        # ppg1_compatibility_test.new_pipegraph(log_file="debug.log", log_level=logging.DEBUG)
         def fn_a():
             raise ValueError()
 

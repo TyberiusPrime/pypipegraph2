@@ -27,11 +27,11 @@ import pypipegraph as ppg
 from .shared import write, assertRaises
 
 
-@pytest.mark.usefixtures("ppg1_compability_test")
+@pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestCycles:
-    def test_simple_cycle(self, ppg1_compability_test):
+    def test_simple_cycle(self, ppg1_compatibility_test):
         def inner():
-            ppg1_compability_test.new_pipegraph()
+            ppg1_compatibility_test.new_pipegraph()
             jobA = ppg.FileGeneratingJob("A", lambda: write("A", "A"))
             jobB = ppg.FileGeneratingJob("B", lambda: write("B", "A"))
             jobA.depends_on(jobB)
@@ -40,8 +40,8 @@ class TestCycles:
 
         assertRaises(ppg.CycleError, inner)
 
-    def test_indirect_cicle(self, ppg1_compability_test):
-        ppg1_compability_test.new_pipegraph()
+    def test_indirect_cicle(self, ppg1_compatibility_test):
+        ppg1_compatibility_test.new_pipegraph()
         jobA = ppg.FileGeneratingJob("A", lambda: write("A", "A"))
         jobB = ppg.FileGeneratingJob("B", lambda: write("B", "A"))
         jobC = ppg.FileGeneratingJob("C", lambda: write("C", "A"))
@@ -54,7 +54,7 @@ class TestCycles:
 
         assertRaises(ppg.CycleError, inner)
 
-    def test_exceeding_max_cycle(self, ppg1_compability_test):
+    def test_exceeding_max_cycle(self, ppg1_compatibility_test):
         max_depth = 50
         # this raisess...
         jobs = []
@@ -70,7 +70,7 @@ class TestCycles:
 
         assertRaises(ppg.CycleError, inner)
 
-        ppg1_compability_test.new_pipegraph()
+        ppg1_compatibility_test.new_pipegraph()
         jobs = []
         for x in range(0, max_depth + 100):
             j = ppg.FileGeneratingJob(str(x), lambda: write(str(x), str(x)))

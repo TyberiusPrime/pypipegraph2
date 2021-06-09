@@ -59,7 +59,7 @@ def replace_ppg1():
     # ppg1.__loader__ == __loader__
     # ppg1.__spec__ == __spec__
     # ppg1.__version__ == ppg2.__version__
-    ppg1.__doc__ == """ppg1->2 compability layer.
+    ppg1.__doc__ == """ppg1->2 compatibility layer.
 Supports the commonly used the old ppg1 API
 with ppg2 objects. Aspires to be a drop-in replacement.
     """
@@ -122,12 +122,12 @@ with ppg2 objects. Aspires to be a drop-in replacement.
     # this was used to find unported code.
     # for k in set(old_entries).difference(new_entries): # pragma: no cover
     # if not k.startswith("__") and k != "all":
-    # warnings.warn(f"not yet ppg1-compability layer implemented: {k}")
+    # warnings.warn(f"not yet ppg1-compatibility layer implemented: {k}")
     patched = True
 
 
 def unreplace_ppg1():
-    """Turn ppg1 compability layer off, restoring ppg1
+    """Turn ppg1 compatibility layer off, restoring ppg1
     not that well tested, I suppose...
 
     """
@@ -275,7 +275,7 @@ def new_pipegraph(
         cache_dir=Path(cache_folder),
         **kwargs,
     )
-    res.cache_folder = res.cache_dir  # ppg1 compability
+    res.cache_folder = res.cache_dir  # ppg1 compatibility
     res.rc = FakeRC()
     util.global_pipegraph = res
 
