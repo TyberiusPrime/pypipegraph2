@@ -846,6 +846,8 @@ class Runner:
                             self._start_another_thread()
 
                     log_job_trace(f"wait for {job_id}")
+                    if c == 0:
+                        log_error(f"Cores was 0! {job.job_id} {job.resources}")
                     with self.core_lock.using(c):
                         job.start_time = time.time() # the *actual* start time
                         log_job_trace(f"Go {job_id}")

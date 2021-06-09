@@ -480,3 +480,7 @@ def test_depends_on_mfg_keeps_wrapping(ppg1_compability_test):
     a = ppg.MultiFileGeneratingJob(['a'], lambda ofs: 5)
     b = ppg.FileGeneratingJob('b', lambda of: 5)
     assert a.depends_on(b) is a
+
+
+def test_cores_available(ppg1_compability_test):
+    assert ppg.util.global_pipegraph.rc.cores_available > 0

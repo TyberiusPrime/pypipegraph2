@@ -140,8 +140,8 @@ def unreplace_ppg1():
         setattr(ppg1, k, v)
     for k, v in old_modules.items():
         sys.modules[k] = v
-    ppg1.testing = old_modules['pypipegraph.testing']
-    ppg1.testing.fixtures = old_modules['pypipegraph.testing.fixtures']
+    ppg1.testing = old_modules["pypipegraph.testing"]
+    ppg1.testing.fixtures = old_modules["pypipegraph.testing.fixtures"]
     patched = False
 
 
@@ -234,6 +234,12 @@ job = Job()
 job.function_to_str = ppg2.FunctionInvariant.function_to_str
 
 
+class FakeRC:
+    @property
+    def cores_available(self):
+        return ppg2.global_pipegraph.cores
+
+
 def new_pipegraph(
     resource_coordinator=None,
     quiet=False,
@@ -270,6 +276,7 @@ def new_pipegraph(
         **kwargs,
     )
     res.cache_folder = res.cache_dir  # ppg1 compability
+    res.rc = FakeRC()
     util.global_pipegraph = res
 
     return res

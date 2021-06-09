@@ -5,6 +5,7 @@ import shutil
 
 from pathlib import Path
 import pypipegraph2 as ppg2
+import pypipegraph2.ppg1_compability
 
 if "pytest" not in sys.modules:
     raise ValueError("fixtures can only be used together with pytest")
@@ -63,7 +64,9 @@ def new_pipegraph(request):
                 log_level = 40
             )
             g.new = np
-            g.new_pipegraph = g.new # ppg1 test case compability
+            g.new_pipegraph = g.new # ppg1 test case compatibility
+            if ppg2.ppg1_compability.patched:
+                g.rc = ppg2.ppg1_compability.FakeRC()
             return g
 
         def finalize():

@@ -58,7 +58,7 @@ class Resources(Enum):
         if self is Resources.SingleCore:
             return 1
         elif self is Resources.AllCores:
-            return max_cores - 1
+            return max(max_cores - 1, 1)  # never return less than 1 core
         elif self is Resources.Exclusive:
             return max_cores
         elif self is Resources.RunsHere:
