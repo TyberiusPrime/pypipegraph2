@@ -1284,6 +1284,7 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
         self.file = Path(file)
         super().__init__([str(self.file)])
+        self.files = [self.file] # so it's the same whether you are looking at FG, MFG, or FI
         if len(self.job_id) < 3 and not global_pipegraph.allow_short_filenames:
             raise ValueError(
                 "This is probably not the filename you intend to use: {}.".format(self)

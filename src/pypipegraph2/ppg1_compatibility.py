@@ -69,13 +69,13 @@ with ppg2 objects. Aspires to be a drop-in replacement.
 
     # invariants
 
-    ppg1.ParameterInvariant = ppg2.ParameterInvariant
-    ppg1.FileInvariant = ppg2.FileInvariant
-    ppg1.FileTimeInvariant = ppg2.FileInvariant
-    ppg1.RobustFileChecksumInvariant = ppg2.FileInvariant
-    ppg1.FileChecksumInvariant = ppg2.FileInvariant
-    ppg1.FunctionInvariant = ppg2.FunctionInvariant
-    ppg1.MultiFileInvariant = wrap_job(MultiFileInvariant)
+    ppg1.ParameterInvariant = ParameterInvariant
+    ppg1.FileInvariant = FileInvariant
+    ppg1.FileTimeInvariant = FileInvariant
+    ppg1.RobustFileChecksumInvariant = FileInvariant
+    ppg1.FileChecksumInvariant = FileInvariant
+    ppg1.FunctionInvariant = FunctionInvariant
+    ppg1.MultiFileInvariant = MultiFileInvariant
 
     ppg1.MultiFileGeneratingJob = MultiFileGeneratingJob
     ppg1.FileGeneratingJob = FileGeneratingJob
@@ -188,8 +188,16 @@ class Util:
         return res
 
 
+def job_or_filename(
+    job_or_filename, invariant_class=None
+):  # we want to return the wrapped class
+    if invariant_class is None:
+        invariant_class = FileInvariant
+    return ppg2.util.job_or_filename(job_or_filename, invariant_class)
+
+
 util = Util()
-util.job_or_filename = ppg2.util.job_or_filename
+util.job_or_filename = job_or_filename
 util.inside_ppg = ppg2.inside_ppg
 util.assert_uniqueness_of_object = ppg2.assert_uniqueness_of_object
 util.flatten_jobs = ppg2.util.flatten_jobs
@@ -330,11 +338,30 @@ class PPG1AdaptorBase:
             self.use_resources(ppg2.Resources.SingleCore)
 
     def depends_on(self, *args):  # keep the wrapper
-        res = self.__wrapped__.depends_on(*args)
+        if hasattr(self, "__wrapped__"):
+            res = self.__wrapped__.depends_on(*args)
+        else:
+            super().depends_on(*args)
         return self
+
+    @property
+    def filenames(self):
+        return self.files
 
 
 class PPG1Adaptor(wrapt.ObjectProxy, PPG1AdaptorBase):
+    pass
+
+
+class FileInvariant(PPG1AdaptorBase, ppg2.FileInvariant):
+    pass
+
+
+class FunctionInvariant(PPG1AdaptorBase, ppg2.FunctionInvariant):
+    pass
+
+
+class ParameterInvariant(PPG1AdaptorBase, ppg2.ParameterInvariant):
     pass
 
 
@@ -343,7 +370,34 @@ def assert_ppg_created():
         raise ValueError("Must instantiate a pipegraph before creating any Jobs")
 
 
-class FileGeneratingJob(ppg2.FileGeneratingJob, PPG1AdaptorBase):
+def _wrap_func_if_no_output_file_params(function):
+    sig = inspect.signature(function)
+    if len(sig.parameters) == 0:
+
+        def wrapper(of):  # pragma: no cover - runs in spawned process
+            function()
+            if not isinstance(of, list):
+                of = [of]
+            for a_filename in of:
+                if not a_filename.exists():
+                    raise ppg2.exceptions.JobContractError(
+                        "%s did not create its file(s) %s %s\n.Cwd: %s"
+                        % (
+                            a_filename,
+                            function.__code__.co_filename,
+                            function.__code__.co_firstlineno,
+                            os.path.abspath(os.getcwd()),
+                        )
+                    )
+
+        wrapper.wrapped_function = function
+        func = wrapper
+    else:
+        func = function
+    return func
+
+
+class FileGeneratingJob(PPG1AdaptorBase, ppg2.FileGeneratingJob):
     def __new__(cls, *args, **kwargs):
         log_error("new")
         obj = ppg2.FileGeneratingJob.__new__(cls, *args, **kwargs)
@@ -351,114 +405,26 @@ class FileGeneratingJob(ppg2.FileGeneratingJob, PPG1AdaptorBase):
 
     def __init__(self, output_filename, function, rename_broken=False, empty_ok=False):
         log_debug(f"FG init {output_filename}")
-        assert_ppg_created()
-        sig = inspect.signature(function)
-        if len(sig.parameters) == 0:
-
-            def wrapper(of):  # pragma: no cover - runs in spawned process
-                function()
-                if not of.exists():
-                    raise ppg2.exceptions.JobContractError(
-                        "%s did not create its file %s %s\n.Cwd: %s"
-                        % (
-                            of,
-                            function.__code__.co_filename,
-                            function.__code__.co_firstlineno,
-                            os.path.abspath(os.getcwd()),
-                        )
-                    )
-
-            wrapper.wrapped_function = function
-            func = wrapper
-        else:
-            func = function
+        func = _wrap_func_if_no_output_file_params(function)
         super().__init__(output_filename, func, empty_ok=empty_ok)
 
 
-def MultiFileGeneratingJob(
-    output_filenames, function, rename_broken=False, empty_ok=False
-):
-    assert_ppg_created()
-    sig = inspect.signature(function)
-    if len(sig.parameters) == 0:
-
-        def wrapper(ofs):  # pragma: no cover - runs in spawned process
-            function()
-            for of in ofs:
-                if not of.exists():
-                    raise ppg2.exceptions.JobContractError(
-                        "%s did not create its file %s %s\n.Cwd: %s"
-                        % (
-                            of,
-                            function.__code__.co_filename,
-                            function.__code__.co_firstlineno,
-                            os.path.abspath(os.getcwd()),
-                        )
-                    )
-
-        func = ppg2.jobs._mark_function_wrapped(wrapper, function)
-
-    else:
-        func = function
-
-    res = ppg2.MultiFileGeneratingJob(output_filenames, func, empty_ok=empty_ok)
-    res = PPG1Adaptor(res)
-    return res
+class MultiFileGeneratingJob(PPG1AdaptorBase, ppg2.MultiFileGeneratingJob):
+    def __init__(self, output_filenames, function, rename_broken=False, empty_ok=False):
+        func = _wrap_func_if_no_output_file_params(function)
+        res = super().__init__(output_filenames, func, empty_ok=empty_ok)
 
 
-def TempFileGeneratingJob(output_filename, function, rename_broken=False):
-    assert_ppg_created()
-    sig = inspect.signature(function)
-    if len(sig.parameters) == 0:
-
-        def wrapper(of):  # pragma: no cover - runs in spawned process
-
-            function()
-            if not of.exists():
-                raise ppg2.exceptions.JobContractError(
-                    "%s did not create its file %s %s\n.Cwd: %s"
-                    % (
-                        of,
-                        function.__code__.co_filename,
-                        function.__code__.co_firstlineno,
-                        os.path.abspath(os.getcwd()),
-                    )
-                )
-
-        func = ppg2.jobs._mark_function_wrapped(wrapper, function)
-    else:
-        func = function
-
-    res = ppg2.TempFileGeneratingJob(output_filename, func)
-    return PPG1Adaptor(res)
+class TempFileGeneratingJob(PPG1AdaptorBase, ppg2.TempFileGeneratingJob):
+    def __init__(self, output_filename, function, rename_broken=False):
+        func = _wrap_func_if_no_output_file_params(function)
+        super().__init__(output_filename, func)
 
 
-def MultiTempFileGeneratingJob(output_filenames, function, rename_broken=False):
-    assert_ppg_created()
-    sig = inspect.signature(function)
-    if len(sig.parameters) == 0:
-
-        def wrapper(ofs):  # pragma: no cover - runs in spawned process
-
-            function()
-            for of in ofs:
-                if not of.exists():
-                    raise ppg2.exceptions.JobContractError(
-                        "%s did not create its file %s %s\n.Cwd: %s"
-                        % (
-                            of,
-                            function.__code__.co_filename,
-                            function.__code__.co_firstlineno,
-                            os.path.abspath(os.getcwd()),
-                        )
-                    )
-
-        func = ppg2.jobs._mark_function_wrapped(wrapper, function)
-    else:
-        func = function
-
-    res = ppg2.MultiTempFileGeneratingJob(output_filenames, func)
-    return PPG1Adaptor(res)
+class MultiTempFileGeneratingJob(PPG1AdaptorBase, ppg2.MultiTempFileGeneratingJob):
+    def __init__(self, output_filenames, function, rename_broken=False):
+        func = _wrap_func_if_no_output_file_params(function)
+        super().__init__(output_filenames, func)
 
 
 def MultiFileInvariant(filenames):
@@ -468,6 +434,10 @@ def MultiFileInvariant(filenames):
     for f in filenames:
         res.append(ppg2.FileInvariant(f))
     return res
+
+
+# no one inherits from these, so wrapping in a function is ok, I suppose
+# they should have been functions in ppg1.e..
 
 
 def CachedAttributeLoadingJob(

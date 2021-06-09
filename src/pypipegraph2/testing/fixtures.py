@@ -65,6 +65,7 @@ def new_pipegraph(request):
             )
             g.new = np
             g.new_pipegraph = g.new # ppg1 test case compatibility
+            g.result_dir = Path('results') # ppg test case compatibility
             if ppg2.ppg1_compatibility.patched:
                 g.rc = ppg2.ppg1_compatibility.FakeRC()
             return g
@@ -189,6 +190,7 @@ def both_ppg_and_no_ppg(request):
                 )
                 g.new = np
                 g.new_pipegraph = np # ppg1 test case compatibility
+                g.result_dir = Path('results') # ppg test case compatibility
                 return g
 
 
@@ -242,6 +244,7 @@ def both_ppg_and_no_ppg(request):
                 d = Dummy
                 d.new = lambda: None
                 d.new_pipegraph = lambda: None # ppg test case compatibility
+                d.result_dir = Path('results') # ppg test case compatibility
                 return d
 
             def finalize():
