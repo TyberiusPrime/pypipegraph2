@@ -2,6 +2,7 @@ import sys
 import pytest
 import os
 import shutil
+from loguru import logger
 
 from pathlib import Path
 import pypipegraph2 as ppg2
@@ -55,13 +56,18 @@ def new_pipegraph(request):
                 Path("out").mkdir()
 
                 first[0] = True
+            print('kwargs', kwargs)
+            if not 'log_level' in kwargs:
+                kwargs['log_level'] = 40
+
 
             g = ppg2.new(
                 cores=1,
                 # log_level=5,
                 allow_short_filenames=True,
                 run_mode=ppg2.RunMode.NONINTERACTIVE,
-                log_level = 40
+                **kwargs,
+                
             )
             g.new = np
             g.new_pipegraph = g.new # ppg1 test case compatibility
@@ -265,3 +271,24 @@ def both_ppg_and_no_ppg(request):
 
         finally:
             os.chdir(old_dir)
+
+
+@pytest.fixture
+def job_trace_log():
+    def fmt(record):
+        lvl = str(record["level"].name).ljust(8)
+        m = record["module"] + ":"
+        func = f"{m:12}{record['line']:4}"
+        func = func.ljust(12 + 4)
+        out = f"{record['level'].icon} {lvl} | {func} | {record['message']}\n"
+        if record["level"].name == "ERROR":
+            out = f"<blue>{out}</blue>"
+        return out
+
+    logger.remove()
+    handler_id = logger.add(sys.stderr, format=fmt, level=6)
+    ppg2.util.do_jobtrace_log = True
+    yield
+    logger.remove(handler_id)
+
+

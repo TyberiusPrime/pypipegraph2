@@ -64,6 +64,7 @@ def _mark_function_wrapped(outer, inner, desc="callback"):
 class Job:
     job_id: int
     historical: Optional[Tuple[str, Dict[str, str]]]
+    cleanup_job_class = None
 
     def __new__(cls, outputs, *args, **kwargs):
         return _dedup_job(cls, ":::".join(sorted([str(x) for x in outputs])))
@@ -89,7 +90,7 @@ class Job:
         self._pruned = False
 
     def __str__(self):
-        return f"{self.__class__}: {getattr(self, 'job_id', '*no_init*')}"
+        return f"{self.__class__.__name__}: {getattr(self, 'job_id', '*no_init*')}"
 
     def __repr__(self):
         return str(self)
@@ -108,7 +109,7 @@ class Job:
         """
         from . import global_pipegraph
 
-        log_job_trace(f"adding {type(self)} {self.job_id}")
+        log_job_trace(f"adding {self.__class__.__name__} {self.job_id}")
 
         if global_pipegraph is None:
             raise ValueError("Must instantiate a pipegraph before creating any Jobs")
@@ -121,7 +122,7 @@ class Job:
         ):  # the actual function is just an adaptor, ignore it for the wrapped function
             # e.g. FileGeneratingJob ppg1 compatibility with 'no-output-filename parameter'.
             func = func.wrapped_function
-            log_debug(f"FAlling back to wrapped function {self.job_id}")
+            # log_debug(f"Falling back to wrapped function {self.job_id}")
         func_invariant = FunctionInvariant(func, self.job_id)
         self.func_invariant = func_invariant  # we only store it so ppg1.compatibility ignore_code_changes can prune it
         self.depends_on(func_invariant)
@@ -151,18 +152,17 @@ class Job:
         if other_job is False and not other_jobs:
             # raise ValueError("You have to pass in at least one job")
             return self  # this is how ppg1 did it
-
-        if isinstance(other_job, list):
+        if isinstance(other_job, (CachedJobTuple, PlotJobTuple)):
+            raise TypeError(
+                "You passed in a CachedJobTuple/PlotJobTuple - unclear what to depend on. Pass in either .load/.calc or .plot/.cache/.table"
+            )
+        elif hasattr(other_job, "__iter__") and not isinstance(other_job, (Job, str)):
             for x in other_job:
                 self.depends_on(x)
         else:
             if isinstance(other_job, Job):
                 o_job = other_job
                 o_inputs = other_job.outputs
-            elif isinstance(other_job, (CachedJobTuple, PlotJobTuple)):
-                raise TypeError(
-                    "You passed in a CachedJobTuple/PlotJobTuple - unclear what to depend on. Pass in either .load/.calc or .plot/.cache/.table"
-                )
             elif other_job is None:
                 return self
             elif hasattr(other_job, "__call__"):
@@ -179,9 +179,10 @@ class Job:
                 raise exceptions.NotADag("Job can not depend on itself")
             if global_pipegraph.has_edge(self, o_job):
                 raise exceptions.NotADag(
-                    f"{o_job.job_id} is already upstream of {self.job_id}, can't be downstream as well (cycle)"
+                    f"{o_job.job_id} is already (directly) upstream of {self.job_id}, can't be downstream as well (cycle)"
                 )
 
+            log_job_trace(f"adding edge {o_job.job_id}, {self.job_id}")
             global_pipegraph.add_edge(o_job, self)
             global_pipegraph.job_inputs[self.job_id].update(o_inputs)
         if other_jobs:
@@ -192,8 +193,7 @@ class Job:
     def output_needed(self, _ignored_runner):
         return False
 
-    @classmethod
-    def compare_hashes(cls, old_hash, new_hash):
+    def compare_hashes(self, old_hash, new_hash):
         return old_hash == new_hash
 
     def depends_on_func(self, function, name=None):
@@ -267,6 +267,12 @@ class Job:
 
 
 class _DownstreamNeedsMeChecker(Job):
+    """Internal to the modified dag in runner,
+
+    Signals whether the downstream jobs has output_needed via
+    the invalidation machinery.
+    """
+
     job_kind = JobKind.Invariant
 
     def __new__(cls, job_to_check):
@@ -281,17 +287,116 @@ class _DownstreamNeedsMeChecker(Job):
 
     def run(self, runner, _historical_output):
         if self.job_to_check.output_needed(runner):
-            return {self.job_id: "ExplodePlease"}
+            log_job_trace(f" {self.job_id} ExplodePlease")
+            return {
+                self.job_id: "ExplodePlease"
+            }  # magic value, not being compared to previous run!
         else:
+            log_job_trace(f" {self.job_id} IgnorePlease")
             return {self.job_id: "IgnorePlease"}
 
-    @classmethod
-    def compare_hashes(cls, old_hash, new_hash):
+    def compare_hashes(self, old_hash, new_hash):
         if new_hash == "ExplodePlease":
             return False
         if new_hash == "IgnorePlease":
             return True
         raise NotImplementedError("Should not be reached")  # pragma: no cover
+
+
+class _ConditionalJobClone(Job):
+    """Internal to the modified dag in runner.
+    This 'mirrors' one conditional job multiple times, so
+    it can be outfitted with 'hulls' per downstream job"""
+
+    @staticmethod
+    def _name_job(
+        parent_job,
+        downstream_job_id,
+    ):
+        return "(CJC:" + parent_job.job_id + ":" + downstream_job_id + ")"
+
+    def __new__(cls, parent_job, clone_number, other_clones, first_output):
+        job_id = cls._name_job(parent_job, clone_number)
+        return object.__new__(cls)
+
+    def __init__(self, parent_job, downstream_job_id, other_clones, first_output):
+        import threading
+
+        self.job_id = self._name_job(
+            parent_job,
+            downstream_job_id,
+        )
+        self.resources = parent_job.resources
+        self.outputs = [self.job_id + x for x in parent_job.outputs]
+        self.dependency_callbacks = []
+        # self._validate()
+        # self.readd()
+        self._pruned = False
+        self.job_kind = parent_job.job_kind
+        self.job_number = parent_job.job_number
+        self.cleanup_job_class = parent_job.cleanup_job_class
+
+        self.parent_job = parent_job
+        self.other_clones = other_clones
+        self.first_output = first_output
+        if not other_clones:
+            self.lock = threading.Condition()
+        else:
+            self.lock = self.other_clones[0].lock
+        self.other_clones.append(self)
+
+    def __del__(self):
+        self.other_clones = None  # break cycle
+
+    def output_needed(self, runner):
+        log_job_trace(f"Forwarding output_needed to {self.parent_job}")
+        # do perverse things with pythons conscept of methods,
+        # like on purpose calling them with the wrong class
+        self.parent_job.__class__.output_needed(self, runner)
+
+    def compare_hashes(self, old_hash, new_hash):
+        return self.parent_job.compare_hashes(old_hash, new_hash)
+
+    def run(self, runner, historical_output):
+        if self.first_output:  # one of the siblings has run
+            log_job_trace(
+                f"{self.job_id}, output available - ok: {self.first_output[0][0]}"
+            )
+            # paranoia
+            if len(self.first_output) > 1:
+                raise ValueError(
+                    "First output had multiple outputs - this should not happen"
+                )
+            ok, res = self.first_output[0]
+            if ok:
+                result = {self.job_id + k: v for (k, v) in res.items()}
+                return result  # translate parent outputs ot my outputs
+            else:
+                raise res
+        else:
+            if self.lock.acquire(blocking=False):
+                # we are the first
+                log_job_trace(f"{self.job_id}, lock aquired")
+                try:
+                    modified_historical_output = {
+                        k[len(self.job_id) :]: v for (k, v) in historical_output.items()
+                    }
+                    result = self.parent_job.run(runner, modified_historical_output)
+                    self.first_output.append((True, result))
+                except Exception as e:
+                    self.first_output.append((False, e))
+                finally:
+                    self.lock.notify_all()  # tell all others to resume
+                    self.lock.release()
+            else:
+                log_job_trace(f"{self.job_id}, concurrent calculation - waiting")
+                self.lock.wait()  # wait for notification
+                # todo: in an ideal world, release core lock, increase thread count here?
+            # now output. reuse code from if self.first_output
+            assert self.first_output  # paranoia
+            return self.run(
+                runner, historical_output
+            )  # recurse and go into output available case
 
 
 class MultiFileGeneratingJob(Job):
@@ -620,6 +725,9 @@ class MultiFileGeneratingJob(Job):
             # other wise we have no history, and the skipping will
             # break the graph execution
             if str(fn) not in runner.job_states[self.job_id].historical_output:
+                log_error(
+                    f"No history for {fn}, {escape_logging(runner.job_states[self.job_id].historical_output)}"
+                )
                 return True
         return False
 
@@ -636,8 +744,7 @@ class MultiFileGeneratingJob(Job):
         if self.pid is not None:
             os.kill(self.pid, signal.SIGTERM)
 
-    @classmethod
-    def compare_hashes(cls, old_hash, new_hash):
+    def compare_hashes(self, old_hash, new_hash):
         return new_hash["hash"] == old_hash.get("hash", "")
 
 
@@ -691,7 +798,9 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
         for downstream_id in runner.dag.neighbors(self.job_id):
             job = runner.jobs[downstream_id]
             if job.output_needed(runner):
+                log_job_trace(f"Tempfile said output needed because of {job.job_id}")
                 return True
+        log_job_trace("Tempfile said no output needed")
         return False
 
 
@@ -728,9 +837,14 @@ class _FileCleanupJob(Job):
     def __init__(self, parent_job):
         Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
         self.parent_job = parent_job
+        self.real_parent_job = (
+            parent_job  #  parent_job may be replaced by _ConditionalJobClone
+        )
+        # and that is necessary for the invalidation to do it's thing
+        # but the real parent will the one we read the files from
 
     def run(self, _ignored_runner, _historical_output):
-        for fn in self.parent_job.files:
+        for fn in self.real_parent_job.files:
             if fn.exists():
                 fn.unlink()
 
@@ -906,8 +1020,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
         return {self.job_id: res}
 
-    @classmethod
-    def compare_hashes(cls, old_hash, new_hash, python_version=python_version):
+    def compare_hashes(self, old_hash, new_hash, python_version=python_version):
         if python_version in new_hash and python_version in old_hash:
             res = new_hash[python_version] == old_hash[python_version]
             # log_job_trace(f"Comparing based on bytecode: result {res}")
@@ -1284,7 +1397,9 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
         self.file = Path(file)
         super().__init__([str(self.file)])
-        self.files = [self.file] # so it's the same whether you are looking at FG, MFG, or FI
+        self.files = [
+            self.file
+        ]  # so it's the same whether you are looking at FG, MFG, or FI
         if len(self.job_id) < 3 and not global_pipegraph.allow_short_filenames:
             raise ValueError(
                 "This is probably not the filename you intend to use: {}.".format(self)
@@ -1320,8 +1435,7 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                 self.did_hash_last_run = (mtime_the_same, size_the_same)
                 return {self.outputs[0]: self.calculate(self.file, stat)}
 
-    @classmethod
-    def compare_hashes(cls, old_hash, new_hash):
+    def compare_hashes(self, old_hash, new_hash):
         return new_hash["hash"] == old_hash.get("hash", "")
 
 
@@ -1402,6 +1516,10 @@ class DataLoadingJob(Job):
     def run(self, runner, historical_output):
         self.load_function()
 
+        log_job_trace(
+            f"dl {self.job_id} - historical: {historical_output.get(self.outputs[0], False)}"
+        )
+        log_job_trace(f"dl {self.job_id} - {escape_logging(historical_output)}")
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
         }  # so the downstream get's invalidated
@@ -1410,7 +1528,7 @@ class DataLoadingJob(Job):
         # we could also invalidate on a hash based on the return of load_function.
         # (which is more naturally available in an AttributeLoadingJob
         # that would be more inline with the 'only-recalc-if-the-input-actually-changed'
-        # philosopy.
+        # philosophy.
         # but it will cause false positives if you return things that have an instable str
         # (or what ever hash source we use)
         # and it will cause false negatives if the load_function is just for the side effects...
@@ -1702,7 +1820,6 @@ def PlotJob(  # noqa:C901
         output_filename, do_plot, depend_on_function=depend_on_function
     )
     param_job = ParameterInvariant(output_filename, render_args)
-    print(param_job.job_id, render_args)
     plot_job.depends_on(param_job)
 
     def _call_result():

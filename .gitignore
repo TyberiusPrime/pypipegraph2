@@ -56,4 +56,4 @@ benchmarks/flames.svg
 */.ppg/*
 examples/run
 flame*.svg
-tests/ppg1_compability_layer/run/
+tests/ppg1_compatibility/run/

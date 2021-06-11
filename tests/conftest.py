@@ -145,43 +145,10 @@ def create_out_dir(request):
     yield
 
 
-@pytest.fixture
-def job_trace_log():
-    def fmt(record):
-        lvl = str(record["level"].name).ljust(8)
-        m = record["module"] + ":"
-        func = f"{m:12}{record['line']:4}"
-        func = func.ljust(12 + 4)
-        out = f"{record['level'].icon} {lvl} | {func} | {record['message']}\n"
-        if record["level"].name == "ERROR":
-            out = f"<blue>{out}</blue>"
-        return out
-
-    logger.remove()
-    handler_id = logger.add(sys.stderr, format=fmt, level=6)
-    ppg2.do_jobtrace_log = True
-    yield
-    logger.remove(handler_id)
+from pypipegraph2.testing.fixtures import job_trace_log
 
 
-@pytest.fixture
-def trace_log():  # could not find out how to abstract pytest fixtures
-    def fmt(record):
-        lvl = str(record["level"].name).ljust(8)
-        m = record["module"] + ":"
-        func = f"{m:12}{record['line']:4}"
-        func = func.ljust(12 + 4)
-        out = f"{record['level'].icon} {lvl} | {func} | {record['message']}\n"
-        if record["level"].name == "ERROR":
-            out = f"<blue>{out}</blue>"
-        return out
-
-    logger.remove()  # no coming back after this :(
-    handler_id = logger.add(sys.stderr, format=fmt, level=5)
-    yield
-    logger.remove(handler_id)
-    # logger.add(old)
-
+trace_log = job_trace_log
 
 @pytest.fixture
 def ppg1_compatibility_test(request):

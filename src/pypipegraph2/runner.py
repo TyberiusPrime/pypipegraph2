@@ -14,6 +14,8 @@ import threading
 from rich.console import Console
 from .interactive import ConsoleInteractive
 from .util import log_info, log_error, log_warning, log_debug, log_job_trace
+from .jobs import _DownstreamNeedsMeChecker, _ConditionalJobClone
+import copy
 
 
 class JobStatus:
@@ -80,7 +82,9 @@ class Runner:
         with _with_changed_global_pipegraph(JobCollector(job_graph.run_mode)):
             self.job_graph = job_graph
             self.jobs = job_graph.jobs.copy()
-            self.job_inputs = job_graph.job_inputs.copy()
+            self.job_inputs = copy.deepcopy(
+                job_graph.job_inputs
+            )  #  job_graph.job_inputs.copy()
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
             self.core_lock = CoreLock(job_graph.cores)
 
@@ -94,19 +98,26 @@ class Runner:
             # import json
 
             # assert flat_before == flat_after
-            # log_job_trace(
-            # "dag "
-            # + escape_logging(
-            # json.dumps(
-            # networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
-            # )
-            # ),
-            # )
+            import json
+
+            log_job_trace(
+                "dag "
+                + escape_logging(
+                    json.dumps(
+                        networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
+                    )
+                ),
+            )
 
             if not networkx.algorithms.is_directed_acyclic_graph(
                 self.dag
             ):  # pragma: no cover - defensive
-                raise exceptions.NotADag("modify_dag error", list(networkx.simple_cycles(self.dag)))
+                error_fn = self.job_graph.log_dir / "debug_edges_with_cycles.txt"
+                networkx.write_edgelist(self.dag, error_fn)
+                cycles = list(networkx.simple_cycles(self.dag))
+                raise exceptions.NotADag(
+                    f"Not a directed *acyclic* graph. See {error_fn}. Cycles between {cycles}"
+                )
             self.job_states = {}
 
             for job_id in self.jobs:
@@ -115,24 +126,14 @@ class Runner:
                     job_id, ({}, {})
                 )  # todo: support renaming jobs.
                 log_job_trace(
-                    f"Loaded history for {job_id} {len(s.historical_input)}, {len(s.historical_output)}"
+                    f"Loaded history for {job_id} in: {len(s.historical_input)}, out: {len(s.historical_output)}"
                 )
                 self.job_states[job_id] = s
             self.event_lock = threading.Lock()
             self.jobs_to_run_que = queue.SimpleQueue()
             self.threads = []
 
-    def modify_dag(  # noqa: C901
-        self, job_graph, focus_on_these_jobs, jobs_already_run_previously
-    ):
-        """Modify the DAG to be executed
-        by adding CleanupJobs, _DownstreamNeedsMeChecker,
-        applying pruning,
-        focusing on selected jobs (ie. prune everything outside of their DAG),
-        or removing jobs we ran in the last ran-through
-        """
-        from .jobs import _DownstreamNeedsMeChecker
-
+    def _apply_pruning(self, dag, focus_on_these_jobs, jobs_already_run_previously):
         def _recurse_pruning(job_id, reason):
             """This goes forward/downstream"""
             pruned.add(job_id)
@@ -151,7 +152,6 @@ class Runner:
             for downstream_job_id in dag.predecessors(job_id):
                 _recurse_unpruning(downstream_job_id)
 
-        dag = job_graph.job_dag.copy()
         if jobs_already_run_previously:
             new_jobs = set(dag.nodes).difference(jobs_already_run_previously)
         else:
@@ -180,73 +180,177 @@ class Runner:
             except networkx.exception.NetworkXError:  # happens with cleanup nodes that we  omitted
                 pass
 
-        known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
+    def _add_cleanup(self, dag, job):
+        cleanup_job = job.cleanup_job_class(job)
+        cleanup_job.job_number = len(self.jobs)
+        job._cleanup_job_id = cleanup_job.job_id
+        self.jobs[cleanup_job.job_id] = cleanup_job
+        self.outputs_to_job_ids[cleanup_job.outputs[0]] = cleanup_job.job_id
+        dag.add_node(cleanup_job.job_id)
+        downstreams = [
+            x
+            for x in dag.neighbors(job.job_id)
+            if self.jobs[x].job_kind is not JobKind.Cleanup
+        ]  # depending on other cleanups makes littlesense
+        log_job_trace(f"{job.job_id} cleanup adding")
+        if not downstreams:
+            log_job_trace(f"{job.job_id} had no downstreams - cleanup right after")
+            downstreams = [
+                job.job_id
+            ]  # nobody below you? your cleanup will run right after you
+        for downstream_job_id in downstreams:
+            log_job_trace(
+                f"add downstream edge: {downstream_job_id}, {cleanup_job.job_id}"
+            )
+            dag.add_edge(downstream_job_id, cleanup_job.job_id)
+            self.job_inputs[cleanup_job.job_id].update(
+                self.jobs[downstream_job_id].outputs
+            )
+
+    def _modify_dag_for_conditional_job(self, dag, job):
+        """A a conditional job is one that only runs if it's downstreams need it.
+        Examples are DataLoadingJobs and TempFileGeneratingJobs.
+
+        They need to run
+        - when their downstream has not (output_needed() == True)
+        - when their downstream is invalidated.
+
+        We achieve the second by cloning the 'hull' of dependencies
+        of the downstream. The hull is the direct dependencies, but
+        conditional are replaced by their hull.
+
+        We need to clone the conditonal jobs per downstream job -
+        mixing the hulls can lead to cycles otherwise (also unnecessary
+        recalcs, I presume)
+        """
+
+        other_clones = []
+        first_output = []  # abuse a list as a box...
+        log_job_trace(f"_modify_dag_for_conditional_job for {job.job_id}")
+        clone = None
+        if job.cleanup_job_class:
+            cleanup_job = job.cleanup_job_class(job)
+            dag.add_node(cleanup_job.job_id)
+            self.jobs[cleanup_job.job_id] = cleanup_job
+        else:
+            cleanup_job = None
+
+        upstreams = dag.predecessors(job.job_id)
+        for downstream_job_id in list(
+            dag.successors(job.job_id)
+        ):  # must make a copy, since we change this in the loop
+            # part one: add the 'does the downstream need me to calculate' check?
+            log_job_trace(f"\t successor {downstream_job_id}")
+            downstream_job = self.jobs[downstream_job_id]
+            clone = _ConditionalJobClone(
+                job, downstream_job_id, other_clones, first_output
+            )
+            dnmc = _DownstreamNeedsMeChecker(
+                downstream_job
+            )  # todo: we only need this once per downstream... what happens if we define it multple times
+            log_job_trace(f"\t clone {clone.job_id}")
+            log_job_trace(f"\t dnmc {dnmc.job_id}")
+            dag.add_node(clone.job_id)
+            self.jobs[clone.job_id] = clone
+            for k in clone.outputs:
+                self.outputs_to_job_ids[k] = clone.job_id
+
+            dag.add_node(dnmc.job_id)
+            self.jobs[dnmc.job_id] = dnmc
+            log_job_trace(
+                f"\t self.jobs[dnmc.job_id] {dnmc.job_id} - {self.jobs[dnmc.job_id]}"
+            )
+            for k in dnmc.outputs:
+                self.outputs_to_job_ids[k] = dnmc.job_id
+                self.job_inputs[clone.job_id].add(
+                    k
+                )  # which I presume is equivalent to dnmc.job_id, but tihs is 'more correct'
+
+            dag.add_edge(dnmc.job_id, clone.job_id)
+
+            # outgoing edge of this clone
+            # there is only one, to the downstream_job  ( one clone per downtream job...)
+            dag.add_edge(clone.job_id, downstream_job_id)
+            # replicate the incoming edges for the conditional job we are replacing
+            for upstream_job_id in upstreams:
+                dag.add_edge(upstream_job_id, clone.job_id)
+                self.job_inputs[clone.job_id].update(self.jobs[upstream_job_id].outputs)
+            # self.job_inputs[downstream_job_id].add(clone.job_id)
+
+            # part two, give the clone the hull of the original.
+            # todo: what happens if the hull is just the direct dependencies,
+            # without the conditonal job recursion?
+
+            # todo: cache (if downstream_job has multiple conditional dependencie
+            hull = self._iter_job_non_temp_upstream_hull(downstream_job_id, dag)
+            for hull_job_id in hull:
+                print(hull_job_id)
+                print(clone)
+                dag.add_edge(hull_job_id, clone.job_id)
+                self.job_inputs[clone.job_id].update(self.jobs[hull_job_id].outputs)
+
+            # now I need to remove the original conditional job from the downstream_jobs dependencies
+            dag.remove_edge(job.job_id, downstream_job_id)
+            # this ins not a noop, since the CJC has it's own renamed outputs
+            for k in job.outputs:
+                log_info(f"Removing {k} from {downstream_job_id}")
+                self.job_inputs[downstream_job_id].remove(k)
+            # add the cloned outputs bag
+            self.job_inputs[downstream_job_id].update(clone.outputs)
+
+            if cleanup_job is not None:
+                dag.add_edge(downstream_job_id, cleanup_job.job_id)
+                self.job_inputs[downstream_job_id].update(clone.outputs)
+                cleanup_job.parent_job = clone # doesn't matter which one.
+
+
+        # and at last remove the conditional job itself from the graph
+        dag.remove_node(job.job_id)
+        del self.jobs[job.job_id]
+
+
+
+
+    def modify_dag(  # noqa: C901
+        self, job_graph, focus_on_these_jobs, jobs_already_run_previously
+    ):
+        """Modify the DAG to be executed
+        by
+            - splitting conditional jobs (DataLoading, TempFile)
+              into one virtual job per downstream that is dependend
+              on the downstreams hull (see below)
+            - adding CleanupJobs, (e.g. for TempFileGeneratingJobs)
+            - pruning
+            - focusing on selected jobs (i.e. prune everything outside of their connected component)
+            - removing jobs we ran in the last run-through
+
+        """
+        import json
+
+        dag = job_graph.job_dag.copy()
+        self._apply_pruning(dag, focus_on_these_jobs, jobs_already_run_previously)
+
         # ti = time.time()
-        counter = 0
         hulls = {}
-        for job_id in reversed(known_job_ids):
+
+        # first, clone & multiply all conditional jobs...
+        known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
+        for job_id in reversed(known_job_ids):  # todo: do we need reversed
             job = self.jobs[job_id]
             if job.job_kind in (JobKind.Temp, JobKind.Loading):
-                for downstream_job_id in dag.successors(job_id):
-                    # part one: add the 'does the downstream need me to calculate' check?
-                    downstream_job = self.jobs[downstream_job_id]
-                    if downstream_job.job_kind is not JobKind.Cleanup:
-                        counter += 1
-                        downstream_needs_me_checker = _DownstreamNeedsMeChecker(
-                            downstream_job
-                        )
-                        dag.add_node(downstream_needs_me_checker.job_id)
-                        self.jobs[
-                            downstream_needs_me_checker.job_id
-                        ] = downstream_needs_me_checker
-                        # self.job_inputs[downstream_needs_me_checker.job_id] =  set() # empty is covered by default dict
-                        self.job_inputs[job_id].add(downstream_needs_me_checker.job_id)
-                        self.outputs_to_job_ids[
-                            downstream_needs_me_checker.job_id
-                        ] = downstream_needs_me_checker.outputs[0]
+                self._modify_dag_for_conditional_job(dag, job)
 
-                        dag.add_edge(downstream_needs_me_checker.job_id, job_id)
-                        # part two - clone downstreams inputs:
-                        # with special attention to temp jobs
-                        # to avoid crosslinking
-                        # print(len(self._iter_job_non_temp_upstream_hull(
-                        # downstream_job_id, dag
-                        # )))
-                        if downstream_job_id not in hulls:
-                            # this caching speeds up 'wide' graphs
-                            # e.g. those in benchmarks/bench_wide.py
-                            # goes from 192s with 1000 jobs to 1.23
-                            # still not great, but much better.
-                            # still quadratic in nature though :(.
-                            hulls[
-                                downstream_job_id
-                            ] = self._iter_job_non_temp_upstream_hull(
-                                downstream_job_id, dag
-                            )
-                        for down_upstream_id in hulls[downstream_job_id]:
-                            counter += 1
-                            if down_upstream_id != job_id:
-                                downstream_upstream_job = self.jobs[down_upstream_id]
-                                dag.add_edge(down_upstream_id, job_id)
-                                self.job_inputs[job_id].update(
-                                    downstream_upstream_job.outputs
-                                )
-            if hasattr(job, "cleanup_job_class"):
-                cleanup_job = job.cleanup_job_class(job)
-                self.jobs[cleanup_job.job_id] = cleanup_job
-                self.outputs_to_job_ids[cleanup_job.outputs[0]] = cleanup_job.job_id
-                dag.add_node(cleanup_job.job_id)
-                downstreams = list(dag.neighbors(job_id))
-                if not downstreams:
-                    downstreams = [
-                        job_id
-                    ]  # nobody below you? your cleanup will run right after you
-                for downstream_job_id in downstreams:
-                    dag.add_edge(downstream_job_id, cleanup_job.job_id)
-                    self.job_inputs[cleanup_job.job_id].update(
-                        self.jobs[downstream_job_id].outputs
-                    )
-        # raise ValueError(counter, time.time() -ti)
+                log_job_trace(
+                    "dag "
+                    + escape_logging(
+                        json.dumps(
+                            networkx.readwrite.json_graph.node_link_data(dag), indent=2
+                        )
+                    ),
+                )
+
+            else:
+                log_job_trace(f"no modify dag for {job.job_id}")
         return dag
 
         # now add an initial job, so we can cut off the evaluation properly
@@ -259,6 +363,10 @@ class Runner:
                 result.update(
                     self._iter_job_non_temp_upstream_hull(upstream_job_id, dag)
                 )
+            elif isinstance(
+                upstream_job, _DownstreamNeedsMeChecker
+            ):  # not quite sure about this one.
+                pass
             else:
                 result.add(upstream_job_id)
         return result
@@ -387,6 +495,17 @@ class Runner:
                 self.jobs_to_run_que.put(ExitNow)
             for t in self.threads:
                 t.join()
+            #now capture straglers
+            #todo: replace this with something guranteed to work.
+            while True:
+                try:
+                    ev = self.events.get_nowait()
+                except queue.Empty:
+                    break
+                else:
+                    log_job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
+                    self._handle_event(ev)
+
             if hasattr(self, "_status"):
                 self._status.stop()
             self._interactive_stop()
@@ -400,6 +519,18 @@ class Runner:
                     log_job_trace(f"new job {job_id}")
             raise _RunAgain(self.job_states)
         log_job_trace("Left runner.run()")
+
+        for job in self.jobs.values():
+            if isinstance(job, _ConditionalJobClone):
+                if not job.parent_job.job_id in self.job_states:
+                    self.job_states[job.parent_job.job_id] = self.job_states[job.job_id]
+                    # errs = {k: v.error for (k,v) in self.job_states.items()}
+                    # log_job_trace(f"{escape_logging(str(errs))}")
+                    pass
+                # del self.job_states[job.job_id] # as if it was never cloned
+            log_job_trace(f'history for {job.job_id} in: {len(self.job_states[job.job_id].updated_input)} out {len(self.job_states[job.job_id].updated_output)}')
+
+
         return self.job_states
 
     def _interactive_start(self):
@@ -496,7 +627,7 @@ class Runner:
             )
         else:
             for name, hash in job_outputs.items():
-                log_job_trace(f"\tCapturing hash for {name}")
+                log_job_trace(f"\tCapturing hash for {name} {escape_logging(hash)}")
                 self.output_hashes[name] = hash
                 job_state.updated_output[name] = hash
                 # when the job is done, it's the time time to record the inputs
@@ -517,15 +648,15 @@ class Runner:
         if self.stopped:
             return
         for downstream_id in self.dag.successors(job_id):
-            # log_job_trace(f"\t\tDownstream {downstream_id}")
+            log_job_trace(f"\t\tDownstream {downstream_id}")
             downstream_state = self.job_states[downstream_id]
             downstream_job = self.jobs[downstream_id]
             for name, hash in job_outputs.items():
                 if name in self.job_inputs[downstream_id]:
-                    # log_job_trace(f"\t\t\tHad {name}")
+                    log_job_trace(f"\t\t\tHad {name}")
                     downstream_state.updated_input[name] = hash  # update any way.
-                # else:
-                # log_job_trace(f"\t\t\tNot an input {name}")
+                else:
+                    log_job_trace(f"\t\t\tNot an input {name}")
             if self._all_inputs_finished(downstream_id):
                 old_input = downstream_state.historical_input
                 new_input = downstream_state.updated_input
@@ -546,10 +677,8 @@ class Runner:
                     ):  # nothing possibly renamed
                         log_job_trace(f"{downstream_id} Same set of input keys")
                         for key, old_hash in old_input.items():
-                            cmp_job = self.jobs[self.outputs_to_job_ids[key]].__class__
-                            if not self._compare_history(
-                                old_hash, new_input[key], cmp_job
-                            ):
+                            cmp_job = self.jobs[self.outputs_to_job_ids[key]]
+                            if not cmp_job.compare_hashes(old_hash, new_input[key]):
                                 log_job_trace(
                                     f"{downstream_id} input {key} changed {escape_logging(old_hash)} {escape_logging(new_input[key])}"
                                 )
@@ -564,11 +693,9 @@ class Runner:
                                 log_job_trace(
                                     f"key in both old/new {old_key} {escape_logging(old_hash)} {escape_logging(new_input[old_key])}"
                                 )
-                                cmp_job = self.jobs[
-                                    self.outputs_to_job_ids[old_key]
-                                ].__class__
-                                if not self._compare_history(
-                                    old_hash, new_input[old_key], cmp_job
+                                cmp_job = self.jobs[self.outputs_to_job_ids[old_key]]
+                                if not cmp_job.compare_hashes(
+                                    old_hash, new_input[old_key]
                                 ):
                                     log_job_trace(
                                         f"{downstream_id} input {old_key} changed"
@@ -603,6 +730,7 @@ class Runner:
                     downstream_job.job_kind is JobKind.Temp
                     and downstream_state.validation_state is ValidationState.Invalidated
                 ):
+                    log_job_trace(f"\t\tcase 1")
                     if self._job_has_non_temp_somewhere_downstream(downstream_id):
                         self._ready_or_failed(downstream_id)
                     else:
@@ -616,8 +744,10 @@ class Runner:
                     downstream_state.validation_state is ValidationState.Invalidated
                     or downstream_job.output_needed(self)
                 ):
+                    log_job_trace(f"\t\tcase 2 {downstream_state.validation_state}")
                     self._ready_or_failed(downstream_id)
                 else:
+                    log_job_trace(f"\t\tcase 3")
                     if downstream_job.job_kind is JobKind.Cleanup:
                         if (
                             self.job_states[
@@ -717,9 +847,7 @@ class Runner:
             else:
                 log_error(f"Failed job: {job_id}")
             if stacks is not None:
-                log_error(
-                    escape_logging(stacks._format_rich_traceback_fallback(False))
-                )
+                log_error(escape_logging(stacks._format_rich_traceback_fallback(False)))
             else:
                 log_error(job_state.error)
                 log_error("no stack available")
@@ -730,26 +858,33 @@ class Runner:
         if job_state.state in (JobState.Failed, JobState.UpstreamFailed):
             # log_job_trace("\t\t\tall_inputs_finished = false because failed")
             return False
-        # log_job_trace(f"\t\t\tjob_inputs: {escape_logging(self.job_inputs[job_id])}")
-        # log_job_trace(
-        # f"\t\t\tupdated_input: {escape_logging(self.job_states[job_id].updated_input.keys())}"
-        # )
+        log_job_trace(f"\t\t\tall_input_finished?: {job_id}")
+        log_job_trace(f"\t\t\tjob_inputs: {escape_logging(self.job_inputs[job_id])}")
+        log_job_trace(
+            f"\t\t\tupdated_input: {escape_logging(set(self.job_states[job_id].updated_input.keys()))}"
+        )
         all_finished = len(self.job_states[job_id].updated_input) == len(
             self.job_inputs[job_id]
         )
+        # if not all_finished:
+        ##log_job_trace(
+        # f"{job_id}  - job_states.updated_input {escape_logging(self.job_states[job_id].updated_input)}"
+        # )
+        # log_job_trace(
+        # f"{job_id}  - job_inputs {escape_logging(self.job_inputs[job_id])}"
+        # )
         # log_job_trace(f"\t\t\tall_input_finished: {all_finished}")
         return all_finished
 
     def _push_event(self, event, args, indent=0):
         """Push an event to be handled by the control thread"""
         with self.event_lock:
-            log_job_trace(
-                "\t" * indent + f"->push {event} {args[0]}"
-            )
+            log_job_trace("\t" * indent + f"->push {event} {args[0]}")
             self.events.put((event, args))
 
     def _fail_downstream_by_outputs(self, outputs, source):
         """Identify all downstream jobs via a job's outputs, and _fail_downstream them"""
+        log_job_trace(f"_fail_downstream_by_outputs {escape_logging(outputs)} {source}")
         for output in outputs:
             # can't I run this with the job_id? todo: optimization
             job_id = self.outputs_to_job_ids[
@@ -759,7 +894,7 @@ class Runner:
 
     def _fail_downstream(self, job_id, source):
         """Fail a node because it's upstream failed, recursively"""
-        log_job_trace(f"failed_downstream {job_id} {source}")
+        log_job_trace(f"failed_downstream {job_id} because of {source}")
         job_state = self.job_states[job_id]
         if (
             job_state.state is not JobState.Failed
@@ -769,10 +904,6 @@ class Runner:
             self._push_event("JobUpstreamFailed", (job_id,))
         for node in self.dag.successors(job_id):
             self._fail_downstream(node, source)
-
-    def _compare_history(self, old_hash, new_hash, job_class):
-        """Compare the hashes of two jobs"""
-        return job_class.compare_hashes(old_hash, new_hash)
 
     def _job_has_non_temp_somewhere_downstream(self, job_id):
         """Does this job have a non-temp job somewhere downstream.
@@ -824,7 +955,9 @@ class Runner:
                 job = self.jobs[job_id]
                 job_state = self.job_states[job_id]
                 try:
-                    job.start_time = time.time() # assign it just in case anything fails before acquiring the lock
+                    job.start_time = (
+                        time.time()
+                    )  # assign it just in case anything fails before acquiring the lock
                     c = job.resources.to_number(self.core_lock.max_cores)
                     log_job_trace(
                         f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {len(self.jobs_in_flight)}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
@@ -849,7 +982,7 @@ class Runner:
                     if c == 0:
                         log_error(f"Cores was 0! {job.job_id} {job.resources}")
                     with self.core_lock.using(c):
-                        job.start_time = time.time() # the *actual* start time
+                        job.start_time = time.time()  # the *actual* start time
                         log_job_trace(f"Go {job_id}")
                         log_job_trace(f"\tExecuting {job_id}")
 
@@ -896,10 +1029,14 @@ class Runner:
                     if c > 1:
                         self.jobs_all_cores_in_flight -= 1
         except (KeyboardInterrupt, SystemExit):
-            log_job_trace(f"Keyboard Interrupt received {time.time() - self.abort_time}")
+            log_job_trace(
+                f"Keyboard Interrupt received {time.time() - self.abort_time}"
+            )
             pass
         except Exception as e:
-            log_error(f"Captured exception outside of loop - should not happen {e}")
+            log_error(
+                f"Captured exception outside of loop - should not happen {type(e)} {str(e)}. Check error log"
+            )
 
 
 class JobCollector:

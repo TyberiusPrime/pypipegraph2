@@ -244,7 +244,7 @@ class TestPypipegraph2:
         )  # c get's rewritten, it depended on all of A
         assert Path("D").read_text() == "D0"
 
-    def test_tempfile(self, trace_log):
+    def test_tempfile(self, job_trace_log):
         jobA = ppg.TempFileGeneratingJob(
             "TA",
             lambda of: of.write_text("A" + counter("a")),
@@ -274,6 +274,7 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "B1A1"
 
     def test_tempfile_chained_invalidate_leaf(self, trace_log):
+        ppg.new(cores=1)
         jobA = ppg.TempFileGeneratingJob(
             "TA", lambda of: of.write_text("A" + counter("a")), depend_on_function=False
         )
@@ -359,9 +360,9 @@ class TestPypipegraph2:
         jobB.depends_on(jobA)
         ppg.run()
         assert not Path("TA").exists()
-        assert Path("a").exists()
+        assert not Path("a").exists() # changed with the smarter hull stuff - they don't run for sideeffects-and-giggles
         assert not Path("B").exists()
-        assert Path("b").exists()
+        assert not Path("b").exists()
 
     def test_just_chained_tempfile_no_invariant(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
@@ -386,11 +387,11 @@ class TestPypipegraph2:
 
         ppg.run()
         assert not Path("A").exists()
-        assert Path("a").exists()
+        assert not Path("a").exists()
         assert not Path("B").exists()
-        assert Path("b").exists()
+        assert not Path("b").exists()
         assert not Path("C").exists()
-        assert Path("c").exists()
+        assert not Path("c").exists()
 
     def test_tempfile_triggered_by_invalidating_final_job(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
@@ -466,7 +467,7 @@ class TestPypipegraph2:
         assert Path("C").read_text() == "C0B"
         assert Path("a").read_text() == "2"
 
-    def test_depending_on_two_temp_jobs_but_only_one_invalidated(self):
+    def test_depending_on_two_temp_jobs_but_only_one_invalidated(self, job_trace_log):
         jobA = ppg.TempFileGeneratingJob(
             "A",
             lambda of: of.write_text("A" + counter("a")),
@@ -539,17 +540,18 @@ class TestPypipegraph2:
         Path("B").unlink()
         ppg.run()
         assert Path("B").read_text() == "BTA1"
-        assert Path("C").read_text() == "C1TA1"
+        assert Path("C").read_text() == "C0TA0"
         assert Path("a").read_text() == "2"
+        ppg.util.log_error("HEER")
         ppg.run()
         assert Path("B").read_text() == "BTA1"
-        assert Path("C").read_text() == "C1TA1"
+        assert Path("C").read_text() == "C0TA0"
         assert Path("a").read_text() == "2"
         Path("B").unlink()
         Path("C").unlink()
         ppg.run()
         assert Path("B").read_text() == "BTA2"
-        assert Path("C").read_text() == "C2TA2"
+        assert Path("C").read_text() == "C1TA2"
         assert Path("a").read_text() == "3"
 
     def test_two_temp_jobs(self, trace_log):
@@ -918,9 +920,9 @@ class TestPypipegraph2:
         with pytest.raises(TypeError):
             ppg.ParameterInvariant("C", (NoHash(),))
 
-    def test_data_loading_job(self):
+    def test_data_loading_job(self, job_trace_log):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
-        self.store = []  # use attribute to avoid cuosure binding
+        self.store = []  # use attribute to avoid closure binding
         try:
             jobA = ppg.DataLoadingJob("A", lambda: self.store.append("A"))
             jobB = ppg.FileGeneratingJob(
@@ -948,6 +950,7 @@ class TestPypipegraph2:
             assert Path("B").read_text() == "A"
             self.store.clear()
             jobA = ppg.DataLoadingJob("A", lambda: self.store.append("B"))
+            ppg.util.log_error("final run")
             ppg.run()
             assert len(self.store) == 1
             assert Path("b").read_text() == "3"

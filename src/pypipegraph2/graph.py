@@ -137,7 +137,8 @@ class PyPipeGraph:
         if self.log_dir:
             self.log_dir.mkdir(exist_ok=True, parents=True)
             fn = Path(sys.argv[0]).name
-            logger.add(open(self.log_dir / f"{fn}-{self.time_str}.log", "w"))
+            print('log level', self.log_level)
+            logger.add(open(self.log_dir / f"{fn}-{self.time_str}.log", "w"), level = min(self.log_level, logging.INFO))
             if False:
                 logger.add(
                     RichHandler(
@@ -149,8 +150,7 @@ class PyPipeGraph:
                     ),
                     level=self.log_level,
                 )
-            # if self.log_level != 20:  # logging.INFO:
-            # logger.add(sink=sys.stdout, level=logging.INFO)  # pragma: no cover
+            logger.add(sink=sys.stdout, level=self.log_level)  # pragma: no cover
             import threading
 
             log_info(

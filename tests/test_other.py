@@ -400,24 +400,98 @@ class TestCleanup:
         assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 3
         assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 3
 
+
 def test_exploding_core_lock_captured(ppg2_per_test):
     """We had an issue where an exception in acquiring the core lock led to the thread dying
     and the graph runner hanging
     """
-    a = ppg.FileGeneratingJob('a', lambda of: of.write_text('a'), resources=ppg.Resources._RaiseInCoreLock)
+    a = ppg.FileGeneratingJob(
+        "a", lambda of: of.write_text("a"), resources=ppg.Resources._RaiseInCoreLock
+    )
     with pytest.raises(ppg.FatalGraphException):
         ppg.run()
-    assert 'Count == 0' in str(a.exception)
+    assert "Count == 0" in str(a.exception)
+
 
 def test_exploding_resources_to_number(ppg2_per_test):
     """We had an issue where an exception in acquiring the core lock led to the thread dying
     and the graph runner hanging
     """
-    a = ppg.FileGeneratingJob('a', lambda of: of.write_text('a'), resources=ppg.Resources._RaiseInToNumber)
+    a = ppg.FileGeneratingJob(
+        "a", lambda of: of.write_text("a"), resources=ppg.Resources._RaiseInToNumber
+    )
     with pytest.raises(ppg.FatalGraphException):
         ppg.run()
-    assert 'Not a Resource' in str(a.exception)
+    assert "Not a Resource" in str(a.exception)
 
 
+@pytest.mark.usefixtures("ppg2_per_test")
+class TestModifyDag:
+    def test_2_fg_one_dl(self, job_trace_log):
+        from pypipegraph2.util import log_info
 
+        parts = []
+        a1 = ppg.FileGeneratingJob(
+            "a1", lambda of: of.write_text(str(parts)), depend_on_function=False
+        )
+        a2 = ppg.FileGeneratingJob(
+            "a2",
+            lambda of: of.write_text(Path("a1").read_text() + str(parts)),
+            depend_on_function=False,
+        )
+        a2.depends_on(a1)
+        b = ppg.DataLoadingJob("b", lambda *args: parts.append(1), depend_on_function=False)
+        a1.depends_on(b)
+        a2.depends_on(b)
+        log_info("now run")
+        ppg.run()
+        assert read("a1") == "[1]"
+        assert read("a2") == "[1][1]"
 
+    def test_2_fg_one_dl_failing(pself, ppg2_per_test, job_trace_log):
+        from pypipegraph2.util import log_info
+
+        parts = []
+        a1 = ppg.FileGeneratingJob(
+            "a1", lambda of: of.write_text('a1'), depend_on_function=False
+        )
+        a2 = ppg.FileGeneratingJob(
+            "a2",
+            lambda of: of.write_text(Path("a2").read_text() + str(parts)),
+            depend_on_function=False,
+        )
+        a2.depends_on(a1)
+        b = ppg.DataLoadingJob("b", lambda: _no_such_thing, depend_on_function=False)
+        a1.depends_on(b)
+        a2.depends_on(b)
+        log_info("now run")
+        with pytest.raises(ppg.RunFailed):
+            ppg.run()
+        assert type(b.exception) is NameError
+        assert 'Upstream' in str(a1.exception)
+        assert 'Upstream' in str(a2.exception)
+        assert not Path('a1').exists()
+        assert not Path('a2').exists()
+
+    def test_2_fg_one_temp(ppg2_per_test, job_trace_log):
+        from pypipegraph2.util import log_info
+
+        parts = []
+        a1 = ppg.FileGeneratingJob(
+            "a1", lambda of: of.write_text(Path('b').read_text() + 'a1'), depend_on_function=False
+        )
+        a2 = ppg.FileGeneratingJob(
+            "a2",
+            lambda of: of.write_text(Path('b').read_text() + Path("a1").read_text() + 'a2'),
+            depend_on_function=False,
+        )
+        a2.depends_on(a1)
+        b = ppg.TempFileGeneratingJob("b", lambda of: of.write_text('b'), depend_on_function=False)
+        a1.depends_on(b)
+        a2.depends_on(b)
+
+        log_info("now run")
+        ppg.run()
+        assert read("a1") == "ba1"
+        assert read("a2") == "bba1a2"
+        assert not Path('b').exists() 

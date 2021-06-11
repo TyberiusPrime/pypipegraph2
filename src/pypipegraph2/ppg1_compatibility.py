@@ -338,6 +338,7 @@ class PPG1AdaptorBase:
             self.use_resources(ppg2.Resources.SingleCore)
 
     def depends_on(self, *args):  # keep the wrapper
+        print('ppg1adaptor depends_on' ,len(args))
         if hasattr(self, "__wrapped__"):
             res = self.__wrapped__.depends_on(*args)
         else:
@@ -523,20 +524,23 @@ def wrap_old_style_lfg_cached_job(job):
         res.lfg = PPG1Adaptor(job.calc)
 
     def depends_on(self, *args, **kwargs):
+        print('wrap_old_style_depends_on', len(args), len(kwargs), 'self', self, 'args',args)
         if args and args[0] == self.lfg:  # repeated definition, I suppose
+            print('case 1')
             # must not call self.__wrapped__.depends_on - that's a recursion for some reason?
             ppg2.Job.depends_on(self, *args, **kwargs)
         else:
+            print('case 2')
             self.lfg.depends_on(*args, **kwargs)
         return self
 
-    res.depends_on = types.MethodType(depends_on, res)
+    res.depends_on = depends_on.__get__(res)
 
     def use_cores(self, cores):
         self.lfg.use_cores(cores)
         return self
 
-    res.use_cores = types.MethodType(use_cores, res)
+    res.use_cores = use_cores.__get__(res)
 
     return res
 

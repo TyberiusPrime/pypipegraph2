@@ -11,6 +11,7 @@ def run():
     else:
         pass
 
+run_pipegraph = run # ppg1 compatibility
 
 fl_count = 0
 
