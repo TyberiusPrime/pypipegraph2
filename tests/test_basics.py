@@ -959,7 +959,7 @@ class TestPypipegraph2:
         finally:
             del self.store
 
-    def test_attribute_loading_job(self):
+    def test_attribute_loading_job(self, job_trace_log):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
 
         class TestRecv:
@@ -1458,7 +1458,9 @@ class TestPypipegraph2:
             except ValueError as e:
                 raise KeyError() from e
 
-        ppg.DataLoadingJob("a", a)
+        jobA = ppg.DataLoadingJob("a", a)
+        b = ppg.FileGeneratingJob('b', lambda of: write('b','b'))
+        b.depends_on(jobA)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         e = (

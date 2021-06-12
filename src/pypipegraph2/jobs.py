@@ -1689,9 +1689,14 @@ class _AttributeCleanupJob(Job):
     def __init__(self, parent_job):
         Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
         self.parent_job = parent_job  # what are we cleaning up?
+        self.real_parent_job = (
+            parent_job  #  parent_job may be replaced by _ConditionalJobClone
+        )
+        # and that is necessary for the invalidation to do it's thing
+        # but the real parent will the one we read the files from
 
     def run(self, _ignored_runner, _historical_output):
-        delattr(self.parent_job.object, self.parent_job.attribute_name)
+        delattr(self.real_parent_job.object, self.real_parent_job.attribute_name)
 
         return {self.outputs[0]: None}  # todo: optimize this awy?
 

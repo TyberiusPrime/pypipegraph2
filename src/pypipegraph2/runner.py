@@ -91,6 +91,16 @@ class Runner:
             # flat_before = networkx.readwrite.json_graph.node_link_data(
             # job_graph.job_dag
             # )
+            if not networkx.algorithms.is_directed_acyclic_graph(
+                self.job_graph.job_dag
+            ):  # pragma: no cover - defensive
+                error_fn = self.job_graph.log_dir / "debug_edges_with_cycles.txt"
+                networkx.write_edgelist(self.job_graph.job_dag, error_fn)
+                cycles = list(networkx.simple_cycles(self.job_graph.job_dag))
+                raise exceptions.NotADag(
+                    f"Not a directed *acyclic* graph. See {error_fn}. Cycles between {cycles}"
+                )
+
             self.dag = self.modify_dag(
                 job_graph, focus_on_these_jobs, jobs_already_run_previously
             )
@@ -116,7 +126,7 @@ class Runner:
                 networkx.write_edgelist(self.dag, error_fn)
                 cycles = list(networkx.simple_cycles(self.dag))
                 raise exceptions.NotADag(
-                    f"Not a directed *acyclic* graph. See {error_fn}. Cycles between {cycles}"
+                    f"Not a directed *acyclic* graph after modification. See {error_fn}. Cycles between {cycles}"
                 )
             self.job_states = {}
 
@@ -185,8 +195,11 @@ class Runner:
         cleanup_job.job_number = len(self.jobs)
         job._cleanup_job_id = cleanup_job.job_id
         self.jobs[cleanup_job.job_id] = cleanup_job
-        self.outputs_to_job_ids[cleanup_job.outputs[0]] = cleanup_job.job_id
         dag.add_node(cleanup_job.job_id)
+        log_job_trace(f"creating cleanup {cleanup_job.job_id}")
+        for o in cleanup_job.outputs:
+            log_job_trace(f"Storing cleanup oututs_to_job_ids {o} = {cleanup_job.job_id}")
+            self.outputs_to_job_ids[o] = cleanup_job.job_id
         downstreams = [
             x
             for x in dag.neighbors(job.job_id)
@@ -206,6 +219,7 @@ class Runner:
             self.job_inputs[cleanup_job.job_id].update(
                 self.jobs[downstream_job_id].outputs
             )
+        return cleanup_job
 
     def _modify_dag_for_conditional_job(self, dag, job):
         """A a conditional job is one that only runs if it's downstreams need it.
@@ -229,9 +243,7 @@ class Runner:
         log_job_trace(f"_modify_dag_for_conditional_job for {job.job_id}")
         clone = None
         if job.cleanup_job_class:
-            cleanup_job = job.cleanup_job_class(job)
-            dag.add_node(cleanup_job.job_id)
-            self.jobs[cleanup_job.job_id] = cleanup_job
+            cleanup_job = self._add_cleanup(dag, job)
         else:
             cleanup_job = None
 
