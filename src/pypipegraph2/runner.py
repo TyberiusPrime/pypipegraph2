@@ -215,6 +215,7 @@ class Runner:
             log_job_trace(
                 f"add downstream edge: {downstream_job_id}, {cleanup_job.job_id}"
             )
+
             dag.add_edge(downstream_job_id, cleanup_job.job_id)
             self.job_inputs[cleanup_job.job_id].update(
                 self.jobs[downstream_job_id].outputs
@@ -237,6 +238,13 @@ class Runner:
         mixing the hulls can lead to cycles otherwise (also unnecessary
         recalcs, I presume)
         """
+        def add_edge(a, b):
+            if a == b:
+                raise ValueError()
+            org_add_edge(a,b)
+        org_add_edge = dag.add_edge
+
+        dag.add_edge = add_edge
 
         other_clones = []
         first_output = []  # abuse a list as a box...
@@ -311,9 +319,10 @@ class Runner:
             self.job_inputs[downstream_job_id].update(clone.outputs)
 
             if cleanup_job is not None:
-                dag.add_edge(downstream_job_id, cleanup_job.job_id)
-                self.job_inputs[downstream_job_id].update(clone.outputs)
-                cleanup_job.parent_job = clone # doesn't matter which one.
+                if downstream_job_id != cleanup_job.job_id:
+                    dag.add_edge(downstream_job_id, cleanup_job.job_id)
+                    self.job_inputs[downstream_job_id].update(clone.outputs)
+                    cleanup_job.parent_job = clone # doesn't matter which one.
 
 
         # and at last remove the conditional job itself from the graph
