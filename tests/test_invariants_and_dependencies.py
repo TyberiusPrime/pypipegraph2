@@ -676,8 +676,8 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None, first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -715,8 +715,8 @@ class TestFunctionInvariant:
         cv = c.run(None, None)
         self.maxDiff = 20000
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -750,8 +750,8 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -794,8 +794,8 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -817,8 +817,8 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -931,8 +931,8 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -957,8 +957,8 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -984,8 +984,8 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -1011,8 +1011,8 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -1023,11 +1023,11 @@ class TestFunctionInvariant:
         b["source"] = "hello_world"
         c = a.copy()
         c[python_version] = ("disB", "closure")
-        assert ppg.FunctionInvariant.compare_hashes(a, a, python_version)
-        assert ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,a, a, python_version)
+        assert ppg.FunctionInvariant.compare_hashes(None,
             a, b, python_version
         )  # same dis ,different source
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             a, c, python_version
         )  # different dis, same source
 
@@ -1417,8 +1417,8 @@ class TestFunctionInvariantDisChanges_BetweenVersions:
         av = a.run(None, None)
         bv = b.run(None, None)
         cv = c.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(
+        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,
             first_value(av), first_value(cv)
         )
 
@@ -1451,6 +1451,6 @@ class TestFunctionInvariantDisChanges_BetweenVersions:
         bv = first_value(b.run(None, None))
         cv = first_value(c.run(None, None))
         dv = first_value(d.run(None, None))
-        assert ppg.FunctionInvariant.compare_hashes((av), (bv))
-        assert ppg.FunctionInvariant.compare_hashes((cv), (dv))
-        assert not ppg.FunctionInvariant.compare_hashes((av), (cv))
+        assert ppg.FunctionInvariant.compare_hashes(None,(av), (bv))
+        assert ppg.FunctionInvariant.compare_hashes(None,(cv), (dv))
+        assert not ppg.FunctionInvariant.compare_hashes(None,(av), (cv))
