@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from .shared import write
+from .shared import write, force_load
 import pypipegraph2 as ppg2
 import pypipegraph as ppg1
 
@@ -64,6 +64,10 @@ class TestcompatibilityLayerMore:
         b = ppg1.TempFileGeneratingJob("b", lambda of: 55)
         c = ppg1.MultiTempFileGeneratingJob(["C"], lambda: 55)
         d = ppg1.MultiTempFileGeneratingJob(["D"], lambda of: 55)
+        force_load(a)
+        force_load(b)
+        force_load(c)
+        force_load(d)
         with pytest.raises(ppg2.RunFailed):
             ppg2.run()
         assert "did not create" in str(a.exception)

@@ -7,7 +7,7 @@ import hashlib
 import shutil
 import pytest
 import pypipegraph2 as ppg
-from .shared import write, read, append, Dummy, counter
+from .shared import write, read, append, Dummy, counter, force_load
 
 
 class Undepickable(object):
@@ -487,11 +487,14 @@ class TestInvariant:
         def sigint():
             import signal
 
+            counter("a")
             os.kill(os.getpid(), signal.SIGINT)
             counter("A")
 
         job = ppg.DataLoadingJob("A", sigint, lambda x: None)
+        force_load(job)
         ppg.run()
+        assert read("a") == "1"
         assert read("A") == "1"
 
     def test_input_output_dumping_dies_for_some_reason(self, ppg2_per_test, mocker):

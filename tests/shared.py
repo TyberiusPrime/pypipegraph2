@@ -35,3 +35,9 @@ def counter(filename):
         res = 0
     Path(filename).write_text(str(res + 1))
     return str(res)
+
+
+def force_load(job):
+    """Force the loading of a Dataloading job that has no other dependents"""
+    import pypipegraph2 as ppg
+    ppg.JobGeneratingJob(job.job_id + '_gen', lambda: None).depends_on(job)

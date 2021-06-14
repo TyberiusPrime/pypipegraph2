@@ -201,7 +201,7 @@ class TestPathLib:
         with pytest.raises(TypeError):
             ppg.MultiFileGeneratingJob([b"a"])  # bytes is not a string type
 
-    def test_accepts(self, job_trace_log):
+    def test_accepts(self):
         import pathlib
 
         write("aaa", "hello")

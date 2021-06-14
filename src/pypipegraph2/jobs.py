@@ -774,6 +774,14 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
 
 
 class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
+    """A job that creates files that are removed 
+    once all it's dependents have run.
+
+    These will always run at least once,
+    (due to the 'virtual clean up jobs' capturing the dependencies)
+    """
+    job_kind = JobKind.Temp
+
     def __new__(cls, files, *args, **kwargs):
         files = [Path(x).resolve().relative_to(Path(".").absolute()) for x in files]
         return Job.__new__(cls, files)
@@ -804,7 +812,7 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
         return False
 
 
-class TempFileGeneratingJob(MultiTempFileGeneratingJob):
+class TempFileGeneratingJob(MultiTempFileGeneratingJob): # todo: should theis be a func?
     job_kind = JobKind.Temp
 
     def __new__(cls, output_filename, *args, **kwargs):
@@ -1498,6 +1506,12 @@ class ParameterInvariant(_InvariantMixin, Job):
 
 
 class DataLoadingJob(Job):
+    """A job that manipulates the currently running python program.
+
+    Note that these don't run if they have no dependents
+    """
+
+
     job_kind = JobKind.Loading
 
     def __new__(cls, job_id, *args, **kwargs):

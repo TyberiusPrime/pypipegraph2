@@ -221,6 +221,7 @@ class TestCachedAttributeJob:
 
     def test_cached_jobs_get_depencies_only_on_the_lazy_filegenerator_not_on_the_loading_job(
         self,
+        job_trace_log
     ):
         o = Dummy()
 
@@ -241,13 +242,14 @@ class TestCachedAttributeJob:
         ppg.run_pipegraph()
         # ppg2...
         # assert jobB.was_invalidated
+        print(ppg.util.global_pipegraph.last_run_result.keys())
         assert (
             ppg.util.global_pipegraph.last_run_result[jobB.job_id].state
             == ppg2.enums.JobState.Executed
         )
         assert (
             ppg.util.global_pipegraph.last_run_result[job.job_id].state
-            == ppg2.enums.JobState.Executed
+            == ppg2.enums.JobState.Skipped
         )
         # assert job.was_invalidated
 
@@ -548,6 +550,8 @@ class TestCachedDataLoadingJob:
         write("out/mycalc", "no unpickling this")
         job2 = ppg.FileGeneratingJob("out/job2", lambda: write(o.a))
         job2.depends_on(job)
+        # job1 get's skipped, so this tests whether the error is correctly copied
+        # from the job2 upstream clone of the dataloading job
         with pytest.raises(ppg.RuntimeError):  # ppg2: was ValueError
             ppg.run_pipegraph()
         # ppg2 assert isinstance(job.exception, ValueError)

@@ -1547,7 +1547,7 @@ class TestPypipegraph2:
             ppg.run()
         assert read("D") == "1"
 
-    def test_chained_failing_temps_no_downstream(self):
+    def test_chained_failing_temps_no_downstream(self, job_trace_log):
         def a(of):
             raise ValueError()
             of.write_text("A")
@@ -1568,18 +1568,24 @@ class TestPypipegraph2:
         )
         b.depends_on(a)
         c.depends_on(b)
-        with pytest.raises(ppg.RunFailed):
-            ppg.run()
+        #with pytest.raises(ppg.RunFailed):
+        ppg.run() # won't raise since the tfs never get run.  
+        # they don't get run, because we create the 'clone jobs' 
+        # backwards - and c disappears
+        # since it had no downstreams of its own.
+        # and then the 2nd level (b) disappears, because
+        # it no longer has a downstream
+        # and the same happens to a
         assert read("D") == "1"
 
     def test_no_source_traceback(self):
-        def a():
+        def a(of):
             import pandas
 
             df = pandas.DataFrame()
             df["shu"]
 
-        ppg.DataLoadingJob("a", a)
+        ppg.FileGeneratingJob("a", a)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         e = (

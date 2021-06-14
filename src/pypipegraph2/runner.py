@@ -87,6 +87,9 @@ class Runner:
             )  #  job_graph.job_inputs.copy()
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
             self.core_lock = CoreLock(job_graph.cores)
+            self.job_states = (
+                {}
+            )  # get's partially filled by modify_dag, and then later in this function
 
             # flat_before = networkx.readwrite.json_graph.node_link_data(
             # job_graph.job_dag
@@ -128,7 +131,6 @@ class Runner:
                 raise exceptions.NotADag(
                     f"Not a directed *acyclic* graph after modification. See {error_fn}. Cycles between {cycles}"
                 )
-            self.job_states = {}
 
             for job_id in self.jobs:
                 s = JobStatus()
@@ -198,7 +200,9 @@ class Runner:
         dag.add_node(cleanup_job.job_id)
         log_job_trace(f"creating cleanup {cleanup_job.job_id}")
         for o in cleanup_job.outputs:
-            log_job_trace(f"Storing cleanup oututs_to_job_ids {o} = {cleanup_job.job_id}")
+            log_job_trace(
+                f"Storing cleanup oututs_to_job_ids {o} = {cleanup_job.job_id}"
+            )
             self.outputs_to_job_ids[o] = cleanup_job.job_id
         downstreams = [
             x
@@ -207,10 +211,12 @@ class Runner:
         ]  # depending on other cleanups makes littlesense
         log_job_trace(f"{job.job_id} cleanup adding")
         if not downstreams:
-            log_job_trace(f"{job.job_id} had no downstreams - cleanup right after")
-            downstreams = [
-                job.job_id
-            ]  # nobody below you? your cleanup will run right after you
+            # if the job has no downstreams
+            # it won't run.
+            log_job_trace(f"{job.job_id} had no downstreams - not adding a cleanup")
+            # downstreams = [
+            # job.job_id
+            # ]  # nobody below you? your cleanup will run right after you
         for downstream_job_id in downstreams:
             log_job_trace(
                 f"add downstream edge: {downstream_job_id}, {cleanup_job.job_id}"
@@ -238,10 +244,12 @@ class Runner:
         mixing the hulls can lead to cycles otherwise (also unnecessary
         recalcs, I presume)
         """
+
         def add_edge(a, b):
             if a == b:
                 raise ValueError()
-            org_add_edge(a,b)
+            org_add_edge(a, b)
+
         org_add_edge = dag.add_edge
 
         dag.add_edge = add_edge
@@ -256,9 +264,10 @@ class Runner:
             cleanup_job = None
 
         upstreams = dag.predecessors(job.job_id)
-        for downstream_job_id in list(
-            dag.successors(job.job_id)
-        ):  # must make a copy, since we change this in the loop
+        downstreams = list(dag.successors(job.job_id))
+        for (
+            downstream_job_id
+        ) in downstreams:  # must make a copy, since we change this in the loop
             # part one: add the 'does the downstream need me to calculate' check?
             log_job_trace(f"\t successor {downstream_job_id}")
             downstream_job = self.jobs[downstream_job_id]
@@ -304,8 +313,6 @@ class Runner:
             # todo: cache (if downstream_job has multiple conditional dependencie
             hull = self._iter_job_non_temp_upstream_hull(downstream_job_id, dag)
             for hull_job_id in hull:
-                print(hull_job_id)
-                print(clone)
                 dag.add_edge(hull_job_id, clone.job_id)
                 self.job_inputs[clone.job_id].update(self.jobs[hull_job_id].outputs)
 
@@ -313,7 +320,7 @@ class Runner:
             dag.remove_edge(job.job_id, downstream_job_id)
             # this ins not a noop, since the CJC has it's own renamed outputs
             for k in job.outputs:
-                log_info(f"Removing {k} from {downstream_job_id}")
+                log_job_trace(f"Removing {k} from {downstream_job_id}")
                 self.job_inputs[downstream_job_id].remove(k)
             # add the cloned outputs bag
             self.job_inputs[downstream_job_id].update(clone.outputs)
@@ -322,15 +329,17 @@ class Runner:
                 if downstream_job_id != cleanup_job.job_id:
                     dag.add_edge(downstream_job_id, cleanup_job.job_id)
                     self.job_inputs[downstream_job_id].update(clone.outputs)
-                    cleanup_job.parent_job = clone # doesn't matter which one.
-
+                cleanup_job.parent_job = clone  # doesn't matter which one.
 
         # and at last remove the conditional job itself from the graph
         dag.remove_node(job.job_id)
         del self.jobs[job.job_id]
-
-
-
+        if not downstreams:
+            # it does not get created later, since job is not in self.jobs
+            # but also not copied from one of the clones - since there are no clones
+            # so mark it as skipped
+            self.job_states[job.job_id] = JobStatus()
+            self.job_states[job.job_id]._state = JobState.Skipped
 
     def modify_dag(  # noqa: C901
         self, job_graph, focus_on_these_jobs, jobs_already_run_previously
@@ -369,6 +378,13 @@ class Runner:
                         )
                     ),
                 )
+            elif job.cleanup_job_class:
+                log_error(
+                    f"Unconditionaly, but cleanup? {job}, {job.cleanup_job_class}"
+                )
+                raise NotImplementedError(
+                    "Currently only 'conditional' jobs support cleanup jobs."
+                )  # probably easy to fix though, just call _add_cleanup_job on it?
 
             else:
                 log_job_trace(f"no modify dag for {job.job_id}")
@@ -516,8 +532,8 @@ class Runner:
                 self.jobs_to_run_que.put(ExitNow)
             for t in self.threads:
                 t.join()
-            #now capture straglers
-            #todo: replace this with something guranteed to work.
+            # now capture straglers
+            # todo: replace this with something guranteed to work.
             while True:
                 try:
                     ev = self.events.get_nowait()
@@ -544,13 +560,15 @@ class Runner:
         for job in self.jobs.values():
             if isinstance(job, _ConditionalJobClone):
                 if not job.parent_job.job_id in self.job_states:
+                    # store it
                     self.job_states[job.parent_job.job_id] = self.job_states[job.job_id]
-                    # errs = {k: v.error for (k,v) in self.job_states.items()}
-                    # log_job_trace(f"{escape_logging(str(errs))}")
-                    pass
+                elif self.job_states[job.job_id]._state == JobState.Failed:
+                    # the others might have been skipped
+                    self.job_states[job.parent_job.job_id] = self.job_states[job.job_id]
                 # del self.job_states[job.job_id] # as if it was never cloned
-            log_job_trace(f'history for {job.job_id} in: {len(self.job_states[job.job_id].updated_input)} out {len(self.job_states[job.job_id].updated_output)}')
-
+            log_job_trace(
+                f"history for {job.job_id} in: {len(self.job_states[job.job_id].updated_input)} out {len(self.job_states[job.job_id].updated_output)}"
+            )
 
         return self.job_states
 

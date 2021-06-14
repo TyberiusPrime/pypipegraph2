@@ -35,3 +35,12 @@ def assertRaises(exception, func):
 
 class Dummy(object):
     pass
+
+
+def force_load(job):
+    """Force the loading of a conditional job
+    (Dataloading, AttributeLoading, TempFile...) job
+    that has no other dependents"""
+    import pypipegraph2 as ppg
+
+    ppg.JobGeneratingJob(job.job_id + "_gen", lambda: None).depends_on(job)

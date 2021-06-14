@@ -792,12 +792,13 @@ class TestDataLoadingJob:
 
         ppg.DataLoadingJob("myjob", load)
         ppg.run()
-        assert read(of) == "1"  # runs once to capture the hashes, right?
+        assert not Path(of).exists()
         ppg.run()
-        assert read(of) == "1"  # but does not run again
+        assert not Path(of).exists()
         ppg.new()
         ppg.DataLoadingJob("myjob", load)
         ppg.run()
+        assert not Path(of).exists()
 
     def test_does_not_get_run_in_chain_without_final_dep(self):
         of = "out/shu"
@@ -813,11 +814,11 @@ class TestDataLoadingJob:
 
         ppg.DataLoadingJob("myjobB", loadB).depends_on(job)
         ppg.run()
-        assert read(of) == "1"
-        assert read(ofB) == "1"
+        assert not Path(of).exists()
+        assert not Path(ofB).exists()
         ppg.run()
-        assert read(of) == "1"
-        assert read(ofB) == "1"
+        assert not Path(of).exists()
+        assert not Path(ofB).exists()
 
     def test_does_get_run_in_chain_all(self):
         of = "out/shu"
@@ -1110,15 +1111,19 @@ class TestAttributeJob:
         tf = "out/testfile"
 
         def load():
-            write(tf, "hello")
+            counter(tf)
             return "shu"
 
         ppg.AttributeLoadingJob(
             "load_dummy_shu", o, "a", load, depend_on_function=False
         )
         ppg.run()
+        assert not (hasattr(o, "a")) # never assigned
+        assert not Path('tf').exists()
+        ppg.run()
+        assert not Path('tf').exists()
         assert not (hasattr(o, "a"))
-        assert not (Path(tf).exists())
+
 
     def test_attribute_loading_does_run_without_dependency_if_invalidated(
         self, job_trace_log
@@ -1132,7 +1137,7 @@ class TestAttributeJob:
 
         ppg.AttributeLoadingJob("load_dummy_shu", o, "a", load)
         ppg.run()
-        assert Path(tf).exists()
+        assert not Path(tf).exists()
         assert not (hasattr(o, "a"))
 
     def test_attribute_disappears_after_direct_dependency(self):
