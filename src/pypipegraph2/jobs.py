@@ -269,6 +269,13 @@ class Job:
             return e
 
     @property
+    def failed(self):
+        """Did this job fail in any way in the last run?
+        I.e. does it have an exception?"""
+        return bool(self.exception)
+
+
+    @property
     def stack_trace(self):
         """Interrogate global pipegraph for this job's exception stacktrace.
         Mostly for the ppg1 tests...

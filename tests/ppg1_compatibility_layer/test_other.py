@@ -484,3 +484,11 @@ def test_depends_on_mfg_keeps_wrapping(ppg1_compatibility_test):
 
 def test_cores_available(ppg1_compatibility_test):
     assert ppg.util.global_pipegraph.rc.cores_available > 0
+
+def test_job_dot_failed(ppg1_compatibility_test):
+    a = ppg.FileGeneratingJob('a', lambda of: of.write_text('a'))
+    b = ppg.FileGeneratingJob('b', lambda of: None)
+    with pytest.raises(ppg.RuntimeException):
+        ppg.run_pipegraph()
+    assert b.failed
+    assert not a.failed
