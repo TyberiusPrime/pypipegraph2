@@ -248,7 +248,7 @@ class TestInvariant:
         ppg.run()
         assert read(of) == "shushu"  # job does get rerun
 
-    def test_input_file_was_renamed(self, job_trace_log):
+    def test_input_file_was_renamed(self):
         of = "out/B"
 
         def do_write(of):

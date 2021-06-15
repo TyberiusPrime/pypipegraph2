@@ -469,7 +469,7 @@ def test_inheritance_of_filegen(ppg1_compatibility_test, job_trace_log):
     assert read('counter') == 'a'
 
 
-def test_util_checksum_file(dir_per_test):
+def test_util_checksum_file(ppg1_compatibility_test):
     import hashlib
     Path('a').write_text("hello world")
     should = hashlib.md5(b'hello world').hexdigest()

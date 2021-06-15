@@ -18,17 +18,15 @@ fl_count = 0
 
 def force_load(job, prefix=None):
     """make sure a dataloadingjob has been loaded (if applicable)"""
-    return # todo?
-
-    if ppg.inside_ppg():
-        if not isinstance(job, ppg.Job):
+    if ppg2.inside_ppg():
+        if not isinstance(job, ppg2.Job):
             if prefix is None:
                 global fl_count
                 fl_count += 1
                 prefix = "fl_%i" % fl_count
         else:
             prefix = job.job_id
-        return ppg.JobGeneratingJob(prefix + "_force_load", lambda: None).depends_on(
+        return ppg2.JobGeneratingJob(prefix + "_force_load", lambda: None).depends_on(
             job
         )
 

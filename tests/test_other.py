@@ -10,7 +10,7 @@ from .shared import write, read, Dummy
 
 @pytest.mark.usefixtures("ppg2_per_test", "create_out_dir")
 class TestResourceCoordinator:
-    def test_jobs_that_need_all_cores_are_spawned_one_by_one(self, job_trace_log):
+    def test_jobs_that_need_all_cores_are_spawned_one_by_one(self):
         # we'll determine this by the start respective end times..
         ppg.new(
             cores=3,
@@ -376,29 +376,48 @@ def test_cache_dir(ppg2_per_test):
 
 class TestCleanup:
     def test_error_cleanup(self, ppg2_per_test):
+        import pypipegraph2 as ppg2
+
         ppg2_per_test.new(log_retention=2)
+        assert ppg2.global_pipegraph.log_retention == 2
 
         def fail(of):
             raise ValueError()
 
         job = ppg.FileGeneratingJob("A", fail)
+        ec = []  # counters
+        lc = []
         with pytest.raises(ppg.RunFailed):
-            ppg.run()
-        assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 1
-        assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 1
+            ppg.run(print_failures=False)
+        ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
+        lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
         with pytest.raises(ppg.RunFailed):
-            ppg.run()
-        assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 2
-        assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 2
+            ppg.run(print_failures=False)
+        ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
+        lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
         with pytest.raises(ppg.RunFailed):
-            ppg.run()
+            ppg.run(print_failures=False)
         # we keep  log_retention old ones + the current one
-        assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 3
-        assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 3
+        ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
+        lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
+
         with pytest.raises(ppg.RunFailed):
-            ppg.run()
-        assert len(list(ppg.global_pipegraph.error_dir.glob("*"))) == 3
-        assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 3
+            ppg.run(print_failures=False)
+        assert ppg.global_pipegraph.log_file.exists()
+        ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
+        lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
+        assert ec == [
+            1,
+            2,
+            3,
+            3,
+        ]
+        assert lc == [
+            1,
+            2,
+            3,
+            3,
+        ]
 
 
 def test_exploding_core_lock_captured(ppg2_per_test):
@@ -427,7 +446,7 @@ def test_exploding_resources_to_number(ppg2_per_test):
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestModifyDag:
-    def test_2_fg_one_dl(self, job_trace_log):
+    def test_2_fg_one_dl(self):
         from pypipegraph2.util import log_info
 
         parts = []
@@ -440,7 +459,9 @@ class TestModifyDag:
             depend_on_function=False,
         )
         a2.depends_on(a1)
-        b = ppg.DataLoadingJob("b", lambda *args: parts.append(1), depend_on_function=False)
+        b = ppg.DataLoadingJob(
+            "b", lambda *args: parts.append(1), depend_on_function=False
+        )
         a1.depends_on(b)
         a2.depends_on(b)
         log_info("now run")
@@ -448,12 +469,12 @@ class TestModifyDag:
         assert read("a1") == "[1]"
         assert read("a2") == "[1][1]"
 
-    def test_2_fg_one_dl_failing(pself, ppg2_per_test, job_trace_log):
+    def test_2_fg_one_dl_failing(pself, ppg2_per_test):
         from pypipegraph2.util import log_info
 
         parts = []
         a1 = ppg.FileGeneratingJob(
-            "a1", lambda of: of.write_text('a1'), depend_on_function=False
+            "a1", lambda of: of.write_text("a1"), depend_on_function=False
         )
         a2 = ppg.FileGeneratingJob(
             "a2",
@@ -468,25 +489,31 @@ class TestModifyDag:
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         assert type(b.exception) is NameError
-        assert 'Upstream' in str(a1.exception)
-        assert 'Upstream' in str(a2.exception)
-        assert not Path('a1').exists()
-        assert not Path('a2').exists()
+        assert "Upstream" in str(a1.exception)
+        assert "Upstream" in str(a2.exception)
+        assert not Path("a1").exists()
+        assert not Path("a2").exists()
 
-    def test_2_fg_one_temp(ppg2_per_test, job_trace_log):
+    def test_2_fg_one_temp(ppg2_per_test):
         from pypipegraph2.util import log_info
 
         parts = []
         a1 = ppg.FileGeneratingJob(
-            "a1", lambda of: of.write_text(Path('b').read_text() + 'a1'), depend_on_function=False
+            "a1",
+            lambda of: of.write_text(Path("b").read_text() + "a1"),
+            depend_on_function=False,
         )
         a2 = ppg.FileGeneratingJob(
             "a2",
-            lambda of: of.write_text(Path('b').read_text() + Path("a1").read_text() + 'a2'),
+            lambda of: of.write_text(
+                Path("b").read_text() + Path("a1").read_text() + "a2"
+            ),
             depend_on_function=False,
         )
         a2.depends_on(a1)
-        b = ppg.TempFileGeneratingJob("b", lambda of: of.write_text('b'), depend_on_function=False)
+        b = ppg.TempFileGeneratingJob(
+            "b", lambda of: of.write_text("b"), depend_on_function=False
+        )
         a1.depends_on(b)
         a2.depends_on(b)
 
@@ -494,4 +521,12 @@ class TestModifyDag:
         ppg.run()
         assert read("a1") == "ba1"
         assert read("a2") == "bba1a2"
-        assert not Path('b').exists() 
+        assert not Path("b").exists()
+
+
+def test_prevent_absolute_paths(ppg2_per_test):
+    with pytest.raises(ValueError):
+        ppg.FileGeneratingJob("/tmp/absolute", lambda of: of.write_text("a"))
+    ppg2_per_test.new(prevent_absolute_paths=False)
+    ppg.FileGeneratingJob("/tmp/absolute", lambda of: of.write_text("a"))
+    ppg2_per_test.new(prevent_absolute_paths=True)

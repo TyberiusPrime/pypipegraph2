@@ -292,7 +292,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "A"
             assert read("out/plot") == "B"
 
-        def test_reruns_both_if_calc_changed(self, ppg1_compatibility_test, job_trace_log):
+        def test_reruns_both_if_calc_changed(self, ppg1_compatibility_test):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -325,7 +325,7 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "AA"
             assert read("out/plot") == "BB"
 
-        def test_no_rerun_if_calc_change_but_ignore_codechanges(self, ppg1_compatibility_test, job_trace_log):
+        def test_no_rerun_if_calc_change_but_ignore_codechanges(self, ppg1_compatibility_test):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(

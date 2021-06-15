@@ -18,16 +18,20 @@ from .runner import Runner, JobState
 from .util import CPUs, console
 from .enums import RunMode
 from .exceptions import _RunAgain
-from .util import log_info, log_error, log_warning, log_debug, log_job_trace
+from .util import log_info, log_error, log_warning, log_debug, log_trace
 from rich.logging import RichHandler
 from rich.console import Console
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
+if "pytest" in sys.modules:
+    log_out = sys.stderr
+else:
+    log_out  = RichHandler(markup=True, console=console)
 logger.configure(
     handlers=[
         {
-            "sink": sys.stderr,  # RichHandler(markup=True, console=console),
+            "sink": log_out,
             "format": "{message}",
             "level": logging.INFO,
         }
@@ -62,6 +66,7 @@ class PyPipeGraph:
         paths: Optional[Dict[str, Union[Path, str]]] = None,
         allow_short_filenames=False,
         log_retention=None,
+        prevent_absolute_paths = True,
     ):
 
         if cores is ALL_CORES:
@@ -101,12 +106,14 @@ class PyPipeGraph:
             self.cache_dir = None
         self.cache_folder = self.cache_dir  # todo: change all occurances?
         self.running = False
+        self.prevent_absolute_paths = prevent_absolute_paths
 
     def run(
-        self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5
+        self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5,
+        dump_graphml=False
     ) -> Dict[str, JobState]:
         """Run the complete pypipegraph"""
-        return self._run(print_failures, raise_on_job_error, event_timeout, None)
+        return self._run(print_failures, raise_on_job_error, event_timeout, None, dump_graphml=dump_graphml)
 
     def _run(
         self,
@@ -114,6 +121,7 @@ class PyPipeGraph:
         raise_on_job_error=True,
         event_timeout=5,
         focus_on_these_jobs=None,
+        dump_graphml=False
     ) -> Dict[str, JobState]:
         """Run the jobgraph - possibly focusing on a subset of jobs (ie. ignoring
         anything that's not necessary to calculate them - activated by calling a Job
@@ -133,12 +141,14 @@ class PyPipeGraph:
         self._resolve_dependency_callbacks()
         self.running = True  # must happen after dependency callbacks
         if self.error_dir:
+            self._cleanup_errors()
             (self.error_dir / self.time_str).mkdir(exist_ok=True, parents=True)
         if self.log_dir:
+            self._cleanup_logs()
             self.log_dir.mkdir(exist_ok=True, parents=True)
             fn = Path(sys.argv[0]).name
-            print('log level', self.log_level)
-            logger.add(open(self.log_dir / f"{fn}-{self.time_str}.log", "w"), level = min(self.log_level, logging.INFO))
+            self.log_file = self.log_dir / f"{fn}-{self.time_str}.log"
+            logger.add(open(self.log_file, "w"), level = min(self.log_level, logging.INFO))
             if False:
                 logger.add(
                     RichHandler(
@@ -156,8 +166,6 @@ class PyPipeGraph:
             log_info(
                 f"Run is go {threading.get_ident()} pid: {os.getpid()}, run_id {self.run_id}"
             )
-        self._cleanup_logs()
-        self._cleanup_errors()
         self.history_dir.mkdir(exist_ok=True, parents=True)
         self.run_dir.mkdir(exist_ok=True, parents=True)
         self.do_raise = []
@@ -181,8 +189,9 @@ class PyPipeGraph:
                         event_timeout,
                         focus_on_these_jobs,
                         jobs_already_run,
+                        dump_graphml
                     )
-                    result = self.runner.run(self.run_id, result)
+                    result = self.runner.run(self.run_id, result, print_failures=print_failures)
                     del self.runner
                     self.run_id += 1
                     do_break = True
@@ -307,27 +316,27 @@ class PyPipeGraph:
         return self.history_dir / ".ppg_history"  # don't end on .py
 
     def _load_history(self):
-        log_job_trace("_load_history")
+        log_trace("_load_history")
         fn = self.get_history_filename()
         history = {}
         self.invariant_loading_issues = set()
         if fn.exists():
-            log_job_trace("Historical existed")
+            log_trace("Historical existed")
             try:
                 with open(fn, "rb") as op:
                     try:
                         counter = 0
                         while True:
                             try:
-                                # log_job_trace(f"History read {counter}")
+                                # log_trace(f"History read {counter}")
                                 counter += 1
                                 job_id = None
                                 job_id = pickle.load(op)
-                                # log_job_trace(f"read job_id {job_id}")
+                                # log_trace(f"read job_id {job_id}")
                                 inputs_and_outputs = pickle.load(op)
                                 history[job_id] = inputs_and_outputs
                             except (TypeError, pickle.UnpicklingError) as e:
-                                # log_job_trace(f"unpickleing error {e}")
+                                # log_trace(f"unpickleing error {e}")
                                 if job_id is None:
                                     raise exceptions.RunFailed(
                                         "Could not depickle job id - history file is borked beyond automatic recovery"
@@ -368,7 +377,7 @@ class PyPipeGraph:
         return history
 
     def _save_history(self, historical):
-        log_job_trace("_save_history")
+        log_trace("_save_history")
         fn = self.get_history_filename()
         if Path(fn).exists():
             fn.rename(fn.with_suffix(fn.suffix + ".backup"))
@@ -426,14 +435,14 @@ class PyPipeGraph:
         self._resolve_dependency_callbacks()  # nested?
 
     def _print_failures(self):
-        log_job_trace("print_failures")
+        log_trace("print_failures")
         # TODO - actually, we kind of already do that inline, don't we.
 
     def _install_signals(self):
         """make sure we don't crash just because the user logged of.
         Also blocks CTRl-c in console, and transaltes into save shutdown otherwise.
         """
-        log_job_trace("_install_signals")
+        log_trace("_install_signals")
 
         def hup(*args, **kwargs):  # pragma: no cover
             log_warning("user logged off - continuing run")
@@ -455,7 +464,7 @@ class PyPipeGraph:
 
     def _restore_signals(self):
         """Restore signals to pre-run values"""
-        log_job_trace("_restore_signals")
+        log_trace("_restore_signals")
         if hasattr(self, "_old_signal_hup"):
             signal.signal(signal.SIGHUP, self._old_signal_hup)
         if hasattr(self, "_old_signal_int"):

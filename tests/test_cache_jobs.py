@@ -19,7 +19,6 @@ class TestCachedDataLoadingJob:
 
         job, cache_job = ppg.CachedDataLoadingJob("out/mycalc", calc, store)
         of = "out/A"
-        Path("out").mkdir()
 
         def do_write(of):
             write(of, o.a)
@@ -37,7 +36,6 @@ class TestCachedDataLoadingJob:
         def store(value):
             o.a = value
 
-        Path("out").mkdir()
         ppg.CachedDataLoadingJob("out/mycalc", calc, store)
         # job.ignore_code_changes() #or it would run anyway... hm.
         assert not (Path("out/mycalc").exists())
@@ -75,7 +73,6 @@ class TestCachedDataLoadingJob:
             dump_job = ppg.FileGeneratingJob("out/A", dump)
             dump_job.depends_on(load_job)
 
-        Path("out").mkdir()
         ppg.JobGeneratingJob("out/C", gen)
         ppg.run()
         assert read("out/A") == "55"
@@ -104,7 +101,6 @@ class TestCachedDataLoadingJob:
 
             ppg.JobGeneratingJob("out/D", gen2)
 
-        Path("out").mkdir()
         ppg.JobGeneratingJob("out/C", gen)
         ppg.run()
         assert read("out/c") == "c"
@@ -129,7 +125,6 @@ class TestCachedDataLoadingJob:
         def output(of):
             write(of, o.c)
 
-        Path("out").mkdir()
 
         dl = ppg.DataLoadingJob("out/A", a)
         ca, cca = ppg.CachedDataLoadingJob("out/C", calc, load)
@@ -178,7 +173,6 @@ class TestCachedDataLoadingJob:
         job, cache_job = ppg.CachedDataLoadingJob(
             "out/mycalc", calc, store, depend_on_function=False
         )
-        Path("out").mkdir()
         write("out/mycalc", "no unpickling this")
         of = "out/A"
 

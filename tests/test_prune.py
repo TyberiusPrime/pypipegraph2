@@ -6,7 +6,7 @@ from .shared import write, read
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestPruning:
-    def test_basic_prune(self, job_trace_log):
+    def test_basic_prune(self):
         ppg.FileGeneratingJob("A", lambda of: write("A", "A"))
         b = ppg.FileGeneratingJob("B", lambda of: write("B", "B"))
         b.prune()
@@ -62,7 +62,7 @@ class TestPruning:
         assert Path("C").read_text() == "CA"
         assert not Path("A").exists()
 
-    def test_basic_prune_unprune(self, job_trace_log):
+    def test_basic_prune_unprune(self):
         ppg.FileGeneratingJob("A", lambda of: write("A", "A"))
         b = ppg.FileGeneratingJob("B", lambda of: write("B", "B"))
         b.prune()

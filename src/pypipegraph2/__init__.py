@@ -66,6 +66,7 @@ def new(
     allow_short_filenames=reuse_last_or_default,
     log_retention=reuse_last_or_default,
     cache_dir=reuse_last_or_default,
+    prevent_absolute_paths=reuse_last_or_default
 ):
     """create a new pipegraph.
     You may pass reuse_last_or_default to all values
@@ -75,7 +76,7 @@ def new(
     (or load defaults)
 
 
-    Log retention is how many old logs (+ the current one) we 
+    Log retention is how many old logs (+ the current one) we
     keep.
     """
     global global_pipegraph
@@ -93,23 +94,30 @@ def new(
             ("run_mode", RunMode.CONSOLE),
             ("log_retention", 3),
             ("cache_dir", Path("cache")),
+            ('prevent_absolute_paths', True)
         ]
     }
-    util.do_job_trace_log = arguments['log_level'] <= 6
+    util.do_job_trace_log = arguments["log_level"] <= 6
     # if arguments['run_mode'] != RunMode.NONINTERACTIVE:
-        # raise ValueError()
+    # raise ValueError()
     global_pipegraph = PyPipeGraph(**arguments)
     return global_pipegraph
 
 
 global_pipegraph = None
 
+
 def change_global_pipegraph(value):
     global global_pipegraph
     global_pipegraph = value
 
 
-def run(print_failures=True, raise_on_job_error=True, event_timeout=5):
+def run(
+    print_failures=True,
+    raise_on_job_error=True,
+    event_timeout=5,
+    dump_graphml=None,
+):
     if global_pipegraph is None:
         raise ValueError("Must instantiate a pipegraph before you can run it.")
 
@@ -117,6 +125,7 @@ def run(print_failures=True, raise_on_job_error=True, event_timeout=5):
         print_failures=print_failures,
         raise_on_job_error=raise_on_job_error,
         event_timeout=event_timeout,
+        dump_graphml=dump_graphml,
     )
 
 
@@ -124,7 +133,6 @@ def inside_ppg():
     from . import global_pipegraph
 
     return global_pipegraph is not None
-
 
 
 @contextlib.contextmanager
@@ -163,6 +171,7 @@ def unreplace_ppg1():
 
     ppg1_compatibility.unreplace_ppg1()
 
+
 from .util import assert_uniqueness_of_object
 
 
@@ -199,6 +208,6 @@ __all__ = [
     "RunMode",
     "replace_ppg1",
     "unreplace_ppg1",
-    'inside_ppg',
-    'assert_uniqueness_of_object',
+    "inside_ppg",
+    "assert_uniqueness_of_object",
 ]

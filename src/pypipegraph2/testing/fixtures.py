@@ -47,7 +47,7 @@ def new_pipegraph(request):
     try:
         first = [False]
 
-        def np(quiet=True, **kwargs):
+        def np(**kwargs):
             if not first[0]:
                 Path(target_path).mkdir(parents=True, exist_ok=True)
                 os.chdir(target_path)
@@ -56,22 +56,22 @@ def new_pipegraph(request):
                 Path("out").mkdir()
 
                 first[0] = True
-            print('kwargs', kwargs)
-            if not 'log_level' in kwargs:
-                kwargs['log_level'] = 40
-
+            if not "log_level" in kwargs:
+                kwargs["log_level"] = 40
+            if not 'cores' in kwargs:
+                kwargs['cores'] = 1
+            if not 'allow_short_filenames' in kwargs:
+                kwargs['allow_short_filenames']=True
+            if not 'run_mode' in kwargs:
+                kwargs['run_mode'] = ppg2.RunMode.NONINTERACTIVE
 
             g = ppg2.new(
-                cores=1,
                 # log_level=5,
-                allow_short_filenames=True,
-                run_mode=ppg2.RunMode.NONINTERACTIVE,
                 **kwargs,
-                
             )
             g.new = np
-            g.new_pipegraph = g.new # ppg1 test case compatibility
-            g.result_dir = Path('results') # ppg test case compatibility
+            g.new_pipegraph = g.new  # ppg1 test case compatibility
+            g.result_dir = Path("results")  # ppg test case compatibility
             if ppg2.ppg1_compatibility.patched:
                 g.rc = ppg2.ppg1_compatibility.FakeRC()
             return g
@@ -95,9 +95,6 @@ def new_pipegraph(request):
 
     finally:
         os.chdir(old_dir)
-
-
-
 
 
 @pytest.fixture
@@ -192,13 +189,12 @@ def both_ppg_and_no_ppg(request):
                     # log_level=5,
                     allow_short_filenames=True,
                     run_mode=ppg2.RunMode.NONINTERACTIVE,
-                    log_level = 40
+                    log_level=40,
                 )
                 g.new = np
-                g.new_pipegraph = np # ppg1 test case compatibility
-                g.result_dir = Path('results') # ppg test case compatibility
+                g.new_pipegraph = np  # ppg1 test case compatibility
+                g.result_dir = Path("results")  # ppg test case compatibility
                 return g
-
 
             def finalize():
                 if hasattr(request.node, "rep_setup"):
@@ -249,8 +245,8 @@ def both_ppg_and_no_ppg(request):
 
                 d = Dummy
                 d.new = lambda: None
-                d.new_pipegraph = lambda: None # ppg test case compatibility
-                d.result_dir = Path('results') # ppg test case compatibility
+                d.new_pipegraph = lambda: None  # ppg test case compatibility
+                d.result_dir = Path("results")  # ppg test case compatibility
                 return d
 
             def finalize():
@@ -290,5 +286,3 @@ def job_trace_log():
     ppg2.util.do_jobtrace_log = True
     yield
     logger.remove(handler_id)
-
-

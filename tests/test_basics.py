@@ -15,7 +15,7 @@ class TestPypipegraph2:
         ppg.run()
         assert Path("A").read_text() == "Done"
 
-    def test_very_simple_chain(self, job_trace_log):
+    def test_very_simple_chain(self):
         assert not Path("A").exists()
         assert not Path("B").exists()
         jobA = ppg.FileGeneratingJob("A", lambda of: of.write_text("AAA"))
@@ -116,7 +116,7 @@ class TestPypipegraph2:
         assert Path("A").read_text() == "c"
         assert Path("B").read_text() == "Bc"
 
-    def test_changing_inputs_when_job_was_temporarily_missing(self, job_trace_log):
+    def test_changing_inputs_when_job_was_temporarily_missing(self):
         jobA = ppg.FileGeneratingJob(
             "A", lambda of: counter("a") and of.write_text("AAA")
         )
@@ -244,7 +244,7 @@ class TestPypipegraph2:
         )  # c get's rewritten, it depended on all of A
         assert Path("D").read_text() == "D0"
 
-    def test_tempfile(self, job_trace_log):
+    def test_tempfile(self):
         jobA = ppg.TempFileGeneratingJob(
             "TA",
             lambda of: of.write_text("A" + counter("a")),
@@ -467,7 +467,7 @@ class TestPypipegraph2:
         assert Path("C").read_text() == "C0B"
         assert Path("a").read_text() == "2"
 
-    def test_depending_on_two_temp_jobs_but_only_one_invalidated(self, job_trace_log):
+    def test_depending_on_two_temp_jobs_but_only_one_invalidated(self):
         jobA = ppg.TempFileGeneratingJob(
             "A",
             lambda of: of.write_text("A" + counter("a")),
@@ -920,7 +920,7 @@ class TestPypipegraph2:
         with pytest.raises(TypeError):
             ppg.ParameterInvariant("C", (NoHash(),))
 
-    def test_data_loading_job(self, job_trace_log):
+    def test_data_loading_job(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         self.store = []  # use attribute to avoid closure binding
         try:
@@ -959,7 +959,7 @@ class TestPypipegraph2:
         finally:
             del self.store
 
-    def test_attribute_loading_job(self, job_trace_log):
+    def test_attribute_loading_job(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
 
         class TestRecv:
@@ -1180,7 +1180,7 @@ class TestPypipegraph2:
         ppg.run()
         assert read("A") == "C"
 
-    def test_failing_plus_job_gen_runs_failing_only_once(self, job_trace_log):
+    def test_failing_plus_job_gen_runs_failing_only_once(self):
         def a(of):
             counter(of)
             counter("a")
@@ -1204,7 +1204,7 @@ class TestPypipegraph2:
         assert read("A") == "1"  # get's unlinked prior to run
         assert read("a") == "2"  # the real 'run' counter'
 
-    def test_actually_multithreading(self, job_trace_log):
+    def test_actually_multithreading(self):
         # use the Barrier  primivite to force it to actually wait for all three threads
         from threading import Barrier
 
@@ -1422,28 +1422,28 @@ class TestPypipegraph2:
             ppg.graph.time_format = (
                 "%Y-%m-%d_%H-%M-%S-%f"  # we need subsecond resolution for this test.
             )
-            ppg.new(log_retention=1)
+            ppg.new(log_retention=1) # so keep 2
             ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
-            assert len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 0
+            assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 0
             ppg.run()
             assert (
                 len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 1 + 1
             )  # runtimes
             ppg.run()
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 1 + 1
+                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 2 + 1
             )  # runtimes
             ppg.new(log_retention=2)
             ppg.run()
             prior = list(ppg.global_pipegraph.log_dir.glob("*"))
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 2 + 1
+                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 3 + 1
             )  # runtimes
             # no new.. still new log file please
             ppg.run()
             after = list(ppg.global_pipegraph.log_dir.glob("*"))
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 2 + 1
+                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 3 + 1
             )  # runtimes
             assert set([x.name for x in prior]) != set([x.name for x in after])
 
@@ -1473,7 +1473,7 @@ class TestPypipegraph2:
         assert e.index("ValueError") < e.index("KeyError")
         assert "cause" in e
 
-    def test_renaming_input_while_invalidating_other(self, job_trace_log):
+    def test_renaming_input_while_invalidating_other(self):
         a = ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
         b = ppg.FileGeneratingJob("B", lambda of: of.write_text("B"))
 
@@ -1506,7 +1506,7 @@ class TestPypipegraph2:
         assert read("C") == "2"
         assert read("c") == "AB2"
 
-    def test_renaming_maps_to_muliple(self, job_trace_log):
+    def test_renaming_maps_to_muliple(self):
         a = ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
         b = ppg.FileGeneratingJob("B", lambda of: of.write_text("A"))
         d = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text("c"))
@@ -1522,7 +1522,7 @@ class TestPypipegraph2:
         ppg.run()
         assert read("c") == "2"
 
-    def test_chained_failing_temps(self, job_trace_log):
+    def test_chained_failing_temps(self):
         def a(of):
             of.write_text("A")
 
@@ -1547,7 +1547,7 @@ class TestPypipegraph2:
             ppg.run()
         assert read("D") == "1"
 
-    def test_chained_failing_temps_no_downstream(self, job_trace_log):
+    def test_chained_failing_temps_no_downstream(self):
         def a(of):
             raise ValueError()
             of.write_text("A")
@@ -1652,7 +1652,7 @@ class TestPypipegraph2:
         with pytest.raises(ppg.JobRedefinitionError):
             ppg.FunctionInvariant("build", open)
 
-    def test_funcinvariant_mixing_function_types_none(self, job_trace_log):
+    def test_funcinvariant_mixing_function_types_none(self):
         a = ppg.FileGeneratingJob(
             "A",
             lambda of: counter("a") and of.write_text(str(of)),
@@ -1754,7 +1754,7 @@ class TestPypipegraph2:
         assert not Path("d").exists()
 
     def test_going_from_file_generating_to_file_invariant_no_retrigger(
-        self, job_trace_log
+        self
     ):
         a = ppg.FileGeneratingJob("a", lambda of: of.write_text("a"))
         b = ppg.FileGeneratingJob(
@@ -1784,7 +1784,7 @@ class TestPypipegraph2:
         assert read("B") == "1"
 
     def test_going_from_multi_file_generating_to_file_invariant_no_retrigger(
-        self, job_trace_log
+        self
     ):
         # this one depends on all files
         a = ppg.MultiFileGeneratingJob(

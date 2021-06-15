@@ -207,7 +207,7 @@ class TestSharedJob:
             a()
         assert list(Path("out").glob("*"))
 
-    def test_multiple_histories(self, job_trace_log):
+    def test_multiple_histories(self):
         import json
 
         def doit(output_files):

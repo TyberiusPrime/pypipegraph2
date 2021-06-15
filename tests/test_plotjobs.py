@@ -138,7 +138,6 @@ if has_pyggplot:  # noqa C901
             p = ppg.FileGeneratingJob("A", prep_job)
 
             # this tests the correct dependency setting on skip_caching
-            Path("out").mkdir()
             of = "out/test.png"
             p2, c2, t2 = ppg.PlotJob(
                 of, calc, plot, cache_calc=False, render_args={"width": 2, "height": 4}

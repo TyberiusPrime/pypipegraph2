@@ -221,7 +221,6 @@ class TestCachedAttributeJob:
 
     def test_cached_jobs_get_depencies_only_on_the_lazy_filegenerator_not_on_the_loading_job(
         self,
-        job_trace_log
     ):
         o = Dummy()
 

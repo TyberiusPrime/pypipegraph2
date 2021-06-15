@@ -201,6 +201,7 @@ util.job_or_filename = job_or_filename
 util.inside_ppg = ppg2.inside_ppg
 util.assert_uniqueness_of_object = ppg2.assert_uniqueness_of_object
 util.flatten_jobs = ppg2.util.flatten_jobs
+util.freeze = ppg2.jobs.ParameterInvariant.freeze
 
 
 class PPGExceptions:
@@ -294,7 +295,7 @@ def run_pipegraph(*args, **kwargs):
     """Run the current global pipegraph"""
     if util.global_pipegraph is None:
         raise ValueError("You need to call new_pipegraph first")
-    ppg2.run()
+    ppg2.run(**kwargs)
 
 
 def _ignore_code_changes(job):
@@ -338,7 +339,6 @@ class PPG1AdaptorBase:
             self.use_resources(ppg2.Resources.SingleCore)
 
     def depends_on(self, *args):  # keep the wrapper
-        print('ppg1adaptor depends_on' ,len(args))
         if hasattr(self, "__wrapped__"):
             res = self.__wrapped__.depends_on(*args)
         else:
@@ -524,13 +524,10 @@ def wrap_old_style_lfg_cached_job(job):
         res.lfg = PPG1Adaptor(job.calc)
 
     def depends_on(self, *args, **kwargs):
-        print('wrap_old_style_depends_on', len(args), len(kwargs), 'self', self, 'args',args)
         if args and args[0] == self.lfg:  # repeated definition, I suppose
-            print('case 1')
             # must not call self.__wrapped__.depends_on - that's a recursion for some reason?
             ppg2.Job.depends_on(self, *args, **kwargs)
         else:
-            print('case 2')
             self.lfg.depends_on(*args, **kwargs)
         return self
 

@@ -82,6 +82,23 @@ class TestJobs:
         assert hasattr(jobA, "__hash__")
 
 
+    def test_repeated_job_definition_and_dependency_callbacks(self, ppg2_per_test):
+        def func(of):
+            of.write_text('a')
+        a = ppg.FileGeneratingJob('a', func)
+        a.depends_on(lambda: counter('ac') and None)
+        assert len(a.dependency_callbacks) == 1
+        assert not Path('ac').exists()
+        a = ppg.FileGeneratingJob('a', func)
+        a.depends_on(lambda: counter('ac') and counter('bc') and None) # 2nd dependency
+        assert len(a.dependency_callbacks) == 2
+        assert not Path('ac').exists()
+        ppg.run()
+        assert read('ac') == '2'
+        assert read('bc') == '1'
+
+
+
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestJobs2:
     def test_str(self):
@@ -112,7 +129,7 @@ class TestFileGeneratingJob:
         assert Path(of).exists()
         assert read(of) == data_to_write
 
-    def test_cores_needed(self, job_trace_log):
+    def test_cores_needed(self):
         ppg.new(cores=5)
         of = "out/a"
         data_to_write = "hello"
@@ -138,7 +155,7 @@ class TestFileGeneratingJob:
         for i in range(10):
             assert read(f"out/{i}") == f"b{i}"
 
-    def test_cores_needed2(self, job_trace_log):
+    def test_cores_needed2(self):
         ppg.new(cores=3)
         # this is meant to trigger the
         # "this job needed to much resources, or was not runnable"
@@ -155,7 +172,7 @@ class TestFileGeneratingJob:
         for i in range(20):
             assert read(f"out/{i}") == f"b{i}"
 
-    def test_misspecified_job_does_not_hang_graph(self, job_trace_log):
+    def test_misspecified_job_does_not_hang_graph(self):
         # this occurred during development
         ppg.new(cores=3)
 
@@ -172,7 +189,7 @@ class TestFileGeneratingJob:
             ppg.global_pipegraph.last_run_result["out/0"].error
         )
 
-    def test_job_not_creating_its_file(self, job_trace_log):
+    def test_job_not_creating_its_file(self):
         # this occurred during development
         ppg.new(cores=3)
 
@@ -986,7 +1003,7 @@ class TestDataLoadingJob:
             UnpickableException,
         )
 
-    def test_sending_a_non_pickable_exception_file_generating(self, job_trace_log):
+    def test_sending_a_non_pickable_exception_file_generating(self):
         class UnpickableException(Exception):
             def __getstate__(self):
                 raise ValueError("Can't pickle me")
@@ -1026,7 +1043,7 @@ class TestDataLoadingJob:
         assert read("out/A") == "A"
         assert not Path("out/C").exists()
 
-    def test_creating_jobs_in_data_loading(self, job_trace_log):
+    def test_creating_jobs_in_data_loading(self):
         def load():
             from loguru import logger  # noqa:F401
 
@@ -1047,6 +1064,9 @@ class TestDataLoadingJob:
         # around on-the-fly-jobs
         # the drawback here is that the DataLoadingJob might not run,
         # but perhaps that's just what you want.
+
+    def test_accept_path_as_job_id(self):
+        ppg.DataLoadingJob(Path("shu"), lambda: 55)
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1106,7 +1126,7 @@ class TestAttributeJob:
         assert read(of) == "shu"
         assert not (hasattr(o, "a"))
 
-    def test_attribute_loading_does_not_run_without_dependency(self, job_trace_log):
+    def test_attribute_loading_does_not_run_without_dependency(self):
         o = Dummy()
         tf = "out/testfile"
 
@@ -1126,7 +1146,7 @@ class TestAttributeJob:
 
 
     def test_attribute_loading_does_run_without_dependency_if_invalidated(
-        self, job_trace_log
+        self
     ):
         o = Dummy()
         tf = "out/testfile"
@@ -1273,7 +1293,7 @@ class TestAttributeJob:
                 "out/A", o, "a", lambda: 55 + 1, depend_on_function=False
             )
 
-    def test_ignore_code_changes(self, job_trace_log):
+    def test_ignore_code_changes(self):
         def a():
             append("out/Aa", "A")
             return "5"
@@ -1366,7 +1386,7 @@ class TestTempFileGeneratingJob:
         assert read(count_file) == "X"
         assert read(normal_count_file) == "A"
 
-    def test_does_not_get_return_if_output_is_not(self, job_trace_log):
+    def test_does_not_get_return_if_output_is_not(self):
         temp_file = "out/temp"
         out_file = "out/A"
         count_file = "out/count"
@@ -1603,7 +1623,7 @@ class TestTempFileGeneratingJob:
         assert read("out/C") == "aBC"
         assert read("out/Cx") == "11"
 
-    def test_cleanup_if_never_run(self, job_trace_log):
+    def test_cleanup_if_never_run(self):
         temp_file = "out/temp"
 
         def write_temp(of):
@@ -1654,7 +1674,7 @@ class TestMultiTempFileGeneratingJob:
         assert not (Path(temp_files[0]).exists())
         assert not (Path(temp_files[1]).exists())
 
-    def test_basic_dependes_were_done(self, job_trace_log):
+    def test_basic_dependes_were_done(self):
         temp_files = ["out/temp", "out/temp2"]
 
         def write_temp(of):

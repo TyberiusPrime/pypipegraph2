@@ -20,7 +20,7 @@ from .enums import JobKind, Resources
 from .util import escape_logging
 import hashlib
 import shutil
-from .util import log_info, log_error, log_warning, log_debug, log_job_trace
+from .util import log_info, log_error, log_warning, log_debug, log_trace
 
 module_type = type(sys)
 
@@ -76,18 +76,24 @@ class Job:
     ):
         self.use_resources(resources)
         if isinstance(outputs, list):
-            self.outputs = outputs
-            for o in outputs:
-                if not isinstance(o, str):
-                    raise TypeError(f"outputs must all be strings, was {type(o)}")
+            self.outputs = self._validate_outputs(outputs)
         else:  # pragma: no cover
             raise TypeError("Invalid output definition.")
         self.outputs = sorted([str(x) for x in outputs])
-        self.job_id = ":::".join(self.outputs)
-        self.dependency_callbacks = []
+        if not hasattr(
+            self, "job_id"
+        ):  # first definition. Otherwise we are a deduped job that has been initialized
+            self.job_id = ":::".join(self.outputs)
+        if not hasattr(
+            self, "dependency_callbacks"
+        ):  # first definition. Otherwise we are a deduped job that has been initialized
+            self.dependency_callbacks = []
         self._validate()
         self.readd()
-        self._pruned = False
+        if not hasattr(
+            self, "_pruned"
+        ):  # first definition. Otherwise we are a deduped job that has been initialized
+            self._pruned = False
 
     def __str__(self):
         return f"{self.__class__.__name__}: {getattr(self, 'job_id', '*no_init*')}"
@@ -97,6 +103,16 @@ class Job:
 
     def _validate(self):
         pass
+
+    def _validate_outputs(self, outputs):
+        res = []
+        for o in outputs:
+            if isinstance(o, Path):
+                o = str(o)
+            elif not isinstance(o, str):
+                raise TypeError(f"outputs must all be strings, was {type(o)}")
+            res.append(o)
+        return res
 
     def __iter__(self):
         """It yields self so you can use jobs and list of jobs uniformly"""
@@ -109,7 +125,7 @@ class Job:
         """
         from . import global_pipegraph
 
-        log_job_trace(f"adding {self.__class__.__name__} {self.job_id}")
+        log_trace(f"adding {self.__class__.__name__} {self.job_id}")
 
         if global_pipegraph is None:
             raise ValueError("Must instantiate a pipegraph before creating any Jobs")
@@ -182,7 +198,7 @@ class Job:
                     f"{o_job.job_id} is already (directly) upstream of {self.job_id}, can't be downstream as well (cycle)"
                 )
 
-            log_job_trace(f"adding edge {o_job.job_id}, {self.job_id}")
+            log_trace(f"adding edge {o_job.job_id}, {self.job_id}")
             global_pipegraph.add_edge(o_job, self)
             global_pipegraph.job_inputs[self.job_id].update(o_inputs)
         if other_jobs:
@@ -287,12 +303,12 @@ class _DownstreamNeedsMeChecker(Job):
 
     def run(self, runner, _historical_output):
         if self.job_to_check.output_needed(runner):
-            log_job_trace(f" {self.job_id} ExplodePlease")
+            log_trace(f" {self.job_id} ExplodePlease")
             return {
                 self.job_id: "ExplodePlease"
             }  # magic value, not being compared to previous run!
         else:
-            log_job_trace(f" {self.job_id} IgnorePlease")
+            log_trace(f" {self.job_id} IgnorePlease")
             return {self.job_id: "IgnorePlease"}
 
     def compare_hashes(self, old_hash, new_hash):
@@ -309,23 +325,22 @@ class _ConditionalJobClone(Job):
     it can be outfitted with 'hulls' per downstream job"""
 
     @staticmethod
-    def _name_job(
-        parent_job,
-        downstream_job_id,
-    ):
-        return "(CJC:" + parent_job.job_id + ":" + downstream_job_id + ")"
+    def _name_job(parent_job, downstream_job_id, only_one):
+        if only_one:  # this makes reading the logs somewhat easier..
+            return "(CJC:" + parent_job.job_id + ")"
+        else:
+            return "(CJC:" + parent_job.job_id + ":" + downstream_job_id + ")"
 
-    def __new__(cls, parent_job, clone_number, other_clones, first_output):
-        job_id = cls._name_job(parent_job, clone_number)
+    def __new__(cls, parent_job, clone_number, other_clones, first_output, only_one):
+        job_id = cls._name_job(parent_job, clone_number, only_one)
         return object.__new__(cls)
 
-    def __init__(self, parent_job, downstream_job_id, other_clones, first_output):
+    def __init__(
+        self, parent_job, downstream_job_id, other_clones, first_output, only_one
+    ):
         import threading
 
-        self.job_id = self._name_job(
-            parent_job,
-            downstream_job_id,
-        )
+        self.job_id = self._name_job(parent_job, downstream_job_id, only_one)
         self.resources = parent_job.resources
         self.outputs = [self.job_id + x for x in parent_job.outputs]
         self.dependency_callbacks = []
@@ -349,7 +364,7 @@ class _ConditionalJobClone(Job):
         self.other_clones = None  # break cycle
 
     def output_needed(self, runner):
-        log_job_trace(f"Forwarding output_needed to {self.parent_job}")
+        log_trace(f"Forwarding output_needed to {self.parent_job}")
         # do perverse things with pythons conscept of methods,
         # like on purpose calling them with the wrong class
         self.parent_job.__class__.output_needed(self, runner)
@@ -359,7 +374,7 @@ class _ConditionalJobClone(Job):
 
     def run(self, runner, historical_output):
         if self.first_output:  # one of the siblings has run
-            log_job_trace(
+            log_trace(
                 f"{self.job_id}, output available - ok: {self.first_output[0][0]}"
             )
             # paranoia
@@ -376,7 +391,7 @@ class _ConditionalJobClone(Job):
         else:
             if self.lock.acquire(blocking=False):
                 # we are the first
-                log_job_trace(f"{self.job_id}, lock aquired")
+                log_trace(f"{self.job_id}, lock aquired")
                 try:
                     modified_historical_output = {
                         k[len(self.job_id) :]: v for (k, v) in historical_output.items()
@@ -389,7 +404,7 @@ class _ConditionalJobClone(Job):
                     self.lock.notify_all()  # tell all others to resume
                     self.lock.release()
             else:
-                log_job_trace(f"{self.job_id}, concurrent calculation - waiting")
+                log_trace(f"{self.job_id}, concurrent calculation - waiting")
                 self.lock.wait()  # wait for notification
                 # todo: in an ideal world, release core lock, increase thread count here?
             # now output. reuse code from if self.first_output
@@ -453,6 +468,8 @@ class MultiFileGeneratingJob(Job):
 
     @staticmethod
     def _validate_files_argument(files):
+        from . import global_pipegraph
+
         if not hasattr(files, "__iter__"):
             raise TypeError("files was not iterable")
         if isinstance(files, (str, Path)):
@@ -468,7 +485,10 @@ class MultiFileGeneratingJob(Job):
         for f in files:
             if not isinstance(f, (str, Path)):
                 raise TypeError("Files for (Multi)FileGeneratingJob must be Path/str")
-        abs_files = [Path(x).resolve().relative_to(Path(".").absolute()) for x in files]
+            if global_pipegraph.prevent_absolute_paths and Path(f).is_absolute():
+                raise ValueError(f"Absolute file path as job_ids prevented by graph.prevent_absolute_paths. Was {f}")
+        path_files = (Path(x) for x in files)
+        abs_files = [x if x.is_absolute() else x.resolve().relative_to(Path(".").absolute()) for x in path_files]
         if lookup:
             lookup = {lookup[ii]: abs_files[ii] for ii in range(len(lookup))}
         return sorted(abs_files), lookup
@@ -490,7 +510,7 @@ class MultiFileGeneratingJob(Job):
             Resources.Exclusive,
         ):
             # que = multiprocessing.Queue() # replace by pipe
-            log_job_trace(f"Forking for {self.job_id}")
+            log_trace(f"Forking for {self.job_id}")
             # these only get closed by the parent process
             stdout = tempfile.NamedTemporaryFile(
                 mode="w+",
@@ -594,17 +614,17 @@ class MultiFileGeneratingJob(Job):
                             time.sleep(sleep_time)
                             wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                     except KeyboardInterrupt:  # pragma: no cover  todo: interactive testing
-                        log_job_trace(
+                        log_trace(
                             f"Keyboard interrupt in {self.job_id} - sigbreak spawned process"
                         )
                         os.kill(self.pid, signal.SIGUSR1)
                         time.sleep(1)
-                        log_job_trace(
+                        log_trace(
                             f"Keyboard interrupt in {self.job_id} - checking spawned process"
                         )
                         wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                         if wp1 == 0 and waitstatus == 0:
-                            log_job_trace(
+                            log_trace(
                                 f"Keyboard interrupt in {self.job_id} - sigkill spawned process"
                             )
                             os.kill(self.pid, signal.SIGKILL)
@@ -774,12 +794,13 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
 
 
 class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
-    """A job that creates files that are removed 
+    """A job that creates files that are removed
     once all it's dependents have run.
 
     These will always run at least once,
     (due to the 'virtual clean up jobs' capturing the dependencies)
     """
+
     job_kind = JobKind.Temp
 
     def __new__(cls, files, *args, **kwargs):
@@ -806,13 +827,15 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
         for downstream_id in runner.dag.neighbors(self.job_id):
             job = runner.jobs[downstream_id]
             if job.output_needed(runner):
-                log_job_trace(f"Tempfile said output needed because of {job.job_id}")
+                log_trace(f"Tempfile said output needed because of {job.job_id}")
                 return True
-        log_job_trace("Tempfile said no output needed")
+        log_trace("Tempfile said no output needed")
         return False
 
 
-class TempFileGeneratingJob(MultiTempFileGeneratingJob): # todo: should theis be a func?
+class TempFileGeneratingJob(
+    MultiTempFileGeneratingJob
+):  # todo: should theis be a func?
     job_kind = JobKind.Temp
 
     def __new__(cls, output_filename, *args, **kwargs):
@@ -994,7 +1017,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         else:
             line_no = self.function.__code__.co_firstlineno
         line_unchanged = line_no == historical_output.get("source_line_no", False)
-        log_job_trace(
+        log_trace(
             f"{self.job_id}, {file_unchanged}, {line_unchanged}, {escape_logging(new_file_hash)}, {escape_logging(historical_output)}"
         )
 
@@ -1031,13 +1054,13 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     def compare_hashes(self, old_hash, new_hash, python_version=python_version):
         if python_version in new_hash and python_version in old_hash:
             res = new_hash[python_version] == old_hash[python_version]
-            # log_job_trace(f"Comparing based on bytecode: result {res}")
+            # log_trace(f"Comparing based on bytecode: result {res}")
             return res
         else:  # pragma: no cover
             # missing one python version, did the source change?
             # should we compare Closures here as well? todo
             res = new_hash["source"] == old_hash["source"]
-            # log_job_trace(f"Comparing based on source: result {res}")
+            # log_trace(f"Comparing based on source: result {res}")
             return res
 
     def get_source_file(self):
@@ -1121,6 +1144,10 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             return False
         elif hasattr(a, "__code__") and hasattr(a, "__closure__"):
             if hasattr(b, "__code__") and hasattr(b, "__closure__"):
+                # print('comp', (a.__code__ == b.__code__) , (a.__closure__ == b.__closure__))
+                # print(a.__closure__)
+                # print(b.__closure__)
+
                 return (a.__code__ == b.__code__) and (a.__closure__ == b.__closure__)
             else:
                 return False
@@ -1511,7 +1538,6 @@ class DataLoadingJob(Job):
     Note that these don't run if they have no dependents
     """
 
-
     job_kind = JobKind.Loading
 
     def __new__(cls, job_id, *args, **kwargs):
@@ -1530,10 +1556,10 @@ class DataLoadingJob(Job):
     def run(self, runner, historical_output):
         self.load_function()
 
-        log_job_trace(
+        log_trace(
             f"dl {self.job_id} - historical: {historical_output.get(self.outputs[0], False)}"
         )
-        log_job_trace(f"dl {self.job_id} - {escape_logging(historical_output)}")
+        log_trace(f"dl {self.job_id} - {escape_logging(historical_output)}")
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
         }  # so the downstream get's invalidated
@@ -1751,7 +1777,7 @@ class JobGeneratingJob(Job):
         return False
 
     def run(self, runner, historical_output):
-        log_job_trace(f"running jobgenerating {self.job_id}")
+        log_trace(f"running jobgenerating {self.job_id}")
         self.last_run_id = runner.run_id
         self.callback()
         # todo: is this the right approach
@@ -2051,7 +2077,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         self._target_folder = self.output_dir_prefix / output_name
 
         if all((self._map_filename(fn).exists() for fn in self.org_files)):
-            log_job_trace(f"{self.job_id} -  all files existed - just hashing")
+            log_trace(f"{self.job_id} -  all files existed - just hashing")
             res = {
                 str(of): hashers.hash_file(self._map_filename(of))
                 for of in self.org_files
@@ -2059,7 +2085,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         else:
             import socket
 
-            log_job_trace(f"{self.job_id} - output files missing, building them")
+            log_trace(f"{self.job_id} - output files missing, building them")
             # temp replace for the actual run
             self._target_folder = (
                 self.output_dir_prefix
@@ -2162,21 +2188,19 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         if log_filename.exists():
             with open(log_filename) as op:
                 known = json.load(op)
-        log_job_trace(f"setting {history_filename} {output_name}")
+        log_trace(f"setting {history_filename} {output_name}")
         known[str(history_filename)] = output_name
         with open(log_filename, "w") as op:
             json.dump(known, op)
 
         if self.remove_unused:
             keep = set(known.values())
-            log_job_trace("Removing - keep {keep}")
+            log_trace("Removing - keep {keep}")
             remove = [
                 x
                 for x in self.output_dir_prefix.glob("*")
                 if x.name.startswith("done_") and x.is_dir() and not x.name in keep
             ]
             for dir in remove:
-                log_job_trace(
-                    f"Identified {dir} as no longer in use by any PPG. Removing"
-                )
+                log_trace(f"Identified {dir} as no longer in use by any PPG. Removing")
                 shutil.rmtree(dir)
