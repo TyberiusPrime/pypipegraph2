@@ -9,6 +9,7 @@ from .shared import counter, write, read
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestPypipegraph2:
+    
     def test_very_simple(self):
         assert not Path("A").exists()
         job = ppg.FileGeneratingJob("A", lambda of: of.write_text("Done"))
@@ -91,7 +92,7 @@ class TestPypipegraph2:
         assert Path("outcount").read_text() == "0"
 
         Path("B").unlink()  # will make it rerun.
-        logger.error("Run 4 - return B but not C")
+        logger.error("Run 4 - rerun B but not C")
         ppg.run()
         assert Path("outcount").read_text() == "1"
         # but C was not rerun, since the B output did not change.
@@ -562,6 +563,9 @@ class TestPypipegraph2:
                        ^
         Fi:TB -> TB    ->  D
 
+        (todo: this full argument might have been invalidated
+        by the non-transitive-hull changes?)
+
         which means, after the graph rewriting,
         TA and TB depend on each other's FunctionInvariants
         (TempJobs steal the invariants from their downstreams,
@@ -621,7 +625,7 @@ class TestPypipegraph2:
         ppg.run()
         assert Path("b").read_text() == "2"  # we trigger that one
         assert (
-            Path("a").read_text() == "2"
+            Path("a").read_text() == "1"
         )  # the FunctionInvariant:TB was pulled into TA's upstream by the rewrite
         assert Path("c").read_text() == "1"  # but this one was isolated
         assert Path("d").read_text() == "1"  # as was this one was isolated

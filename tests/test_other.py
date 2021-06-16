@@ -530,3 +530,36 @@ def test_prevent_absolute_paths(ppg2_per_test):
     ppg2_per_test.new(prevent_absolute_paths=False)
     ppg.FileGeneratingJob("/tmp/absolute", lambda of: of.write_text("a"))
     ppg2_per_test.new(prevent_absolute_paths=True)
+
+
+def test_broken_case_from_delayeddataframe(ppg2_per_test):
+    out = {}
+    def store(key, value):
+        out[key] = value
+
+    a = ppg.CachedDataLoadingJob('a', lambda: 'a', lambda value: store('a', value))
+    event = ppg.CachedDataLoadingJob('event', lambda: 'event', lambda value: store('event', value))
+    event2 = ppg.CachedDataLoadingJob('event2', lambda: 'event2', lambda value: store('event2', value))
+    anno_sequence = ppg.CachedDataLoadingJob('anno_sequence', lambda: 'anno_sequence', lambda value: store('anno_sequence', value))
+    event_seq = ppg.DataLoadingJob('event_seq', lambda: store('event_seq', out['event'] + out['anno_sequence']))
+    event2_seq = ppg.DataLoadingJob('event2_seq', lambda: store('event2_seq', out['event2'] + out['event_seq']))
+    force_load = ppg.JobGeneratingJob('force_load', lambda: None)
+
+    anno_sequence.calc.depends_on(a.load)
+    anno_sequence.load.depends_on(a.load)
+    event.calc.depends_on(a.load)
+
+    event_seq.depends_on(event.load)
+    event_seq.depends_on(anno_sequence.load)
+
+    event2.calc.depends_on(event.load)
+
+    event2_seq.depends_on(event_seq, event2.load)
+
+    force_load.depends_on(event.load, event2.load, event2_seq, event_seq)
+    ppg.run()
+    assert out['event2_seq'] == 'event2' + 'event' + 'anno_sequence'
+
+
+
+

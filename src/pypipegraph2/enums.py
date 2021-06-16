@@ -3,11 +3,33 @@ from enum import Enum, auto
 
 class JobState(Enum):
     Waiting = auto()
+    ConditionalWaiting = auto()
     ReadyToRun = auto()
-    Executed = auto()
+    Success = auto()
     Skipped = auto()
     Failed = auto()
     UpstreamFailed = auto()
+
+    def is_terminal(self):
+        return self in (
+            JobState.Success,
+            JobState.Skipped,
+            JobState.Failed,
+            JobState.UpstreamFailed,
+        )
+    def is_failed(self):
+        return self in (
+            JobState.Failed,
+            JobState.UpstreamFailed,
+        )
+
+class ShouldRun(Enum):
+    Maybe = auto()
+    Yes = auto()
+    No = auto()
+
+    def is_decided(self):
+        return self in (ShouldRun.Yes, ShouldRun.No)
 
 
 class ValidationState(Enum):
@@ -64,6 +86,12 @@ class Resources(Enum):
         elif self is Resources.RunsHere:
             return 1
         elif self is Resources._RaiseInCoreLock:
-            return 0 # which the core lock does not like!
+            return 0  # which the core lock does not like!
         else:
             raise ValueError("Not a Resource with a given number of cores")
+
+
+class UpstreamCompleted(Enum):
+    All = auto()
+    AllButConditional = auto()
+    No = auto()

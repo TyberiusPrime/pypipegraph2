@@ -225,6 +225,7 @@ class PyPipeGraph:
             return final_result
         finally:
             log_info("Run is done")
+            log_info("")
             if print_failures:
                 self._print_failures()
             self._restore_signals()
@@ -300,7 +301,7 @@ class PyPipeGraph:
             if not rt_file.exists():
                 lines.append("jobid\trun_start_time\truntime_s")
             for job_id, job_result in job_results.items():
-                if job_result.state is JobState.Executed:
+                if job_result.state is JobState.Success:
                     if job_result.run_time >= 1:
                         lines.append(
                             f"{job_id}\t{int(run_start_time)}\t{job_result.run_time:.2}"

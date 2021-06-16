@@ -20,7 +20,7 @@ from .enums import JobKind, Resources
 from .util import escape_logging
 import hashlib
 import shutil
-from .util import log_info, log_error, log_warning, log_debug, log_trace
+from .util import log_info, log_error, log_warning, log_debug, log_trace, log_job_trace
 
 module_type = type(sys)
 
@@ -254,6 +254,9 @@ class Job:
 
     def _call_result(self):  # pragma: no cover
         return None
+
+    def is_conditional(self):
+        return self.job_kind in (JobKind.Temp, JobKind.Loading)
 
     @property
     def exception(self):
