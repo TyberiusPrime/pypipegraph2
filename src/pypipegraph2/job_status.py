@@ -90,8 +90,8 @@ class JobStatus:
 
     def all_upstreams_terminal_or_conditional(self):
         for upstream_id in self.upstreams():
-            s = self.runner.job_states[upstream_id].state
-            if not s.is_terminal():
+            s = self.runner.job_states[upstream_id]
+            if not s.state.is_terminal():
                 if self.runner.jobs[upstream_id].is_conditional():
                     if (
                         s.should_run == ShouldRun.Yes
@@ -102,6 +102,17 @@ class JobStatus:
                             f"{self.job_id} all_upstreams_terminal_or_conditional -->False, {upstream_id} was conditional, but shouldrun, and not yes"
                         )
                         return False
+                    else:
+                        # import history from that one. 
+                        for name in self.runner.jobs[upstream_id].outputs:
+                            if name in self.runner.job_inputs[self.job_id]:
+                                log_trace(f"\t\t\tHad {name} - non-running conditional job - using historical input")
+                                if name in self.historical_input:
+                                    self.updated_input[name] = self.historical_input[name]
+                                # else: do nothing. We'll come back as invalidated, since we're missing an input
+                                # and then the upstream job will be run, and we'll be back here,
+                                # and it will be  in a terminal state.
+
                 else:
                     log_job_trace(
                         f"{self.job_id} all_upstreams_terminal_or_conditional -->False, {upstream_id} was not terminal"
@@ -117,6 +128,7 @@ class JobStatus:
         yield from self.runner.dag.predecessors(self.job_id)
 
     def update_should_run(self):
+        log_job_trace(f"{self.job_id} update_should_run")
         if self.should_run in (ShouldRun.Yes, ShouldRun.No):  # it was decided.
             result = self.should_run
         else:
@@ -138,10 +150,13 @@ class JobStatus:
                         result = ShouldRun.No
 
                 else:  # a conditional job...
+                    log_job_trace("\t was conditional")
                     ds_count = 0
                     ds_no_count = 0
                     for downstream_id in self.downstreams():
+                        log_job_trace(f"\t downstream: {downstream_id}")
                         ds_count += 1
+                        self.runner.job_states[downstream_id].update_should_run()
                         ds_should_run = self.runner.job_states[downstream_id].should_run
                         if ds_should_run == ShouldRun.Yes:
                             log_job_trace(
@@ -165,7 +180,7 @@ class JobStatus:
             self.should_run = result
             self.job_decided_wether_to_run()
             log_job_trace("run_now in update_should_run")
-        if self.should_run.is_decided():
+        if self.should_run.is_decided() and self.state == JobState.Waiting:
             self.run_now_if_ready()
 
     def run_now_if_ready(self):
@@ -282,10 +297,12 @@ class JobStatus:
                     self.validation_state = ValidationState.Invalidated
                 else:
                     # if self.all_upstreams_terminal():
-                    log_job_trace(
-                        f"{self.job_id} - not invalidated, but all_upstreams_terminal_or_conditional -> invalidated"
-                    )
-                    self.validation_state = ValidationState.Validated
+                    if not self.job.output_needed(self.runner):
+                        log_job_trace(
+                            f"{self.job_id} - not invalidated, but "
+                            "all_upstreams_terminal_or_conditional -> validated "
+                            "and output not needed")
+                        self.validation_state = ValidationState.Validated
 
     def _consider_invalidation(self):
         downstream_state = self
@@ -296,7 +313,7 @@ class JobStatus:
             f"new input {escape_logging(new_input.keys())} old_input {escape_logging(old_input.keys())}"
         )
         if len(new_input) != len(old_input):  # we lost or gained an input -> invalidate
-            log_trace(
+            log_job_trace(
                 f"{self.job_id} No of inputs changed _> invalidated {len(new_input)}, {len(old_input)}"
             )
             invalidated = True
@@ -308,13 +325,13 @@ class JobStatus:
                 for key, old_hash in old_input.items():
                     cmp_job = self.runner.jobs[self.runner.outputs_to_job_ids[key]]
                     if not cmp_job.compare_hashes(old_hash, new_input[key]):
-                        log_trace(
-                            f"{self.job_id} input {key} changed {escape_logging(old_hash)} {escape_logging(new_input[key])}"
+                        log_job_trace(
+                            f"{self.job_id} input {key} changed {escape_logging(old_hash)} {escape_logging(new_input[key])} {cmp_job}"
                         )
                         invalidated = True
                         break
             else:
-                log_trace(
+                log_job_trace(
                     f"{self.job_id} differing set of keys. Prev invalidated: {invalidated}"
                 )
                 for old_key, old_hash in old_input.items():
@@ -326,7 +343,7 @@ class JobStatus:
                             self.runner.outputs_to_job_ids[old_key]
                         ]
                         if not cmp_job.compare_hashes(old_hash, new_input[old_key]):
-                            log_trace(f"{self.job_id} input {old_key} changed")
+                            log_job_trace(f"{self.job_id} input {old_key} changed")
                             invalidated = True
                             break
                     else:
@@ -335,7 +352,7 @@ class JobStatus:
                         count = _dict_values_count_hashed(new_input, old_hash)
                         if count:
                             if count > 1:
-                                log_trace(
+                                log_job_trace(
                                     f"{self.job_id} {old_key} mapped to multiple possible replacement hashes. Invalidating to be better safe than sorry"
                                 )
                                 invalidated = True
@@ -346,7 +363,7 @@ class JobStatus:
                             log_trace(f"{self.job_id} {old_key} - no match found")
                             invalidated = True
                             break
-                log_trace(f"{self.job_id} invalidated: {invalidated}")
+                log_job_trace(f"{self.job_id} invalidated: {invalidated}")
         return invalidated
 
 
