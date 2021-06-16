@@ -244,7 +244,7 @@ class TestCachedAttributeJob:
         print(ppg.util.global_pipegraph.last_run_result.keys())
         assert (
             ppg.util.global_pipegraph.last_run_result[jobB.job_id].state
-            == ppg2.enums.JobState.Executed
+            == ppg2.enums.JobState.Success
         )
         assert (
             ppg.util.global_pipegraph.last_run_result[job.job_id].state

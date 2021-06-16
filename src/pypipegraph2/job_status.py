@@ -1,4 +1,4 @@
-from .enums import JobState, ValidationState, ShouldRun
+from .enums import JobState, ValidationState, ShouldRun, JobKind
 import time
 
 from .util import (
@@ -14,17 +14,22 @@ from .util import (
 class JobStatus:
     """Job run information collector"""
 
-    def __init__(self, job_id, runner):
+    def __init__(self, job_id, runner, historical_input, historical_output):
         self.job_id = job_id
+        self.runner = runner
         self._state = JobState.Waiting
         self._validation_state = ValidationState.Unknown
+        # if not historical_input and not self.runner.job_inputs[job_id]:# todo: do I need this?!
+        # log_job_trace(
+        # f"{self.job_id} was a no input job without history -> validated"
+        # )
+        # self._validation_state = ValidationState.Validated
         self.should_run = ShouldRun.Maybe
-        self.runner = runner
         self.input_done_counter = 0
         self.upstreams_completed = False
         self.run_non_invalidated = False
-        self.historical_input = {}  # filled in from Runner
-        self.historical_output = {}  # filled in from Runner
+        self.historical_input = historical_input
+        self.historical_output = historical_output
         self.updated_input = {}
         self.updated_output = {}
 
@@ -70,7 +75,9 @@ class JobStatus:
         )
         if self._validation_state != value:
             if self._validation_state != ValidationState.Unknown:
-                raise ValueError(f"Can't go from {self._validation_state} to {value}")
+                raise ValueError(
+                    f"{self.job_id} Can't go from {self._validation_state} to {value} {self.state}"
+                )
             self._validation_state = value
             # self.update_should_run()
 
@@ -103,12 +110,16 @@ class JobStatus:
                         )
                         return False
                     else:
-                        # import history from that one. 
+                        # import history from that one.
                         for name in self.runner.jobs[upstream_id].outputs:
                             if name in self.runner.job_inputs[self.job_id]:
-                                log_trace(f"\t\t\tHad {name} - non-running conditional job - using historical input")
+                                log_trace(
+                                    f"\t\t\tHad {name} - non-running conditional job - using historical input"
+                                )
                                 if name in self.historical_input:
-                                    self.updated_input[name] = self.historical_input[name]
+                                    self.updated_input[name] = self.historical_input[
+                                        name
+                                    ]
                                 # else: do nothing. We'll come back as invalidated, since we're missing an input
                                 # and then the upstream job will be run, and we'll be back here,
                                 # and it will be  in a terminal state.
@@ -130,30 +141,73 @@ class JobStatus:
     def update_should_run(self):
         log_job_trace(f"{self.job_id} update_should_run")
         if self.should_run in (ShouldRun.Yes, ShouldRun.No):  # it was decided.
+            log_job_trace(f"\t short circuit {self.should_run}")
             result = self.should_run
         else:
             if self.validation_state == ValidationState.Invalidated:
-                log_job_trace(f"{self.job_id} update_should_run-> yes case invalidated")
+                log_job_trace(f"\t update_should_run-> yes case invalidated")
                 result = ShouldRun.Yes
             else:
                 if not self.job.is_conditional():
 
                     if self.job.output_needed(self.runner):
                         log_job_trace(
-                            f"{self.job_id} update_should_run-> yes case output_needed"
+                            f"\t update_should_run-> yes case output_needed"
                         )
                         result = ShouldRun.Yes
                     else:
-                        log_job_trace(
-                            f"{self.job_id} update_should_run-> no output_needed not needed"
-                        )
-                        result = ShouldRun.No
+                        if self.validation_state == ValidationState.Validated:
+                            log_job_trace(
+                                f"\t update_should_run-> no output_needed needed, validated"
+                            )
+                            result = ShouldRun.No
+                        else:
+                            if self.job.job_kind == JobKind.Cleanup:
+                                log_job_trace(f"\t -> cleanup_job")
+                                parent_id = self.job.parent_job.job_id
+                                parent_state = self.runner.job_states[parent_id].state
+                                if parent_state == JobState.Skipped:
+                                    log_job_trace(
+                                        f"\t -> skip (was cleanup, parent skipped)"
+                                    )
+                                    result = ShouldRun.No
+                                elif parent_state == JobState.Success:
+                                    log_job_trace(
+                                        f"\t -> run (was cleanup, parent success)"
+                                    )
+                                    result = ShouldRun.Yes
+                                elif (
+                                    parent_state == JobState.Failed
+                                ):  # todo: this is a judgment call. Is it the right one?
+                                    log_job_trace(
+                                        f"\t -> run (was cleanup, parent failed)"
+                                    )
+                                    result = ShouldRun.Yes
+                                elif parent_state == JobState.UpstreamFailed:
+                                    result = ShouldRun.No
+                                elif parent_state == JobState.Waiting:
+                                    result = ShouldRun.Maybe
+                                else:
+                                    raise ValueError(f"Should not happen {parent_state}")
+
+                            else:
+                                self.update_invalidation()
+                                if self.validation_state == ValidationState.Invalidated:
+                                    raise ValueError("I did not expect this case")
+                                elif self.validation_state == ValidationState.Validated:
+                                    result = ShouldRun.No
+                                else:
+                                    result = ShouldRun.Maybe
 
                 else:  # a conditional job...
-                    log_job_trace("\t was conditional")
+                    log_job_trace(
+                        "\t was conditional"
+                    )  # todo: maybe not recurse back to the job we came from?
                     ds_count = 0
                     ds_no_count = 0
                     for downstream_id in self.downstreams():
+                        if self.runner.jobs[downstream_id].job_kind == JobKind.Cleanup: # those don't count
+                            continue
                         log_job_trace(f"\t downstream: {downstream_id}")
                         ds_count += 1
                         self.runner.job_states[downstream_id].update_should_run()
@@ -174,12 +228,12 @@ class JobStatus:
                         else:
                             result = ShouldRun.Maybe
         log_job_trace(
-            f"{self.job_id} update_should_run. Was {self.should_run} becomes {result}"
+            f"== update_should_run. Was {self.should_run} becomes {result}"
         )
         if self.should_run != result:
             self.should_run = result
             self.job_decided_wether_to_run()
-            log_job_trace("run_now in update_should_run")
+            log_job_trace(f"{self.job_id} run_now in update_should_run")
         if self.should_run.is_decided() and self.state == JobState.Waiting:
             self.run_now_if_ready()
 
@@ -288,21 +342,31 @@ class JobStatus:
             else:
                 log_trace(f"\t\t\tNot an input {name}")
         if self.validation_state != ValidationState.Invalidated:
-            if self.all_upstreams_terminal_or_conditional():
-                invalidated = self._consider_invalidation()
-                log_job_trace(
-                    f"{self.job_id} - invalidation considered. Result: {invalidated}"
-                )
-                if invalidated:
-                    self.validation_state = ValidationState.Invalidated
-                else:
-                    # if self.all_upstreams_terminal():
-                    if not self.job.output_needed(self.runner):
-                        log_job_trace(
-                            f"{self.job_id} - not invalidated, but "
-                            "all_upstreams_terminal_or_conditional -> validated "
-                            "and output not needed")
-                        self.validation_state = ValidationState.Validated
+            self.update_invalidation()
+
+    def update_invalidation(self):
+        if self.job.job_kind == JobKind.Cleanup:
+            return False
+        if self.all_upstreams_terminal_or_conditional():
+            invalidated = self._consider_invalidation()
+            log_job_trace(
+                f"{self.job_id} - invalidation considered. Result: {invalidated}"
+            )
+            if invalidated:
+                self.validation_state = ValidationState.Invalidated
+            else:
+                # if self.all_upstreams_terminal():
+                if not self.job.output_needed(self.runner):
+                    log_job_trace(
+                        f"{self.job_id} - not invalidated, but "
+                        "all_upstreams_terminal_or_conditional -> validated "
+                        "and output not needed "
+                        "and was not a cleanup job"
+                    )
+                    self.validation_state = ValidationState.Validated
+            return True
+        else:
+            return False
 
     def _consider_invalidation(self):
         downstream_state = self

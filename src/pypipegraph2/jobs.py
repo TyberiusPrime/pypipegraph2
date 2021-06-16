@@ -878,14 +878,9 @@ class _FileCleanupJob(Job):
     def __init__(self, parent_job):
         Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
         self.parent_job = parent_job
-        self.real_parent_job = (
-            parent_job  #  parent_job may be replaced by _ConditionalJobClone
-        )
-        # and that is necessary for the invalidation to do it's thing
-        # but the real parent will the one we read the files from
 
     def run(self, _ignored_runner, _historical_output):
-        for fn in self.real_parent_job.files:
+        for fn in self.parent_job.files:
             if fn.exists():
                 fn.unlink()
 

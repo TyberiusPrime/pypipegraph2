@@ -125,7 +125,7 @@ class TestFileGeneratingJob:
 
         job = ppg.FileGeneratingJob(of, do_write, depend_on_function=False)
         res = ppg.run()
-        assert res[job.job_id].state == ppg.enums.JobState.Executed
+        assert res[job.job_id].state == ppg.enums.JobState.Success
         assert Path(of).exists()
         assert read(of) == data_to_write
 

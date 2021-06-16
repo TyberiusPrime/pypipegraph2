@@ -77,22 +77,23 @@ class Runner:
                 job_graph,
                 focus_on_these_jobs,
                 jobs_already_run_previously,
+                history,
                 dump_graphml,
             )
             # flat_after = networkx.readwrite.json_graph.node_link_data(job_graph.job_dag)
             # import json
 
             # assert flat_before == flat_after
-            # import json
+            import json
 
-            # log_trace(
-            # "dag "
-            # + escape_logging(
-            # json.dumps(
-            # networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
-            # )
-            # ),
-            # )
+            log_job_trace(
+                "dag "
+                + escape_logging(
+                    json.dumps(
+                        networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
+                    )
+                ),
+            )
 
             if not networkx.algorithms.is_directed_acyclic_graph(
                 self.dag
@@ -105,10 +106,10 @@ class Runner:
                 )
 
             for job_id in self.jobs:
-                s = JobStatus(job_id, self)
-                s.historical_input, s.historical_output = history.get(
+                historical_input, historical_output = history.get(
                     job_id, ({}, {})
                 )  # todo: support renaming jobs.
+                s = JobStatus(job_id, self, historical_input, historical_output)
                 log_trace(
                     f"Loaded history for {job_id} in: {len(s.historical_input)}, out: {len(s.historical_output)}"
                 )
@@ -196,7 +197,7 @@ class Runner:
             )
         return cleanup_job
 
-    def _modify_dag_for_conditional_job(self, dag, job):
+    def _modify_dag_for_conditional_job(self, dag, job, history):
         """A a conditional job is one that only runs if it's downstreams need it.
         Examples are DataLoadingJobs and TempFileGeneratingJobs.
 
@@ -221,13 +222,27 @@ class Runner:
             dag.remove_node(job.job_id)
             del self.jobs[job.job_id]
             # mark it as skipped
-            self.job_states[job.job_id] = JobStatus()
-            self.job_states[job.job_id].state = JobState.Skipped
+            historical_input, historical_output = history.get(
+                job.job_id, ({}, {})
+            )  # todo: support renaming jobs.
+            self.job_states[job.job_id] = JobStatus(
+                job.job_id, self, historical_input, historical_output
+            )
+            self.job_states[
+                job.job_id
+            ]._state = (
+                JobState.Skipped
+            )  # no need to do the downstream calls - this is just an ignored job
         elif job.cleanup_job_class:
             cleanup_job = self._add_cleanup(dag, job)
 
     def modify_dag(  # noqa: C901
-        self, job_graph, focus_on_these_jobs, jobs_already_run_previously, dump_graphml
+        self,
+        job_graph,
+        focus_on_these_jobs,
+        jobs_already_run_previously,
+        history,
+        dump_graphml,
     ):
         """Modify the DAG to be executed
         by
@@ -255,12 +270,11 @@ class Runner:
 
         self._apply_pruning(dag, focus_on_these_jobs, jobs_already_run_previously)
 
-        # first, clone & multiply all conditional jobs...
         known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
         for job_id in reversed(known_job_ids):  # todo: do we need reversed
             job = self.jobs[job_id]
             if job.job_kind in (JobKind.Temp, JobKind.Loading):
-                self._modify_dag_for_conditional_job(dag, job)
+                self._modify_dag_for_conditional_job(dag, job, history)
             elif job.cleanup_job_class:
                 log_error(
                     f"Unconditionaly, but cleanup? {job}, {job.cleanup_job_class}"
@@ -304,7 +318,7 @@ class Runner:
         job_ids_topological = list(networkx.algorithms.dag.topological_sort(self.dag))
         self.events = queue.Queue()
 
-        for job_id in self.jobs:
+        for job_id in self.dag.nodes: # those are without the pruned nodes
             no_inputs = not self.job_inputs[job_id]
             output_needed = self.jobs[job_id].output_needed(self)
             failed_last_time = self._job_failed_last_time(job_id)
@@ -340,7 +354,9 @@ class Runner:
                         raise exceptions.RunFailedInternally
                     continue
 
-                log_job_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}, todo: {todo}")
+                log_job_trace(
+                    f"<-handle {ev[0]} {escape_logging(ev[1][0])}, todo: {todo}"
+                )
                 d = self._handle_event(ev)
                 todo += d
                 self.jobs_done -= d
@@ -516,9 +532,7 @@ class Runner:
             for name, hash in job_outputs.items():
                 log_trace(f"\tCapturing hash for {name} {escape_logging(hash)}")
                 self.output_hashes[name] = hash
-            log_job_trace("First call?")
             job_state.succeeded(job_outputs)
-            log_job_trace("Returned")
 
     def _job_failed_last_time(self, job_id):
         """Did this job fail last time?"""

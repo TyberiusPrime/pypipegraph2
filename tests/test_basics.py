@@ -40,7 +40,7 @@ class TestPypipegraph2:
         assert Path("A").read_text() == "AAA"
         assert Path("B").read_text() == "BBBAAA"
 
-    def test_very_simple_chain_rerun(self):
+    def test_very_simple_chain_rerun(self, job_trace_log):
         assert not Path("A").exists()
         assert not Path("B").exists()
         counter = 0
@@ -189,7 +189,7 @@ class TestPypipegraph2:
         last = ppg.global_pipegraph.last_run_result
         assert last["A"].state == JobState.Failed
         assert last["B"].state == JobState.UpstreamFailed
-        assert last["C"].state == JobState.Executed
+        assert last["C"].state == JobState.Success
         assert "ValueError" in str(last["A"].error)
 
     def test_multi_file_generating_job(self):
@@ -541,18 +541,17 @@ class TestPypipegraph2:
         Path("B").unlink()
         ppg.run()
         assert Path("B").read_text() == "BTA1"
-        assert Path("C").read_text() == "C0TA0"
+        assert Path("C").read_text() == "C1TA1" # TA1 invalidates C when it runs.
         assert Path("a").read_text() == "2"
-        ppg.util.log_error("HEER")
         ppg.run()
         assert Path("B").read_text() == "BTA1"
-        assert Path("C").read_text() == "C0TA0"
+        assert Path("C").read_text() == "C1TA1"
         assert Path("a").read_text() == "2"
         Path("B").unlink()
         Path("C").unlink()
         ppg.run()
         assert Path("B").read_text() == "BTA2"
-        assert Path("C").read_text() == "C1TA2"
+        assert Path("C").read_text() == "C2TA2"
         assert Path("a").read_text() == "3"
 
     def test_two_temp_jobs(self, trace_log):
@@ -687,7 +686,7 @@ class TestPypipegraph2:
         with pytest.raises(ppg.RunFailed):
             ppg.run()
         last = ppg.global_pipegraph.last_run_result
-        assert last["A"].state == JobState.Executed
+        assert last["A"].state == JobState.Success
         assert last["B"].state == JobState.Failed
         assert last["C"].state == JobState.UpstreamFailed
         assert isinstance(last["B"].error.args[0], ppg.JobContractError)
@@ -1034,7 +1033,7 @@ class TestPypipegraph2:
         assert not hasattr(a, "a_")
         assert Path("A").exists()
 
-    def test_job_generating(self):
+    def test_job_generating(self, job_trace_log):
         def inner():  # don't keep it inside, or the FunctionInvariant will trigger each time.
             counter("a")
             b = ppg.FileGeneratingJob(
