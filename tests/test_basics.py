@@ -9,7 +9,6 @@ from .shared import counter, write, read
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestPypipegraph2:
-    
     def test_very_simple(self):
         assert not Path("A").exists()
         job = ppg.FileGeneratingJob("A", lambda of: of.write_text("Done"))
@@ -361,7 +360,9 @@ class TestPypipegraph2:
         jobB.depends_on(jobA)
         ppg.run()
         assert not Path("TA").exists()
-        assert not Path("a").exists() # changed with the smarter hull stuff - they don't run for sideeffects-and-giggles
+        assert not Path(
+            "a"
+        ).exists()  # changed with the smarter hull stuff - they don't run for sideeffects-and-giggles
         assert not Path("B").exists()
         assert not Path("b").exists()
 
@@ -541,7 +542,7 @@ class TestPypipegraph2:
         Path("B").unlink()
         ppg.run()
         assert Path("B").read_text() == "BTA1"
-        assert Path("C").read_text() == "C1TA1" # TA1 invalidates C when it runs.
+        assert Path("C").read_text() == "C1TA1"  # TA1 invalidates C when it runs.
         assert Path("a").read_text() == "2"
         ppg.run()
         assert Path("B").read_text() == "BTA1"
@@ -721,11 +722,18 @@ class TestPypipegraph2:
         ppg.run(event_timeout=0.1)
         assert Path("a").exists()
 
-    def test_catching_catastrophic_execution_message_passing_failures(self):
+    def test_catching_catastrophic_execution_message_passing_failures(
+        self, job_trace_log
+    ):
         """if it get's really messed up, we raise a RunFailedInternally.
         Hopefully there is no way by user code to trigger this"""
+        import pickle
 
         class BadFileGeneratingJob(ppg.FileGeneratingJob):
+            """A file generating job that does not output_needed()= True
+            if it has no history
+            """
+
             def output_needed(self, runner):
                 for fn in self.files:
                     if not fn.exists():
@@ -752,10 +760,25 @@ class TestPypipegraph2:
             )
             a = ppg.FileGeneratingJob("A", lambda of: of.write_text("a" + o[0]))
             a.depends_on(load_job)
-            Path("b").write_text("b")
+            load_job2, cache_job2 = ppg.CachedDataLoadingJob(
+                "c", lambda: "52", load, depend_on_function=False
+            )
+            d = ppg.FileGeneratingJob('D', lambda of: of.write_text('d' + o[-1]))
+            d.depends_on(load_job2)
+            Path('c').write_text('c')
+            # write something sensible
+            with open("b", "wb") as op:
+                pickle.dump('153', op)
+            # now this does not get rewritten
+            # because of the BadFileGeneratingJob
             assert type(cache_job) == BadFileGeneratingJob
-            with pytest.raises(ppg.exceptions.RunFailedInternally):
-                ppg.run(event_timeout=1)
+            # with the new execution engine (JobState based)
+            # this is no longer an issue
+            # at worst, you'll get a pickle failed error if the job dies
+            with pytest.raises(ppg.RunFailed):
+                ppg.run()
+            assert read('A') == 'a153'
+            assert 'UnpicklingError' in str(load_job2.exception)
         finally:
             ppg.jobs.FileGeneratingJob = old_fg
 
@@ -1425,7 +1448,7 @@ class TestPypipegraph2:
             ppg.graph.time_format = (
                 "%Y-%m-%d_%H-%M-%S-%f"  # we need subsecond resolution for this test.
             )
-            ppg.new(log_retention=1) # so keep 2
+            ppg.new(log_retention=1)  # so keep 2
             ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
             assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 0
             ppg.run()
@@ -1462,7 +1485,7 @@ class TestPypipegraph2:
                 raise KeyError() from e
 
         jobA = ppg.DataLoadingJob("a", a)
-        b = ppg.FileGeneratingJob('b', lambda of: write('b','b'))
+        b = ppg.FileGeneratingJob("b", lambda of: write("b", "b"))
         b.depends_on(jobA)
         with pytest.raises(ppg.RunFailed):
             ppg.run()
@@ -1571,9 +1594,9 @@ class TestPypipegraph2:
         )
         b.depends_on(a)
         c.depends_on(b)
-        #with pytest.raises(ppg.RunFailed):
-        ppg.run() # won't raise since the tfs never get run.  
-        # they don't get run, because we create the 'clone jobs' 
+        # with pytest.raises(ppg.RunFailed):
+        ppg.run()  # won't raise since the tfs never get run.
+        # they don't get run, because we create the 'clone jobs'
         # backwards - and c disappears
         # since it had no downstreams of its own.
         # and then the 2nd level (b) disappears, because
@@ -1756,9 +1779,7 @@ class TestPypipegraph2:
         assert not Path("b").exists()
         assert not Path("d").exists()
 
-    def test_going_from_file_generating_to_file_invariant_no_retrigger(
-        self
-    ):
+    def test_going_from_file_generating_to_file_invariant_no_retrigger(self):
         a = ppg.FileGeneratingJob("a", lambda of: of.write_text("a"))
         b = ppg.FileGeneratingJob(
             "b", lambda of: counter("B") and of.write_text("b" + read("a"))
@@ -1786,9 +1807,7 @@ class TestPypipegraph2:
         assert read("b") == "ba"
         assert read("B") == "1"
 
-    def test_going_from_multi_file_generating_to_file_invariant_no_retrigger(
-        self
-    ):
+    def test_going_from_multi_file_generating_to_file_invariant_no_retrigger(self):
         # this one depends on all files
         a = ppg.MultiFileGeneratingJob(
             ["a", "a1"], lambda of: of[0].write_text("a") and of[1].write_text("a1")

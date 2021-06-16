@@ -284,7 +284,7 @@ class JobStatus:
         elif self.state == JobState.Failed:
             for downstream_job_id in self.downstreams():
                 self.runner.job_states[downstream_job_id].upstream_failed(
-                    "Upstream {source_job_id} failed"
+                    f"Upstream {self.job_id} failed"
                 )
             # upstream_failed all downstreams (reason: This job)
             pass
