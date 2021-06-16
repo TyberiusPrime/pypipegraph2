@@ -469,7 +469,7 @@ class TestModifyDag:
         assert read("a1") == "[1]"
         assert read("a2") == "[1][1]"
 
-    def test_2_fg_one_dl_failing(pself, ppg2_per_test):
+    def test_2_fg_one_dl_failing(pself, ppg2_per_test, job_trace_log):
         from pypipegraph2.util import log_info
 
         parts = []

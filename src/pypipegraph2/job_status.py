@@ -49,6 +49,7 @@ class JobStatus:
     def state(self, value):
         log_job_trace(f"{self.job_id} set state. Was {self._state}, becomes {value}")
         if self._state.is_terminal():  # pragma: no cover
+            log_job_trace(f"{self.job_id} Can't undo or set again a terminal state")
             raise ValueError("Can't undo or set again a terminal state")
         self._state = value
         if value.is_terminal():
@@ -315,10 +316,13 @@ class JobStatus:
 
     def upstream_failed(self, msg):
         log_job_trace(f"{self.job_id} upstream failed {msg}")
-        self.error = msg
-        self.invalidation_state = ValidationState.UpstreamFailed
-        self.state = JobState.UpstreamFailed
-        self.runner._push_event("JobUpstreamFailed", (self.job_id,))  # for accounting
+        if self.state != JobState.UpstreamFailed:
+            self.error = msg
+            self.invalidation_state = ValidationState.UpstreamFailed
+            self.state = JobState.UpstreamFailed
+            self.runner._push_event("JobUpstreamFailed", (self.job_id,))  # for accounting
+        else:
+            self.error += "\n" + msg # multiple upstreams failed. Combine messages
         # -> job_became_terminal
 
     def succeeded(self, output):
