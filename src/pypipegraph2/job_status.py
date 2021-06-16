@@ -110,19 +110,22 @@ class JobStatus:
                         )
                         return False
                     else:
-                        # import history from that one.
-                        for name in self.runner.jobs[upstream_id].outputs:
-                            if name in self.runner.job_inputs[self.job_id]:
-                                log_trace(
-                                    f"\t\t\tHad {name} - non-running conditional job - using historical input"
-                                )
-                                if name in self.historical_input:
-                                    self.updated_input[name] = self.historical_input[
-                                        name
-                                    ]
-                                # else: do nothing. We'll come back as invalidated, since we're missing an input
-                                # and then the upstream job will be run, and we'll be back here,
-                                # and it will be  in a terminal state.
+                        if self.runner.job_states[upstream_id].all_upstreams_terminal_or_conditional():
+                            # import history from that one.
+                            for name in self.runner.jobs[upstream_id].outputs:
+                                if name in self.runner.job_inputs[self.job_id]:
+                                    log_trace(
+                                        f"\t\t\tHad {name} - non-running conditional job - using historical input"
+                                    )
+                                    if name in self.historical_input:
+                                        self.updated_input[name] = self.historical_input[
+                                            name
+                                        ]
+                                    # else: do nothing. We'll come back as invalidated, since we're missing an input
+                                    # and then the upstream job will be run, and we'll be back here,
+                                    # and it will be  in a terminal state.
+                        else:
+                            return False # I can't tell yet!
 
                 else:
                     log_job_trace(
@@ -195,6 +198,7 @@ class JobStatus:
                                 if self.validation_state == ValidationState.Invalidated:
                                     raise ValueError("I did not expect this case")
                                 elif self.validation_state == ValidationState.Validated:
+                                    log_job_trace(f"\t -> {self.job_id} validated")
                                     result = ShouldRun.No
                                 else:
                                     result = ShouldRun.Maybe
@@ -223,12 +227,22 @@ class JobStatus:
                             ds_no_count += 1
                         # else maybe...
                     else:  # no break
-                        if ds_count == ds_no_count:
-                            result = ShouldRun.No
+                        if ds_count == ds_no_count: # no downstream needs me
+                            self.update_invalidation()
+                            if self.validation_state == ValidationState.Validated:
+                                log_job_trace(f"\t {self.job_id} -> no ds_count ==ds_no_count & validated")
+                                result = ShouldRun.No
+                            elif self.validation_state == ValidationState.Invalidated:
+                                log_job_trace(f"\t {self.job_id} -> yes ds_count ==ds_no_count & invalidated")
+                                result = ShouldRun.Yes
+                            else:
+                                log_job_trace(f"\t {self.job_id} -> maybe ds_count ==ds_no_count & unknown validation")
+                                result = ShouldRun.Maybe
                         else:
+                            log_job_trace(f"\t {self.job_id} -> maybe ds_count != ds_no_count")
                             result = ShouldRun.Maybe
         log_job_trace(
-            f"== update_should_run. Was {self.should_run} becomes {result}"
+            f"{self.job_id} == update_should_run. Was {self.should_run} becomes {result}"
         )
         if self.should_run != result:
             self.should_run = result
