@@ -1730,7 +1730,7 @@ class TestPypipegraph2:
             ppg.FileGeneratingJob("A", lambda of: counter("a") and of.write_text("A"))
 
         c = ppg.FileGeneratingJob("c", lambda of: of.write_text("c"))
-        ppg.JobGeneratingJob("B", inner)()
+        ppg.JobGeneratingJob("B", inner)() # here is the call
         assert read("b") == "1"
         assert read("a") == "1"
         assert read("A") == "A"
@@ -1740,6 +1740,15 @@ class TestPypipegraph2:
         assert read("b") == "2"
         assert read("a") == "1"
         assert read("c") == "c"
+
+    def test_focus_on_multiple(self):
+        a = ppg.FileGeneratingJob('a', lambda of: of.write_text(of.name))
+        b = ppg.FileGeneratingJob('b', lambda of: of.write_text(of.name))
+        c = ppg.FileGeneratingJob('c', lambda of: of.write_text(of.name))
+        ppg.global_pipegraph.run_for_these([a,b])
+        assert read('a') == 'a'
+        assert read('b') == 'b'
+        assert not Path('c').exists()
 
     def test_fail_but_write(self):
         def fail(of):

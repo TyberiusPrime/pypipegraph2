@@ -5,7 +5,7 @@ import sys
 import pytest
 import pypipegraph2 as ppg
 from pathlib import Path
-from .shared import write, read, Dummy
+from .shared import write, read, Dummy, counter
 
 
 @pytest.mark.usefixtures("ppg2_per_test", "create_out_dir")
@@ -41,7 +41,7 @@ class TestResourceCoordinator:
             first_job.start_time - min_start,
             first_job.stop_time - min_start,
             second_job.start_time - min_start,
-            second_job.stop_time - min_start,
+            second_job.stop_time - min_start
         )
         if jobA.start_time is None:
             raise ValueError("JobA did not run")
@@ -541,16 +541,16 @@ def test_broken_case_from_delayeddataframe(ppg2_per_test):
     def store(key, value):
         out[key] = value
 
-    a = ppg.CachedDataLoadingJob("a", lambda: "a", lambda value: store("a", value))
+    a = ppg.CachedDataLoadingJob("a", lambda: "a", lambda value: counter('A') and store("a", value))
     event = ppg.CachedDataLoadingJob(
-        "event", lambda: "event", lambda value: store("event", value)
+        "event", lambda: counter("EVENT") and "event", lambda value: store("event", value)
     )
     event2 = ppg.CachedDataLoadingJob(
-        "event2", lambda: "event2", lambda value: store("event2", value)
+        "event2", lambda: counter("EVENT2") and "event2", lambda value: store("event2", value)
     )
     anno_sequence = ppg.CachedDataLoadingJob(
         "anno_sequence",
-        lambda: "anno_sequence",
+        lambda: counter('ANNO_SEQUENCE') and "anno_sequence",
         lambda value: store("anno_sequence", value),
     )
     event_seq = ppg.DataLoadingJob(
@@ -575,3 +575,10 @@ def test_broken_case_from_delayeddataframe(ppg2_per_test):
     force_load.depends_on(event.load, event2.load, event2_seq, event_seq)
     ppg.run()
     assert out["event2_seq"] == "event2" + "event" + "anno_sequence"
+    assert read('EVENT') == '1'
+    assert read('EVENT2') == '1'
+    assert read('ANNO_SEQUENCE') == '1'
+    ppg.run()
+    assert read('EVENT') == '1'
+    assert read('EVENT2') == '1'
+    assert read('ANNO_SEQUENCE') == '1'
