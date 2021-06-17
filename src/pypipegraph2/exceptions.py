@@ -31,6 +31,8 @@ class JobRedefinitionError(ValueError):
 class RunFailed(FatalGraphException):
     pass
 
+class JobsFailed(RunFailed):
+    pass
 
 class RunFailedInternally(RunFailed):
     def __init__(self, *args, **kwargs):

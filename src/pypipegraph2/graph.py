@@ -27,15 +27,11 @@ logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
 if "pytest" in sys.modules:
     log_out = sys.stderr
 else:
-    log_out  = RichHandler(markup=True, console=console)
-logger.configure(
-    handlers=[
-        {
-            "sink": log_out,
-            "format": "{message}",
-            "level": logging.INFO,
-        }
-    ]
+    log_out = RichHandler(markup=True, console=console)
+logger.add(
+    sink=log_out,
+    format="{elapsed} {message}",
+    level=logging.INFO,
 )
 
 time_format = "%Y-%m-%d_%H-%M-%S"
@@ -66,7 +62,7 @@ class PyPipeGraph:
         paths: Optional[Dict[str, Union[Path, str]]] = None,
         allow_short_filenames=False,
         log_retention=None,
-        prevent_absolute_paths = True,
+        prevent_absolute_paths=True,
     ):
 
         if cores is ALL_CORES:
@@ -109,11 +105,20 @@ class PyPipeGraph:
         self.prevent_absolute_paths = prevent_absolute_paths
 
     def run(
-        self, print_failures: bool = True, raise_on_job_error=True, event_timeout=5,
-        dump_graphml=False
+        self,
+        print_failures: bool = True,
+        raise_on_job_error=True,
+        event_timeout=5,
+        dump_graphml=False,
     ) -> Dict[str, JobState]:
         """Run the complete pypipegraph"""
-        return self._run(print_failures, raise_on_job_error, event_timeout, None, dump_graphml=dump_graphml)
+        return self._run(
+            print_failures,
+            raise_on_job_error,
+            event_timeout,
+            None,
+            dump_graphml=dump_graphml,
+        )
 
     def _run(
         self,
@@ -121,7 +126,7 @@ class PyPipeGraph:
         raise_on_job_error=True,
         event_timeout=5,
         focus_on_these_jobs=None,
-        dump_graphml=False
+        dump_graphml=False,
     ) -> Dict[str, JobState]:
         """Run the jobgraph - possibly focusing on a subset of jobs (ie. ignoring
         anything that's not necessary to calculate them - activated by calling a Job
@@ -148,7 +153,9 @@ class PyPipeGraph:
             self.log_dir.mkdir(exist_ok=True, parents=True)
             fn = Path(sys.argv[0]).name
             self.log_file = self.log_dir / f"{fn}-{self.time_str}.log"
-            logger.add(open(self.log_file, "w"), level = min(self.log_level, logging.INFO))
+            logger.add(
+                open(self.log_file, "w"), level=min(self.log_level, logging.INFO)
+            )
             if False:
                 logger.add(
                     RichHandler(
@@ -170,6 +177,7 @@ class PyPipeGraph:
         self.run_dir.mkdir(exist_ok=True, parents=True)
         self.do_raise = []
         self._restart_afterwards = False
+        ok = False
         try:
             result = None
             self._install_signals()
@@ -189,9 +197,11 @@ class PyPipeGraph:
                         event_timeout,
                         focus_on_these_jobs,
                         jobs_already_run,
-                        dump_graphml
+                        dump_graphml,
                     )
-                    result = self.runner.run(self.run_id, result, print_failures=print_failures)
+                    result = self.runner.run(
+                        self.run_id, result, print_failures=print_failures
+                    )
                     del self.runner
                     self.run_id += 1
                     do_break = True
@@ -221,10 +231,14 @@ class PyPipeGraph:
                         self.do_raise.append("At least one job failed")
             self.last_run_result = final_result
             if self.do_raise and not self._restart_afterwards:
-                raise exceptions.RunFailed(*self.do_raise)
+                raise exceptions.JobsFailed(*self.do_raise)
+            ok = True
             return final_result
         finally:
-            log_info("Run is done")
+            if ok:
+                log_info("Run is done")
+            else:
+                log_info("Run is done - with failure")
             log_info("")
             if print_failures:
                 self._print_failures()
@@ -339,7 +353,7 @@ class PyPipeGraph:
                             except (TypeError, pickle.UnpicklingError) as e:
                                 # log_trace(f"unpickleing error {e}")
                                 if job_id is None:
-                                    raise exceptions.RunFailed(
+                                    raise exceptions.JobsFailed(
                                         "Could not depickle job id - history file is borked beyond automatic recovery"
                                     )
                                 else:
@@ -360,7 +374,7 @@ class PyPipeGraph:
                                 try:
                                     list(pickletools.genops(op))
                                 except Exception as e:
-                                    raise exceptions.RunFailed(
+                                    raise exceptions.JobsFailed(
                                         "Could not depickle invariants - "
                                         f"depickling of {job_id} failed, could not skip to next pickled dataset"
                                         f" Exception was {e}"
@@ -368,7 +382,7 @@ class PyPipeGraph:
 
                     except EOFError:
                         pass
-            except exceptions.RunFailed:
+            except exceptions.JobsFailed:
                 raise
             # except Exception as e: coverage indicates this never runs.
             # raise exceptions.FatalGraphException( # that's pretty terminal

@@ -20,12 +20,12 @@ old_modules = {}
 patched = False
 
 exception_map = {
-    "RuntimeError": "RunFailed",
+    "RuntimeError": "JobsFailed",
     "JobContractError": "JobContractError",
     "PyPipeGraphError": "FatalGraphException",
     "CycleError": "NotADag",
     "JobDiedException": "JobDied",
-    "RuntimeException": "FatalGraphException",
+    "RuntimeException": "RunFailedInternally",
 }
 
 

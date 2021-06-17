@@ -182,7 +182,7 @@ class TestPypipegraph2:
         jobB = ppg.FileGeneratingJob("B", lambda of: of.write_text("B"))
         jobC = ppg.FileGeneratingJob("C", lambda of: of.write_text("C"))
         jobB.depends_on(jobA)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert Path("C").read_text() == "C"
         last = ppg.global_pipegraph.last_run_result
@@ -684,7 +684,7 @@ class TestPypipegraph2:
         )  # yes, it's planned that it doesn't write B, this exposed a bug
         c = ppg.FileGeneratingJob("C", lambda of: counter("C"))
         c.depends_on(a, b)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         last = ppg.global_pipegraph.last_run_result
         assert last["A"].state == JobState.Success
@@ -725,8 +725,6 @@ class TestPypipegraph2:
     def test_catching_catastrophic_execution_message_passing_failures(
         self, job_trace_log
     ):
-        """if it get's really messed up, we raise a RunFailedInternally.
-        Hopefully there is no way by user code to trigger this"""
         import pickle
 
         class BadFileGeneratingJob(ppg.FileGeneratingJob):
@@ -775,7 +773,7 @@ class TestPypipegraph2:
             # with the new execution engine (JobState based)
             # this is no longer an issue
             # at worst, you'll get a pickle failed error if the job dies
-            with pytest.raises(ppg.RunFailed):
+            with pytest.raises(ppg.JobsFailed):
                 ppg.run()
             assert read('A') == 'a153'
             assert 'UnpicklingError' in str(load_job2.exception)
@@ -1138,10 +1136,10 @@ class TestPypipegraph2:
 
         gen()
         assert not Path("a").exists()
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert Path("a").read_text() == "1"
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert Path("a").read_text() == "2"  # new .run means rerun this thing
         assert not Path("B").exists()
@@ -1155,7 +1153,7 @@ class TestPypipegraph2:
 
     def test_filegen_not_creating_files_throws_job_contract(self):
         jobA = ppg.FileGeneratingJob("A", lambda of: 55)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert isinstance(
             ppg.global_pipegraph.last_run_result[jobA.job_id].error.args[0],
@@ -1182,7 +1180,7 @@ class TestPypipegraph2:
                 write(of, "C")
 
         a = ppg.FileGeneratingJob("A", raiser)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         write("do_raise", "False")
         ppg.run()
@@ -1199,7 +1197,7 @@ class TestPypipegraph2:
                 write(of, "C")
 
         ppg.FileGeneratingJob("A", raiser, depend_on_function=False)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("A") == "B"
         write("do_raise", "False")
@@ -1219,13 +1217,13 @@ class TestPypipegraph2:
         jobA = ppg.FileGeneratingJob("A", a)
         ppg.FileGeneratingJob("E", lambda of: counter(of)).depends_on(jobA)
         ppg.JobGeneratingJob("B", b)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("B") == "1"
         assert read("C") == "1"
         assert read("A") == "1"
         assert read("a") == "1"
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("A") == "1"  # get's unlinked prior to run
         assert read("a") == "2"  # the real 'run' counter'
@@ -1266,7 +1264,7 @@ class TestPypipegraph2:
         b.depends_on(a)
         c = ppg.FileGeneratingJob("C", lambda of: write(of, "C"))
         c.depends_on(b)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert not Path("A").exists()
         assert not Path("B").exists()
@@ -1287,7 +1285,7 @@ class TestPypipegraph2:
                 return result
 
         a = LyingJob("A", lambda of: counter("shu") and write(of, "shu"))
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         error = ppg.global_pipegraph.last_run_result["A"].error
         assert isinstance(error, ppg.JobContractError)
@@ -1300,7 +1298,7 @@ class TestPypipegraph2:
         jobA = ppg.TempFileGeneratingJob("A", a)
         jobB = ppg.FileGeneratingJob("B", lambda of: write(of, "B"))
         jobB.depends_on(jobA)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("a") == "1"
         assert not Path("B").exists()
@@ -1320,7 +1318,7 @@ class TestPypipegraph2:
         ppg.FileGeneratingJob("A", err)
         ppg.FileGeneratingJob("B", err)
         ppg.FileGeneratingJob("C", lambda of: write(of, str(of)))
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert len(ppg.global_pipegraph.do_raise) == 1
         assert ppg.global_pipegraph.last_run_result["A"].error
@@ -1349,7 +1347,7 @@ class TestPypipegraph2:
             raise ValueError("x " * (should_len // 2))
 
         ppg.FileGeneratingJob("A", inner)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         # make sure we captured it all
         assert (
@@ -1423,7 +1421,7 @@ class TestPypipegraph2:
                 raise ValueError()
 
             ppg.FileGeneratingJob("B", b)
-            with pytest.raises(ppg.RunFailed):
+            with pytest.raises(ppg.JobsFailed):
                 ppg.run()
         finally:
             del ppg._last_new_arguments["error_dir"]  # reset to default
@@ -1437,7 +1435,7 @@ class TestPypipegraph2:
                 raise ValueError()
 
             ppg.FileGeneratingJob("B", b)
-            with pytest.raises(ppg.RunFailed):
+            with pytest.raises(ppg.JobsFailed):
                 ppg.run()
         finally:
             del ppg._last_new_arguments["log_dir"]  # reset to default
@@ -1487,7 +1485,7 @@ class TestPypipegraph2:
         jobA = ppg.DataLoadingJob("a", a)
         b = ppg.FileGeneratingJob("b", lambda of: write("b", "b"))
         b.depends_on(jobA)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         e = (
             ppg.global_pipegraph.error_dir
@@ -1569,7 +1567,7 @@ class TestPypipegraph2:
         )
         b.depends_on(a)
         c.depends_on(b)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("D") == "1"
 
@@ -1594,7 +1592,7 @@ class TestPypipegraph2:
         )
         b.depends_on(a)
         c.depends_on(b)
-        # with pytest.raises(ppg.RunFailed):
+        # with pytest.raises(ppg.JobsFailed):
         ppg.run()  # won't raise since the tfs never get run.
         # they don't get run, because we create the 'clone jobs'
         # backwards - and c disappears
@@ -1612,7 +1610,7 @@ class TestPypipegraph2:
             df["shu"]
 
         ppg.FileGeneratingJob("a", a)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         e = (
             ppg.global_pipegraph.error_dir
@@ -1749,11 +1747,11 @@ class TestPypipegraph2:
             raise ValueError()
 
         ppg.FileGeneratingJob("a", fail)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("a") == "A"
 
-    def test_failing_job_but_required_again_after_job_generating_job(self):
+    def test_failing_job_but_required_again_after_job_generating_job(self, job_trace_log):
         def fail(of):
             counter("a")
             raise ValueError()
@@ -1772,7 +1770,7 @@ class TestPypipegraph2:
             d.depends_on(a)
 
         c = ppg.JobGeneratingJob("c", c)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("a") == "1"
         assert read("c") == "1"

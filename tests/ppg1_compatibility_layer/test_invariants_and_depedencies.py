@@ -86,34 +86,40 @@ class TestInvariant:
         of = "out/a"
 
         def do_write():
+            append("A", "a")
             append(of, "shu" * self.sentinel_count())
 
         job = ppg.FileGeneratingJob(of, do_write)
         ppg.run_pipegraph()
 
         assert read(of) == "shu"
+        assert read("A") == "a"
         ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write)
         ppg.run_pipegraph()
         assert read(of) == "shu"  # has not been run again, for no change
+        assert read("A") == "a"
 
         ppg1_compatibility_test.new_pipegraph()
         print("secound round")
 
         def do_write2():
+            append("A", "b")
             append(of, "sha")
 
         job = ppg.FileGeneratingJob(of, do_write2)
         job.ignore_code_changes()
         ppg.run_pipegraph()
-        assert read(of) == "shu"  # has not been run again, since we ignored the changes
+        assert read(of) == "sha"  # removing the invariant does trigger
+        assert read("A") == "ab"
 
         ppg1_compatibility_test.new_pipegraph()
         job = ppg.FileGeneratingJob(of, do_write2)
         ppg.run_pipegraph()
-        assert (
-            read(of) == "sha"
-        )  # But the new code had not been stored, not ignoring => redoing.
+        assert read(of) == "sha"
+        assert read("A") == "abb"  # Adding it again also triggers
+        ppg.run_pipegraph()
+        assert read("A") == "abb"  # no change, no trigger
 
     def test_parameter_dependency(self, ppg1_compatibility_test):
         of = "out/a"
@@ -1789,6 +1795,7 @@ class TestDependency:
 
     def test_dependency_placeholder_dynamic_auto_invariants(self):
         from loguru import logger
+
         jobA = ppg.FileGeneratingJob(
             "out/A", lambda: write("out/A", "A" + read("out/B"))
         )
@@ -1797,8 +1804,8 @@ class TestDependency:
             write("out/B", "B")
             print()
 
-            #ppg2
-            assert ppg.util.global_pipegraph.has_edge('FIout/B', 'out/B')
+            # ppg2
+            assert ppg.util.global_pipegraph.has_edge("FIout/B", "out/B")
 
         def gen_deps():
             jobB = ppg.FileGeneratingJob("out/B", check_function_invariant)
@@ -1820,32 +1827,33 @@ class TestDefinitionErrors:
         def inner():
             ppg.FunctionInvariant("a", b)
 
-        #assertRaises(ppg.JobContractError, inner)
-        #ppg2
+        # assertRaises(ppg.JobContractError, inner)
+        # ppg2
         assertRaises(ValueError, inner)
         import pypipegraph2 as ppg2
+
         assertRaises(ppg2.JobRedefinitionError, inner)
 
-    @pytest.mark.skip # in ppg2, you can't have a collision, they have different prefixes
+    @pytest.mark.skip  # in ppg2, you can't have a collision, they have different prefixes
     def test_defining_function_and_parameter_invariant_with_same_name(self):
         a = lambda: 55  # noqa:E731
         b = 66
         ja = ppg.FunctionInvariant("PIa", a)
 
-        #def inner():
+        # def inner():
         jb = ppg.ParameterInvariant("a", b)
         assert ja.job_id == jb.job_id
 
-    @pytest.mark.skip # in ppg2, you can't have a collision, they have different prefixes
+    @pytest.mark.skip  # in ppg2, you can't have a collision, they have different prefixes
     def test_defining_function_and_parameter_invariant_with_same_name_reversed(self):
         a = lambda: 55  # noqa:E731
-        #b = lambda: 66  # noqa:E731
-        #ppg2
+        # b = lambda: 66  # noqa:E731
+        # ppg2
         ja = ppg.ParameterInvariant("a", 66)
 
         ppg.FunctionInvariant(ja.job_id, a)
 
-        #assertRaises(ppg.JobContractError, inner)
+        # assertRaises(ppg.JobContractError, inner)
 
 
 @pytest.mark.usefixtures("ppg1_compatibility_test")
@@ -1983,6 +1991,7 @@ RETURN_VALUE"""
 
     def test_function_name_is_irrelevant(self):
         import pypipegraph2 as ppg2
+
         def test_a():
             return 55
 
@@ -1995,11 +2004,18 @@ RETURN_VALUE"""
         a = ppg.FunctionInvariant("a", test_a)
         b = ppg.FunctionInvariant("b", test_b)
         c = ppg.FunctionInvariant("c", test_c)
-        assert a.run(None,None)['FIa'][ppg2.jobs.python_version] == b.run(None,None)['FIb'][ppg2.jobs.python_version]
-        assert a.run(None,None)['FIa'][ppg2.jobs.python_version] != c.run(None,None)['FIc'][ppg2.jobs.python_version]
+        assert (
+            a.run(None, None)["FIa"][ppg2.jobs.python_version]
+            == b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        )
+        assert (
+            a.run(None, None)["FIa"][ppg2.jobs.python_version]
+            != c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        )
 
     def test_docstring_is_irrelevant(self):
         import pypipegraph2 as ppg2
+
         def test():
             """A"""
             return 55
@@ -2025,13 +2041,22 @@ RETURN_VALUE"""
 
         d = ppg.FunctionInvariant("d", test)
 
-        assert a.run(None,None)['FIa'][ppg2.jobs.python_version]  == b.run(None,None)['FIb'][ppg2.jobs.python_version] 
-        assert a.run(None,None)['FIa'][ppg2.jobs.python_version]  != c.run(None,None)['FIc'][ppg2.jobs.python_version] 
-        assert c.run(None,None)['FIc'][ppg2.jobs.python_version]  == d.run(None,None)['FId'][ppg2.jobs.python_version] 
+        assert (
+            a.run(None, None)["FIa"][ppg2.jobs.python_version]
+            == b.run(None, None)["FIb"][ppg2.jobs.python_version]
+        )
+        assert (
+            a.run(None, None)["FIa"][ppg2.jobs.python_version]
+            != c.run(None, None)["FIc"][ppg2.jobs.python_version]
+        )
+        assert (
+            c.run(None, None)["FIc"][ppg2.jobs.python_version]
+            == d.run(None, None)["FId"][ppg2.jobs.python_version]
+        )
 
 
 @pytest.mark.usefixtures("ppg1_compatibility_test")
-#ppg2: actual ppg2 source is without final newline. tests adjusted.
+# ppg2: actual ppg2 source is without final newline. tests adjusted.
 class TestCythoncompatibility:
     def test_just_a_function(self):
         import pypipegraph2 as ppg2
@@ -2045,7 +2070,7 @@ def b():
     return 5
 """
         func = cython.inline(src)["a"]
-        actual = ppg.FunctionInvariant("a", func).run(None, None)['FIa']['source']
+        actual = ppg.FunctionInvariant("a", func).run(None, None)["FIa"]["source"]
         should = """    def a():
         return 1"""
         assert actual == should
@@ -2064,7 +2089,7 @@ def c():
     return 5
 """
         func = cython.inline(src)["a"]()
-        actual = ppg.FunctionInvariant("a", func).run(None, None)['FIa']['source']
+        actual = ppg.FunctionInvariant("a", func).run(None, None)["FIa"]["source"]
         should = """        def b():
             return 1"""
         assert actual == should
@@ -2082,7 +2107,7 @@ def c():
     return 5"""
 
         func = cython.inline(src)["A"]().b
-        actual = ppg.FunctionInvariant("a", func).run(None, None)['FIa']['source']
+        actual = ppg.FunctionInvariant("a", func).run(None, None)["FIa"]["source"]
         should = """        def b(self):
             return 55"""
         assert actual == should
@@ -2102,7 +2127,7 @@ def d():
     return 5"""
 
         func = cython.inline(src)["A"]().b()
-        actual = ppg.FunctionInvariant("a", func).run(None, None)['FIa']['source']
+        actual = ppg.FunctionInvariant("a", func).run(None, None)["FIa"]["source"]
         should = """            def c():
                 return 55"""
         assert actual == should

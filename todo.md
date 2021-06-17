@@ -25,6 +25,7 @@ Open stuff
 	- should we switch the history to json? or sqlite? if the later, we could update *during* 
 	  the runs...
 	  
+	- output aware data loading jobs that return a useful hash.
 
 	
 	- test what happens if you have two fileinvariants as input and you swap them. No recalc, right?

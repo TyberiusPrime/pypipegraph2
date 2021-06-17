@@ -276,7 +276,7 @@ def job_trace_log():
         m = record["module"] + ":"
         func = f"{m:12}{record['line']:4}"
         func = func.ljust(12 + 4)
-        out = f"{record['level'].icon} {lvl} | {func} | {record['message']}\n"
+        out = f"{record['level'].icon} {lvl} | {record['elapsed']} | {func} | {record['message']}\n"
         if record["level"].name == "ERROR":
             out = f"<blue>{out}</blue>"
         return out

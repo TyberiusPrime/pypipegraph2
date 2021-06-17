@@ -105,7 +105,7 @@ class TestingTheUnexpectedTests:
             sys.exit(5)
 
         ppg.FileGeneratingJob("out/A", dies)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             # ppg.util.global_pipegraph.rc.timeout = 1
             ppg.run()
         assert not (Path("out/A").exists())
@@ -124,7 +124,7 @@ class TestingTheUnexpectedTests:
             sys.exit(5)
 
         fg = ppg.FileGeneratingJob("out/A", dies)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
             ppg.run()
         assert not (Path("out/A").exists())
@@ -147,7 +147,7 @@ class TestingTheUnexpectedTests:
             os.kill(os.getpid(), signal.SIGKILL)
 
         fg = ppg.FileGeneratingJob("out/A", dies)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
             ppg.run()
         assert not (Path("out/A").exists())
@@ -322,7 +322,7 @@ def test_dataloading_job_changing_cwd(ppg2_per_test):
     a = ppg.FileGeneratingJob("a", lambda of: of.write_text("hello"))
     b = ppg.DataLoadingJob("b", load)
     a.depends_on(b)
-    with pytest.raises(ppg.RunFailed):
+    with pytest.raises(ppg.JobsFailed):
         ppg.run()
     assert isinstance(
         ppg.global_pipegraph.last_run_result["b"].error.args[0], ppg.JobContractError
@@ -342,7 +342,7 @@ def test_job_generating_job_changing_cwd(ppg2_per_test):
     a = ppg.FileGeneratingJob("a", lambda of: Path("a").write_text("hello"))
     b = ppg.JobGeneratingJob("b", load)
     a.depends_on(b)
-    with pytest.raises(ppg.RunFailed):
+    with pytest.raises(ppg.JobsFailed):
         ppg.run()
     assert isinstance(
         ppg.global_pipegraph.last_run_result["b"].error.args[0], ppg.JobContractError
@@ -359,7 +359,7 @@ def test_capturing_locals_when_they_have_throwing_str(ppg2_per_test):
         raise ValueError("expected")  # trace check
 
     j = ppg.FileGeneratingJob("a", inner)
-    with pytest.raises(ppg.RunFailed):
+    with pytest.raises(ppg.JobsFailed):
         ppg.run()
     assert "expected" in str(j.exception)
     assert "trace check" in str(j.stack_trace)  # we captured teh relevant line
@@ -387,21 +387,21 @@ class TestCleanup:
         job = ppg.FileGeneratingJob("A", fail)
         ec = []  # counters
         lc = []
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run(print_failures=False)
         ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
         lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run(print_failures=False)
         ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
         lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run(print_failures=False)
         # we keep  log_retention old ones + the current one
         ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
         lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
 
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run(print_failures=False)
         assert ppg.global_pipegraph.log_file.exists()
         ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
@@ -486,7 +486,7 @@ class TestModifyDag:
         a1.depends_on(b)
         a2.depends_on(b)
         log_info("now run")
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert type(b.exception) is NameError
         assert "Upstream" in str(a1.exception)

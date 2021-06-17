@@ -488,7 +488,7 @@ def test_cores_available(ppg1_compatibility_test):
 def test_job_dot_failed(ppg1_compatibility_test):
     a = ppg.FileGeneratingJob('a', lambda of: of.write_text('a'))
     b = ppg.FileGeneratingJob('b', lambda of: None)
-    with pytest.raises(ppg.RuntimeException):
+    with pytest.raises(ppg.RuntimeError):
         ppg.run_pipegraph()
     assert b.failed
     assert not a.failed

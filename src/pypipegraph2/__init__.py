@@ -33,6 +33,7 @@ from .exceptions import (
     JobRedefinitionError,
     RunFailed,
     RunFailedInternally,
+    JobsFailed,
     JobError,
 )
 from .enums import Resources, RunMode
@@ -203,6 +204,7 @@ __all__ = [
     "JobRedefinitionError",
     "RunFailed",
     "RunFailedInternally",
+    "JobsFailed",
     "JobError",
     "Resources",
     "RunMode",

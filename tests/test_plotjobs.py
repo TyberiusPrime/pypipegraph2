@@ -109,7 +109,7 @@ if has_pyggplot:  # noqa C901
             p, c, t = ppg.PlotJob(of, calc, plot)
             p.height = 1200
             p.width = 800
-            with pytest.raises(ppg.RunFailed):
+            with pytest.raises(ppg.JobsFailed):
                 ppg.run()
             assert "did not return a DataFrame" in str(
                 ppg.global_pipegraph.last_run_result[c[1].job_id].error
@@ -351,7 +351,7 @@ if has_pyggplot:  # noqa C901
 
             of = "out/test.png"
             job, cache_job, table_job = ppg.PlotJob(of, calc, plot)
-            with pytest.raises(ppg.RunFailed):
+            with pytest.raises(ppg.JobsFailed):
                 ppg.run(print_failures=False)
             print(ppg.global_pipegraph.last_run_result[cache_job[1].job_id].error)
             assert isinstance(
@@ -371,7 +371,7 @@ if has_pyggplot:  # noqa C901
 
             of = "out/test.png"
             ppg.PlotJob(of, calc, plot)
-            with pytest.raises(ppg.RunFailed):
+            with pytest.raises(ppg.JobsFailed):
                 ppg.run()
             print(type(ppg.global_pipegraph.last_run_result[of].error))
             print(repr(ppg.global_pipegraph.last_run_result[of].error))
@@ -420,7 +420,7 @@ if has_pyggplot:  # noqa C901
             with open("cache/out/test.png", "w") as op:
                 op.write("no unpickling")
             os.unlink("out/test.png")  # so it reruns
-            with pytest.raises(ppg.RunFailed):
+            with pytest.raises(ppg.JobsFailed):
                 ppg.run()
             assert not os.path.exists("out/test.png")
             assert isinstance(
@@ -447,7 +447,7 @@ if has_pyggplot:  # noqa C901
             p, c, t = ppg.PlotJob(of, calc, plot)
             # p.add_fiddle(lambda p: p.scale_x_log10())
             p2 = p.add_another_plot("out/test2.png", plot2)
-            with pytest.raises(ppg.RunFailed):
+            with pytest.raises(ppg.JobsFailed):
                 ppg.run()
             assert isinstance(
                 ppg.global_pipegraph.last_run_result[p2.job_id].error, ppg.JobError

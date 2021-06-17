@@ -75,7 +75,9 @@ class JobStatus:
             f"{self.job_id} set validation_state. Was {self._validation_state}, becomes {value}"
         )
         if self._validation_state != value:
-            if self._validation_state != ValidationState.Unknown:
+            if value == ValidationState.Invalidated and self.state == JobState.Waiting:
+                pass
+            elif self._validation_state != ValidationState.Unknown:
                 raise ValueError(
                     f"{self.job_id} Can't go from {self._validation_state} to {value} {self.state}"
                 )
@@ -148,6 +150,7 @@ class JobStatus:
             log_job_trace(f"\t short circuit {self.should_run}")
             result = self.should_run
         else:
+            self.update_invalidation()
             if self.validation_state == ValidationState.Invalidated:
                 log_job_trace(f"\t update_should_run-> yes case invalidated")
                 result = ShouldRun.Yes
@@ -195,7 +198,6 @@ class JobStatus:
                                     raise ValueError(f"Should not happen {parent_state}")
 
                             else:
-                                self.update_invalidation()
                                 if self.validation_state == ValidationState.Invalidated:
                                     raise ValueError("I did not expect this case")
                                 elif self.validation_state == ValidationState.Validated:

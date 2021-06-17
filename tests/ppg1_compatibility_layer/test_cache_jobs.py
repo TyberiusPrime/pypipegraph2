@@ -107,6 +107,10 @@ class TestCachedAttributeJob:
         assert read(of) == ", ".join(str(x) for x in range(0, 200))
 
     def test_invalidation_ignored_does_not_redo_output(self, ppg1_compatibility_test):
+        # similar to the ppg2 test of the same name, this has
+        # evolved to retrigger calculation, because the act of removing
+        # the invariant triggers
+
         o = Dummy()
 
         def calc():
@@ -131,7 +135,7 @@ class TestCachedAttributeJob:
         job.ignore_code_changes()
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run_pipegraph()
-        assert read(of) == ", ".join(str(x) for x in range(0, 100))
+        assert read(of) == ", ".join(str(x) for x in range(0, 200)) # ppg2 change
 
         ppg1_compatibility_test.new_pipegraph()
         job = ppg.CachedAttributeLoadingJob("out/mycalc", o, "a", calc2)
@@ -139,7 +143,7 @@ class TestCachedAttributeJob:
         ppg.run_pipegraph()
         assert read(of) == ", ".join(
             str(x) for x in range(0, 200)
-        )  # The new stuff - you either have an explicit ignore_code_changes in our codebase, or we enforce consistency between code and result
+        )  
 
     def test_throws_on_non_function_func(self):
         o = Dummy()

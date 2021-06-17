@@ -318,21 +318,29 @@ class Runner:
         job_ids_topological = list(networkx.algorithms.dag.topological_sort(self.dag))
         self.events = queue.Queue()
 
+        todo = len(self.dag)
         for job_id in self.dag.nodes: # those are without the pruned nodes
             no_inputs = not self.job_inputs[job_id]
             output_needed = self.jobs[job_id].output_needed(self)
             failed_last_time = self._job_failed_last_time(job_id)
             if no_inputs:  # could be an initial job
+                log_job_trace(f"{job_id} failed_last_time: {failed_last_time}")
                 if failed_last_time:
-                    self.job_states[job_id].skip()
+                    log_job_trace(f"{job_id} Failing because of failure last time (1)")
+                    self.job_states[job_id].failed(self.job_states[job_id].error)
+                    todo -= 1 # no need to send a message for this
                 else:
                     self.job_states[job_id].update_should_run()
+            elif failed_last_time:
+                log_job_trace(f"{job_id} Failing because of failure last time (2)")
+                self.job_states[job_id].failed(self.job_states[job_id].error)
+                todo -= 1 # no need to send a message for this
+        log_job_trace("Finished initial pass")
 
         self.jobs_in_flight = []
         self.jobs_all_cores_in_flight = 0
         self._start_job_executing_threads()
 
-        todo = len(self.dag)
         self.jobs_done = 0
         try:
             self._interactive_start()

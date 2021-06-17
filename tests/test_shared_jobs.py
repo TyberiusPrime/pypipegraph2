@@ -197,13 +197,13 @@ class TestSharedJob:
             raise ValueError()
 
         a = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             a()
         assert not list(Path("out").glob("*"))
         a = ppg.SharedMultiFileGeneratingJob(
             "out", ["a"], doit, remove_build_dir_on_error=False
         )
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             a()
         assert list(Path("out").glob("*"))
 
@@ -343,7 +343,7 @@ class TestSharedJob:
             "outB", ["a"], dofail, depend_on_function=False, remove_unused=False,
             remove_build_dir_on_error=True
        )
-       with pytest.raises(ppg.RunFailed):
+       with pytest.raises(ppg.JobsFailed):
            ppg.run()
        assert jobKeep.target_folder.exists()
        assert not jobTrash.target_folder.exists()

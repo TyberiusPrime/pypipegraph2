@@ -183,7 +183,7 @@ class TestFileGeneratingJob:
                 depend_on_function=False,
             )
 
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert "a number is required, not PosixPath" in str(
             ppg.global_pipegraph.last_run_result["out/0"].error
@@ -200,7 +200,7 @@ class TestFileGeneratingJob:
                 depend_on_function=False,
             )
 
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert "did not create the following files: ['out/0']" in str(
             ppg.global_pipegraph.last_run_result["out/0"].error
@@ -245,7 +245,7 @@ class TestFileGeneratingJob:
 
         job = ppg.FileGeneratingJob(of, do_write)
 
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
 
         assert isinstance(
@@ -264,7 +264,7 @@ class TestFileGeneratingJob:
             raise ValueError("Hello Exception")
 
         job = ppg.FileGeneratingJob("out/A", do)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert "Hello Exception" in str(
             ppg.global_pipegraph.last_run_result[job.job_id].error
@@ -279,7 +279,7 @@ class TestFileGeneratingJob:
             raise ValueError("shu")
 
         job = ppg.FileGeneratingJob(of, do_write)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert Path(
             of
@@ -305,11 +305,11 @@ class TestFileGeneratingJob:
             raise ValueError()
 
         job = ppg.FileGeneratingJob(of, do)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("a") == "2"
         assert read("A") == "B"
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("a") == "3"
         assert read("A") == "B"
@@ -391,7 +391,7 @@ class TestFileGeneratingJob:
             raise ValueError()
 
         job = ppg.FileGeneratingJob(of, do_write)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert Path(of).exists()
         op = open(of, "r")
@@ -525,7 +525,7 @@ class TestFileGeneratingJob:
             "my_params", (2,)
         )  # same name ,changed params, job needs to rerun, but explodes...
         job.depends_on(dep)  # on average, half the mistakes are in the tests...
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert not (Path(of).exists())
 
@@ -545,7 +545,7 @@ class TestFileGeneratingJob:
 
         jobA = ppg.FileGeneratingJob("out/A", shu)
 
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
 
         assert isinstance(
@@ -562,7 +562,7 @@ class TestFileGeneratingJob:
 
         jobA = ppg.FileGeneratingJob("out/A", shu)
 
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
 
         print(ppg.global_pipegraph.last_run_result[jobA.job_id].error)
@@ -616,7 +616,7 @@ class TestMultiFileGeneratingJob:
             write(f, "")  # one is empty
 
         job = ppg.MultiFileGeneratingJob(of, do_write, empty_ok=False)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert isinstance(
             ppg.global_pipegraph.last_run_result[job.job_id].error.args[0],
@@ -646,7 +646,7 @@ class TestMultiFileGeneratingJob:
             raise ValueError("explode")
 
         ppg.MultiFileGeneratingJob(of, do_write)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         for f in of:
             assert Path(f).exists()
@@ -672,7 +672,7 @@ class TestMultiFileGeneratingJob:
         ppg.MultiFileGeneratingJob(of, do_write).depends_on(
             ppg.ParameterInvariant("myparam", (2,))
         )
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()  # since this should blow up
         for f in of:
             assert not (Path(f).exists())
@@ -694,7 +694,7 @@ class TestMultiFileGeneratingJob:
 
         jobA = ppg.MultiFileGeneratingJob(["out/A", "out/B"], shu)
 
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
 
         assert isinstance(
@@ -931,7 +931,7 @@ class TestDataLoadingJob:
         job_fg = ppg.FileGeneratingJob(of, write)
         job_dl = ppg.DataLoadingJob("doload", load)
         job_fg.depends_on(job_dl)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert not (Path(of).exists())
         assert isinstance(
@@ -995,7 +995,7 @@ class TestDataLoadingJob:
         jobB = ppg.FileGeneratingJob("out/B", lambda of: True)
         jobB.depends_on(jobA)
 
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
 
         assert isinstance(
@@ -1013,7 +1013,7 @@ class TestDataLoadingJob:
 
         jobB = ppg.FileGeneratingJob("out/B", load)
 
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert isinstance(
             ppg.global_pipegraph.last_run_result[jobB.job_id].error.args[0],
@@ -1177,7 +1177,7 @@ class TestAttributeJob:
 
         # might be pure luck that this job runs after the cleanup
         ppg.FileGeneratingJob(of2, later_write).depends_on(fgjob)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read(of) == "shu"
         assert not (Path(of2).exists())
@@ -1215,7 +1215,7 @@ class TestAttributeJob:
         fgjobB.depends_on(
             fgjobC
         )  # otherwise, B might be started C returned, and the cleanup will not have occurred!
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
             pass
         assert read(of) == "shu"
@@ -1441,7 +1441,7 @@ class TestTempFileGeneratingJob:
 
         fgjob = ppg.FileGeneratingJob(ofA, write_A)
         fgjob.depends_on(temp_job)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         # ppg.run()
         assert not (Path(ofA).exists())
@@ -1475,7 +1475,7 @@ class TestTempFileGeneratingJob:
 
         fgjob = ppg.FileGeneratingJob(ofA, write_A)
         fgjob.depends_on(temp_job)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert Path(temp_file).exists()
         assert not (Path(ofA).exists())

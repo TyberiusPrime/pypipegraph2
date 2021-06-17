@@ -63,32 +63,38 @@ class TestInvariant:
         of = "out/a"
 
         def do_write(of):
+            counter('A')
             append(of, "shu" * self.sentinel_count())
 
         job = ppg.FileGeneratingJob(of, do_write)
         ppg.run()
 
         assert read(of) == "shu"
+        assert read('A') == '1'
         ppg.new()
         job = ppg.FileGeneratingJob(of, do_write)
         ppg.run()
         assert read(of) == "shu"  # has not been run again, for no change
+        assert read('A') == '1'
 
         ppg.new()
 
         def do_write2(of):
+            counter('A')
             append(of, "sha")
 
         job = ppg.FileGeneratingJob(of, do_write2, depend_on_function=False)
         ppg.run()
-        assert read(of) == "shu"  # has not been run again, since we ignored the changes
+        assert read(of) == "sha"  # has been run again - number of invariants changed!
+        assert read('A') == '2'
 
         ppg.new()
         job = ppg.FileGeneratingJob(of, do_write2)
         ppg.run()
         assert (
             read(of) == "sha"
-        )  # But the new code had not been stored, not ignoring => redoing.
+        )  # Readding the invariant does trigger again
+        assert read('A') == '3'
 
     def test_parameter_dependency(self):
         of = "out/a"
@@ -186,7 +192,7 @@ class TestInvariant:
 
     def test_file_did_not_exist(self):
         ppg.FileInvariant("shu")
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert "did not exist" in str(ppg.global_pipegraph.last_run_result["shu"].error)
 
@@ -384,7 +390,7 @@ class TestInvariant:
             "out/A", w2, depend_on_function=False
         )  # and this job crashes
         fg.depends_on(func_dep)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert not (os.path.exists("out/A"))  # since it was removed, and not recreated
         assert read("out/B") == "B"
@@ -451,7 +457,7 @@ class TestInvariant:
         mocker.patch("pickle.dumps", new_pickle_dump)
         ki_raised = False
         assert not hasattr(ppg.global_pipegraph, "last_run_result")
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert isinstance(ppg.global_pipegraph.do_raise[0], KeyboardInterrupt)
         assert len(ppg.global_pipegraph.do_raise) == 2
@@ -564,7 +570,7 @@ class TestInvariant:
         with open(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             op.write(b"This breaks")
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("out/b") == "a"  # job was not run
 
@@ -594,7 +600,7 @@ class TestInvariant:
             pickle.dump(Undepickable(), op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(c.job_id, op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(({}, {"c": str(c.parameters)}), op, pickle.HIGHEST_PROTOCOL)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("out/b") == "b"  # job was run
         # assert a.job_id in ppg.global_pipegraph.invariant_loading_issues
@@ -612,7 +618,7 @@ class TestInvariant:
         with open(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             op.write(b"key breaks already")
             op.write(b"This breaks")
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("out/b") == "a"  # job was not run
 
@@ -1104,7 +1110,7 @@ class TestDependency:
 
         jobC = ppg.FileGeneratingJob(ofC, write_c)
         jobC.depends_on(jobB)
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert os.path.exists(ofA)  # which was before the error
         assert not (os.path.exists(ofB))  # which was on the error

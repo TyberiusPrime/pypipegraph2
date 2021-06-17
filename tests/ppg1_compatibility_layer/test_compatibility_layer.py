@@ -42,7 +42,7 @@ class TestcompatibilityLayerMore:
         j2 = ppg1.FileGeneratingJob(
             "test_file_gen_does", lambda: Path("test_file_gen_does").write_text("A")
         )  # old school callback
-        with pytest.raises(ppg2.RunFailed):
+        with pytest.raises(ppg2.JobsFailed):
             ppg2.run()
         assert "did not create" in str(j.exception)
 
@@ -52,7 +52,7 @@ class TestcompatibilityLayerMore:
         )
         j2 = ppg1.MultiFileGeneratingJob(["out/C", "out/D"], lambda: 55)
         j3 = ppg1.MultiFileGeneratingJob(["out/G", "out/F"], lambda of: 55)
-        with pytest.raises(ppg2.RunFailed):
+        with pytest.raises(ppg2.JobsFailed):
             ppg2.run()
         assert "did not create" in str(j2.exception)
         assert "did not create" in str(j3.exception)
@@ -68,7 +68,7 @@ class TestcompatibilityLayerMore:
         force_load(b)
         force_load(c)
         force_load(d)
-        with pytest.raises(ppg2.RunFailed):
+        with pytest.raises(ppg2.JobsFailed):
             ppg2.run()
         assert "did not create" in str(a.exception)
         assert "did not create" in str(b.exception)

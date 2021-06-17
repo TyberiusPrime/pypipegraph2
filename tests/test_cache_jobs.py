@@ -3,7 +3,7 @@ import pickle
 from pathlib import Path
 import pypipegraph2 as ppg
 
-from .shared import read, write, append, Dummy
+from .shared import read, write, append, Dummy, counter
 
 
 @pytest.mark.usefixtures("ppg2_per_test")
@@ -184,7 +184,7 @@ class TestCachedDataLoadingJob:
         # overwriting it again
         write("out/mycalc", "no unpickling this")
         Path(of).unlink()
-        with pytest.raises(ppg.RunFailed):
+        with pytest.raises(ppg.JobsFailed):
             ppg.run()
         error = ppg.global_pipegraph.last_run_result[job.job_id].error
         assert isinstance(error, ppg.JobError)
@@ -258,10 +258,13 @@ class TestCachedAttributeJob:
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 200))
 
-    def test_invalidation_ignored_does_not_redo_output(self):
+    def test_invalidation_ignored_does_not_redo_output(self, job_trace_log):
+        # actually, this test has evolved away from it's original behaviour.
+        # adding/remoning a function dependency will always trigger!
         o = Dummy()
 
         def calc():
+            counter('1')
             return ", ".join(str(x) for x in range(0, 100))
 
         job, cache_job = ppg.CachedAttributeLoadingJob("mycalc", o, "a", calc)
@@ -273,10 +276,12 @@ class TestCachedAttributeJob:
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
+        assert read('1') == '1'
 
         ppg.new()
 
         def calc2():
+            counter('2')
             return ", ".join(str(x) for x in range(0, 200))
 
         job, cache_job = ppg.CachedAttributeLoadingJob(
@@ -284,7 +289,8 @@ class TestCachedAttributeJob:
         )
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run()
-        assert read(of) == ", ".join(str(x) for x in range(0, 100))
+        assert read(of) == ", ".join(str(x) for x in range(0, 200)) # removing the dependency triggers
+        assert read('2') == '1'
 
         ppg.new()
         job, cache_job = ppg.CachedAttributeLoadingJob("mycalc", o, "a", calc2)
@@ -293,6 +299,14 @@ class TestCachedAttributeJob:
         assert read(of) == ", ".join(
             str(x) for x in range(0, 200)
         )  # The new stuff - you either have an explicit ignore_code_changes in our codebase, or we enforce consistency between code and result
+        assert read('2') == '2' # rerun, we regained the func dependency
+
+        ppg.run()
+        assert read(of) == ", ".join(
+            str(x) for x in range(0, 200)
+        )  # The new stuff - you either have an explicit ignore_code_changes in our codebase, or we enforce consistency between code and result
+        assert read('2') == '2' # no rerun
+
 
     def test_throws_on_non_function_func(self):
         o = Dummy()

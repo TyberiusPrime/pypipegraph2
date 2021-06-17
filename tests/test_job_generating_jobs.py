@@ -242,7 +242,7 @@ class TestJobGeneratingJob:
 
         dl = ppg.DataLoadingJob("load_data", load)
         write_job.depends_on(dl)
-        # with pytest.raises(ppg.RunFailed):
+        # with pytest.raises(ppg.JobsFailed):
         ppg.run()
         assert Path("out/B").exists()
 
