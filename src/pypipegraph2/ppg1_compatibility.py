@@ -400,12 +400,10 @@ def _wrap_func_if_no_output_file_params(function):
 
 class FileGeneratingJob(PPG1AdaptorBase, ppg2.FileGeneratingJob):
     def __new__(cls, *args, **kwargs):
-        log_error("new")
         obj = ppg2.FileGeneratingJob.__new__(cls, *args, **kwargs)
         return obj
 
     def __init__(self, output_filename, function, rename_broken=False, empty_ok=False):
-        log_debug(f"FG init {output_filename}")
         func = _wrap_func_if_no_output_file_params(function)
         super().__init__(output_filename, func, empty_ok=empty_ok)
 

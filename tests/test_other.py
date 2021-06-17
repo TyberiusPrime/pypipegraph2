@@ -49,6 +49,8 @@ class TestResourceCoordinator:
 
     def test_jobs_concurrent_jobs_run_concurrently(self):
         # we'll determine this by the start respective end times..
+        import time
+
         ppg.new(
             cores=2,
         )
@@ -58,6 +60,7 @@ class TestResourceCoordinator:
         jobB = ppg.FileGeneratingJob(
             "out/B", lambda of: write(of, "B"), resources=ppg.Resources.AllCores
         )
+        now = time.time()
         ppg.run()
         assert read("out/A") == "A"
         assert read("out/B") == "B"
@@ -69,14 +72,14 @@ class TestResourceCoordinator:
             second_job = jobA
         print(
             "times",
-            first_job.start_time,
-            first_job.stop_time,
-            second_job.start_time,
-            second_job.stop_time,
+            first_job.start_time - now,
+            first_job.stop_time - now,
+            second_job.start_time - now,
+            second_job.stop_time - now,
         )
         if jobA.start_time is None:
             raise ValueError("JobA did not run")
-        assert first_job.stop_time > second_job.start_time
+        assert first_job.stop_time - now > second_job.start_time - now
 
     def test_multiple_all_cores_blocking_single_jobs(self):
         pass  # todo
@@ -534,16 +537,29 @@ def test_prevent_absolute_paths(ppg2_per_test):
 
 def test_broken_case_from_delayeddataframe(ppg2_per_test):
     out = {}
+
     def store(key, value):
         out[key] = value
 
-    a = ppg.CachedDataLoadingJob('a', lambda: 'a', lambda value: store('a', value))
-    event = ppg.CachedDataLoadingJob('event', lambda: 'event', lambda value: store('event', value))
-    event2 = ppg.CachedDataLoadingJob('event2', lambda: 'event2', lambda value: store('event2', value))
-    anno_sequence = ppg.CachedDataLoadingJob('anno_sequence', lambda: 'anno_sequence', lambda value: store('anno_sequence', value))
-    event_seq = ppg.DataLoadingJob('event_seq', lambda: store('event_seq', out['event'] + out['anno_sequence']))
-    event2_seq = ppg.DataLoadingJob('event2_seq', lambda: store('event2_seq', out['event2'] + out['event_seq']))
-    force_load = ppg.JobGeneratingJob('force_load', lambda: None)
+    a = ppg.CachedDataLoadingJob("a", lambda: "a", lambda value: store("a", value))
+    event = ppg.CachedDataLoadingJob(
+        "event", lambda: "event", lambda value: store("event", value)
+    )
+    event2 = ppg.CachedDataLoadingJob(
+        "event2", lambda: "event2", lambda value: store("event2", value)
+    )
+    anno_sequence = ppg.CachedDataLoadingJob(
+        "anno_sequence",
+        lambda: "anno_sequence",
+        lambda value: store("anno_sequence", value),
+    )
+    event_seq = ppg.DataLoadingJob(
+        "event_seq", lambda: store("event_seq", out["event"] + out["anno_sequence"])
+    )
+    event2_seq = ppg.DataLoadingJob(
+        "event2_seq", lambda: store("event2_seq", out["event2"] + out["event_seq"])
+    )
+    force_load = ppg.JobGeneratingJob("force_load", lambda: None)
 
     anno_sequence.calc.depends_on(a.load)
     anno_sequence.load.depends_on(a.load)
@@ -558,8 +574,4 @@ def test_broken_case_from_delayeddataframe(ppg2_per_test):
 
     force_load.depends_on(event.load, event2.load, event2_seq, event_seq)
     ppg.run()
-    assert out['event2_seq'] == 'event2' + 'event' + 'anno_sequence'
-
-
-
-
+    assert out["event2_seq"] == "event2" + "event" + "anno_sequence"

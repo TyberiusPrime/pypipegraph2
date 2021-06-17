@@ -81,22 +81,47 @@ class TestJobs:
         jobA = ppg.FileGeneratingJob("out/", lambda of: None)
         assert hasattr(jobA, "__hash__")
 
-
     def test_repeated_job_definition_and_dependency_callbacks(self, ppg2_per_test):
         def func(of):
-            of.write_text('a')
-        a = ppg.FileGeneratingJob('a', func)
-        a.depends_on(lambda: counter('ac') and None)
-        assert len(a.dependency_callbacks) == 1
-        assert not Path('ac').exists()
-        a = ppg.FileGeneratingJob('a', func)
-        a.depends_on(lambda: counter('ac') and counter('bc') and None) # 2nd dependency
-        assert len(a.dependency_callbacks) == 2
-        assert not Path('ac').exists()
-        ppg.run()
-        assert read('ac') == '2'
-        assert read('bc') == '1'
+            of.write_text("a")
 
+        a = ppg.FileGeneratingJob("a", func)
+        a.depends_on(lambda: counter("ac") and None)
+        assert len(a.dependency_callbacks) == 1
+        assert not Path("ac").exists()
+        a = ppg.FileGeneratingJob("a", func)
+        a.depends_on(lambda: counter("ac") and counter("bc") and None)  # 2nd dependency
+        assert len(a.dependency_callbacks) == 2
+        assert not Path("ac").exists()
+        ppg.run()
+        assert read("ac") == "2"
+        assert read("bc") == "1"
+
+    def test_data_loading_MultiFile_dowstream(self, job_trace_log):
+        def tf(ofs):
+            counter("A")
+            ofs[0].write_text("a1")
+            ofs[1].write_text("a1")
+
+        a = ppg.MultiTempFileGeneratingJob(["a1", "a2"], tf)
+
+        def write(ofs):
+            counter("B")
+            ofs[0].write_text("b")
+            ofs[1].write_text("c" + read("a1"))
+
+        bc = ppg.MultiFileGeneratingJob(["b", "c"], write)
+        bc.depends_on(a)
+        bc()
+        assert read("c") == "ca1"
+        assert read("b") == "b"
+        assert read("A") == "1"
+        assert read("B") == "1"
+        ppg.run()
+        assert read("c") == "ca1"
+        assert read("b") == "b"
+        assert read("B") == "1"
+        assert read("A") == "1"
 
 
 @pytest.mark.usefixtures("ppg2_per_test")
@@ -1138,16 +1163,13 @@ class TestAttributeJob:
             "load_dummy_shu", o, "a", load, depend_on_function=False
         )
         ppg.run()
-        assert not (hasattr(o, "a")) # never assigned
-        assert not Path('tf').exists()
+        assert not (hasattr(o, "a"))  # never assigned
+        assert not Path("tf").exists()
         ppg.run()
-        assert not Path('tf').exists()
+        assert not Path("tf").exists()
         assert not (hasattr(o, "a"))
 
-
-    def test_attribute_loading_does_run_without_dependency_if_invalidated(
-        self
-    ):
+    def test_attribute_loading_does_run_without_dependency_if_invalidated(self):
         o = Dummy()
         tf = "out/testfile"
 
@@ -1649,6 +1671,21 @@ class TestTempFileGeneratingJob:
         # temp_job.do_cleanup_if_was_never_run = True
         ppg.run()
         assert Path("out/temp").exists()  # no run, no cleanup
+
+    def test_cleanup_if_fails(self, job_trace_log):
+        def fail(of):
+            of.write_text("hello")
+            raise ValueError("thisisit")
+
+        a = ppg.TempFileGeneratingJob("a", fail)
+        b = ppg.FileGeneratingJob("b", lambda of: of.write_text(read("a")))
+        b.depends_on(a)
+        with pytest.raises(ppg.JobsFailed):
+            b()
+        assert Path("a").exists()  # cleanup does not run
+        assert not Path("b").exists()
+        assert "thisisit" in str(a.exception)
+        assert "Upstream" in str(b.exception)
 
 
 @pytest.mark.usefixtures("create_out_dir")

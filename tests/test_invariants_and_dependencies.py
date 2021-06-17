@@ -646,6 +646,28 @@ class TestInvariant:
         assert read("counter") == "1"
 
 
+    def test_file_invariant_replaced(self):
+        Path('a.tsv').write_text('a')
+        a = ppg.FileInvariant('a.tsv')
+        def func(of):
+            counter('J')
+            of.write_text('j')
+        j = ppg.FileGeneratingJob('j', func)
+        j.depends_on(a)
+        ppg.run()
+        assert read('j') == 'j'
+        assert read('J') == '1'
+        ppg.run()
+        assert read('J') == '1'
+        ppg.new()
+        Path('b.tsv').write_text('b')
+        b = ppg.FileInvariant('b.tsv')
+        j = ppg.FileGeneratingJob('j', func)
+        j.depends_on(b)
+        ppg.run()
+        assert read('J') == '2'
+
+
 def first_value(d):
     return list(d.values())[0]
 

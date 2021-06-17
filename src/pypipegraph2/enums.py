@@ -3,7 +3,6 @@ from enum import Enum, auto
 
 class JobState(Enum):
     Waiting = auto()
-    ConditionalWaiting = auto()
     ReadyToRun = auto()
     Success = auto()
     Skipped = auto()
