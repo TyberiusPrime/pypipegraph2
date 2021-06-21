@@ -12,7 +12,7 @@ A longer description of your project goes here...
 ## Note
 
 Differences to pypipegraph
-	- graphs can now be run multiple times
+	- graps can now be run multiple times
 	- calling a job will run the graph cut down to this job and it's prerequisites.
 	  Some jobs - like PlotJobs will return something useful from the call.
 

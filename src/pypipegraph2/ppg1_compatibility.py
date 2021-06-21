@@ -276,6 +276,7 @@ def new_pipegraph(
         kwargs["history_dir"] = invariant_status_filename / "history"
         kwargs["run_dir"] = invariant_status_filename / "run"
     kwargs["allow_short_filenames"] = False  # as was the default for ppg1
+    kwargs["prevent_absolute_paths"] = False  # as was the default for ppg1
 
     res = ppg2.new(
         cores=cores,
@@ -348,6 +349,11 @@ class PPG1AdaptorBase:
     @property
     def filenames(self):
         return self.files
+
+    @property
+    def prerequisites(self):
+        gg = ppg2.global_pipegraph
+        return [gg.jobs[job_id] for job_id in gg.job_dag.predecessors(self.job_id)]
 
 
 class PPG1Adaptor(wrapt.ObjectProxy, PPG1AdaptorBase):

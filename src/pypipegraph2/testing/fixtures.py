@@ -58,12 +58,14 @@ def new_pipegraph(request):
                 first[0] = True
             if not "log_level" in kwargs:
                 kwargs["log_level"] = 40
-            if not 'cores' in kwargs:
-                kwargs['cores'] = 1
-            if not 'allow_short_filenames' in kwargs:
-                kwargs['allow_short_filenames']=True
-            if not 'run_mode' in kwargs:
-                kwargs['run_mode'] = ppg2.RunMode.NONINTERACTIVE
+            if not "cores" in kwargs:
+                kwargs["cores"] = 1
+            if not "allow_short_filenames" in kwargs:
+                kwargs["allow_short_filenames"] = True
+            if not "prevent_absolute_paths" in kwargs:
+                kwargs["prevent_absolute_paths"] = False
+            if not "run_mode" in kwargs:
+                kwargs["run_mode"] = ppg2.RunMode.NONINTERACTIVE
 
             g = ppg2.new(
                 # log_level=5,
@@ -183,14 +185,18 @@ def both_ppg_and_no_ppg(request):
                     Path("out").mkdir()
 
                     first[0] = True
+                if not "log_level" in kwargs:
+                    kwargs["log_level"] = 40
+                if not "cores" in kwargs:
+                    kwargs["cores"] = 1
+                if not "allow_short_filenames" in kwargs:
+                    kwargs["allow_short_filenames"] = True
+                if not "prevent_absolute_paths" in kwargs:
+                    kwargs["prevent_absolute_paths"] = False
+                if not "run_mode" in kwargs:
+                    kwargs["run_mode"] = ppg2.RunMode.NONINTERACTIVE
 
-                g = ppg2.new(
-                    cores=1,
-                    # log_level=5,
-                    allow_short_filenames=True,
-                    run_mode=ppg2.RunMode.NONINTERACTIVE,
-                    log_level=40,
-                )
+                g = ppg2.new(**kwargs)
                 g.new = np
                 g.new_pipegraph = np  # ppg1 test case compatibility
                 g.result_dir = Path("results")  # ppg test case compatibility
@@ -247,6 +253,7 @@ def both_ppg_and_no_ppg(request):
                 d.new = lambda: None
                 d.new_pipegraph = lambda: None  # ppg test case compatibility
                 d.result_dir = Path("results")  # ppg test case compatibility
+                ppg2.change_global_pipegraph(None)
                 return d
 
             def finalize():
@@ -262,7 +269,8 @@ def both_ppg_and_no_ppg(request):
                             pass
 
             request.addfinalizer(finalize)
-            ppg2.global_pipegraph = None
+            ppg2.change_global_pipegraph(None)
+            print('gloabl', ppg2.global_pipegraph)
             yield np()
 
         finally:

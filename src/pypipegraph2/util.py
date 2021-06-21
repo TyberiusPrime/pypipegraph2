@@ -78,6 +78,8 @@ def assert_uniqueness_of_object(
         raise ValueError(
             "Names must not contain /, it confuses the directory calculations"
         )
+    if pipegraph is None:
+        return
     if not hasattr(pipegraph, "object_uniquifier"):
         pipegraph.object_uniquifier = {}
     typ = object_with_name_attribute.__class__

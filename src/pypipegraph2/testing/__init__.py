@@ -11,7 +11,8 @@ def run():
     else:
         pass
 
-run_pipegraph = run # ppg1 compatibility
+
+run_pipegraph = run  # ppg1 compatibility
 
 fl_count = 0
 
@@ -57,7 +58,14 @@ class RaisesDirectOrInsidePipegraph(object):
         if ppg2.inside_ppg():
             with pytest.raises(ppg2.RunFailed) as e:
                 run()
-            assert isinstance(e.value.exceptions[0], self.expected_exception) # todo?
+            ex = e.value.exceptions[0]
+            if isinstance(ex, ppg2.JobError):
+                ex = ex.args[0]
+            if not isinstance(ex, self.expected_exception):
+                raise ValueError(
+                    f"Unexpected exception. Expected {self.expected_exception}, found {e.value.exceptions[0]}"
+                )
+
             if self.search_message:
                 assert self.search_message in str(e.value.exceptions[0])
         else:
@@ -66,5 +74,9 @@ class RaisesDirectOrInsidePipegraph(object):
                 fail(self.message)
             self.excinfo.__init__(tp)
             suppress_exception = issubclass(self.excinfo.type, self.expected_exception)
-            if sys.version_info[0] == 2 and suppress_exception:
-                sys.exc_clear()
+            if sys.version_info[0] == 2:
+                raise ValueError("No python2 support")
+            if suppress_exception:
+                return True  # seep PEP_0343
+            else:
+                return False

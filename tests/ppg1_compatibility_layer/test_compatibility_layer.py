@@ -78,3 +78,12 @@ class TestcompatibilityLayerMore:
     def test_unsupported(self):
         with pytest.raises(NotImplementedError):
             ppg1.MemMappedDataLoadingJob()
+
+
+    def test_predecessors(self):
+        a = ppg1.TempFileGeneratingJob("A", lambda: 55)
+        b = ppg1.TempFileGeneratingJob("b", lambda of: 55)
+        b.ignore_code_changes()
+        b.depends_on(a)
+        assert list(b.prerequisites) == [a]
+

@@ -1320,7 +1320,7 @@ class TestPypipegraph2:
         ppg.FileGeneratingJob("C", lambda of: write(of, str(of)))
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
-        assert len(ppg.global_pipegraph.do_raise) == 1
+        assert len(ppg.global_pipegraph.do_raise) == 2 # both exceptions
         assert ppg.global_pipegraph.last_run_result["A"].error
         assert ppg.global_pipegraph.last_run_result["B"].error
         assert not ppg.global_pipegraph.last_run_result["C"].error

@@ -8,7 +8,7 @@ from .shared import write, read, counter
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestSharedJob:
     def test_simple(self):
-        def doit(output_files):
+        def doit(output_files, output_prefix):
             for of in output_files:
                 assert not "no_input" in str(of)
             count = counter("doit")
@@ -112,11 +112,11 @@ class TestSharedJob:
             ppg.MultiFileGeneratingJob({"a": "A", "b": "A"}, lambda of: None)
         with pytest.raises(ValueError):
             ppg.SharedMultiFileGeneratingJob(
-                "shared", {"a": "A", "b": "A"}, lambda of: None
+                "shared", {"a": "A", "b": "A"}, lambda of, prefix: None
             )
 
     def test_subdirs(self):
-        def doit(files):
+        def doit(files, prefix):
             for f in files.values():
                 f.parent.mkdir()
                 f.write_text(f.name)
@@ -131,12 +131,12 @@ class TestSharedJob:
         assert read(job["b"]) == "b"
 
     def test_nested(self):
-        def doit(output_files):
+        def doit(output_files, prefix):
             count = counter("doit")
             write(output_files[0], "a" + str(count))
             write(output_files[1], "b")
 
-        def func_c(files):
+        def func_c(files, prefix):
             counter("C")
             files[0].write_text(read(job[0]) + "c")
 
@@ -193,7 +193,7 @@ class TestSharedJob:
         assert read("d") == "a0cd"
 
     def test_nuking_on_error(self):
-        def doit(output_files):
+        def doit(output_files, prefix):
             raise ValueError()
 
         a = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit)
@@ -210,7 +210,7 @@ class TestSharedJob:
     def test_multiple_histories(self):
         import json
 
-        def doit(output_files):
+        def doit(output_files, prefix):
             for of in output_files:
                 assert not "no_input" in str(of)
             count = counter("doit")
@@ -303,7 +303,7 @@ class TestSharedJob:
 
 
     def test_simple_one_file(self):
-        def doit(output_file):
+        def doit(output_file, prefix):
             count = counter("doit")
             write(output_file[0], "a" + str(count))
 
@@ -333,7 +333,7 @@ class TestSharedJob:
         assert before != after
 
     def test_remove_and_keep_build_dir(self):
-       def dofail(ofs):
+       def dofail(ofs, prefix):
             raise ValueError()
        jobKeep = ppg.SharedMultiFileGeneratingJob(
             "out", ["a"], dofail, depend_on_function=False, remove_unused=False,
@@ -351,7 +351,7 @@ class TestSharedJob:
 
 
     def test_direct_call(self):
-        def doit(output_file):
+        def doit(output_file, prefix):
             count = counter("doit")
             write(output_file[0], "a" + str(count))
 

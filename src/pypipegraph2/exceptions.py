@@ -32,7 +32,9 @@ class RunFailed(FatalGraphException):
     pass
 
 class JobsFailed(RunFailed):
-    pass
+    def __init__(self, msg, exceptions):
+        super().__init__(msg)
+        self.exceptions = exceptions
 
 class RunFailedInternally(RunFailed):
     def __init__(self, *args, **kwargs):
@@ -48,8 +50,6 @@ class _RunAgain(PPGException):
 
 
 class JobError(PPGException):
-    def __init__(self, *args):
-        super().__init__(*args)
 
     def __str__(self):
         return (
@@ -58,3 +58,6 @@ class JobError(PPGException):
             # + (f"\tTraceback: {self.args[1]}\n")
             + ("")
         )
+
+    def __repr__(self):
+        return str(self)

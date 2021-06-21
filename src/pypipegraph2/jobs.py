@@ -1,8 +1,8 @@
 from __future__ import annotations
 import json
 import signal
+
 import time
-import collections
 import tempfile
 import pickle
 import os
@@ -59,6 +59,13 @@ def _mark_function_wrapped(outer, inner, desc="callback"):
         raise TypeError(f"{desc} function must be callable")
     outer.wrapped_function = inner
     return outer
+
+
+def _safe_str(x):
+    try:
+        return str(x)
+    except:  # noqa:E722
+        return "could not str(x)"
 
 
 class Job:
@@ -187,9 +194,14 @@ class Job:
             else:
                 if isinstance(other_job, Path):
                     other_job = str(other_job)
-                o_job = global_pipegraph.jobs[
-                    global_pipegraph.outputs_to_job_ids[other_job]
-                ]
+                try:
+                    o_job = global_pipegraph.jobs[
+                        global_pipegraph.outputs_to_job_ids[other_job]
+                    ]
+                except KeyError as e:
+                    raise KeyError(
+                        f"Dependency specified via job_id {repr(other_job)}. No such job found"
+                    )
                 o_inputs = [other_job]
             if o_job.job_id == self.job_id:
                 raise exceptions.NotADag("Job can not depend on itself")
@@ -276,7 +288,6 @@ class Job:
         """Did this job fail in any way in the last run?
         I.e. does it have an exception?"""
         return bool(self.exception)
-
 
     @property
     def stack_trace(self):
@@ -477,8 +488,10 @@ class MultiFileGeneratingJob(Job):
         return func
 
     @staticmethod
-    def _validate_files_argument(files):
+    def _validate_files_argument(files, allow_absolute=False):
         from . import global_pipegraph
+
+        # print(files)
 
         if not hasattr(files, "__iter__"):
             raise TypeError("files was not iterable")
@@ -495,10 +508,17 @@ class MultiFileGeneratingJob(Job):
         for f in files:
             if not isinstance(f, (str, Path)):
                 raise TypeError("Files for (Multi)FileGeneratingJob must be Path/str")
-            if global_pipegraph.prevent_absolute_paths and Path(f).is_absolute():
-                raise ValueError(f"Absolute file path as job_ids prevented by graph.prevent_absolute_paths. Was {f}")
+            if (global_pipegraph.prevent_absolute_paths or allow_absolute) and Path(
+                f
+            ).is_absolute():
+                raise ValueError(
+                    f"Absolute file path as job_ids prevented by graph.prevent_absolute_paths. Was {f}"
+                )
         path_files = (Path(x) for x in files)
-        abs_files = [x if x.is_absolute() else x.resolve().relative_to(Path(".").absolute()) for x in path_files]
+        abs_files = [
+            x if x.is_absolute() else x.resolve().relative_to(Path(".").absolute())
+            for x in path_files
+        ]
         if lookup:
             lookup = {lookup[ii]: abs_files[ii] for ii in range(len(lookup))}
         return sorted(abs_files), lookup
@@ -559,7 +579,7 @@ class MultiFileGeneratingJob(Job):
                         sys.stdout = stdout
                         sys.stderr = stderr
                         try:
-                            self.generating_function(input)
+                            self.generating_function(*input)
                             stdout.flush()
                             stderr.flush()
                             # else:
@@ -695,7 +715,7 @@ class MultiFileGeneratingJob(Job):
                 exception_out.close()
                 self.pid = None
         else:
-            self.generating_function(input)
+            self.generating_function(*input)
         missing_files = [x for x in self.files if not x.exists()]
         if missing_files:
             raise exceptions.JobContractError(
@@ -741,21 +761,21 @@ class MultiFileGeneratingJob(Job):
 
     def get_input(self):
         if self._single_file:
-            return self.files[0]
+            return (self.files[0], )
         else:
             if self._lookup:
-                return self._lookup
+                return (self._lookup, )
             else:
-                return self.files
+                return (self.files, )
 
     def output_needed(self, runner):
         for fn in self.files:
             if not fn.exists():
                 return True
-            # other wise we have no history, and the skipping will
+            # other wise we have no history, and the skipping would
             # break the graph execution
             if str(fn) not in runner.job_states[self.job_id].historical_output:
-                log_error(
+                log_job_trace(
                     f"No history for {fn}, {escape_logging(runner.job_states[self.job_id].historical_output)}"
                 )
                 return True
@@ -1149,16 +1169,39 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             return False
         elif hasattr(a, "__code__") and hasattr(a, "__closure__"):
             if hasattr(b, "__code__") and hasattr(b, "__closure__"):
-                # print('comp', (a.__code__ == b.__code__) , (a.__closure__ == b.__closure__))
-                # print(a.__closure__)
-                # print(b.__closure__)
-
                 return (a.__code__ == b.__code__) and (a.__closure__ == b.__closure__)
             else:
                 return False
         else:
             return False
             # return ~(hasattr(b, "__code__") and hasattr(b, "__closure__"))
+
+    @staticmethod
+    def debug_function_differences(a, b):
+        if a is None and b is None:
+            return "No difference"
+        elif a is None or b is None:
+            return "one function was none"
+        elif hasattr(a, "__code__") and hasattr(a, "__closure__"):
+            if hasattr(b, "__code__") and hasattr(b, "__closure__"):
+                if not (a.__code__ == b.__code__):
+                    return "The function __code__ differed"
+                elif not (a.__closure__ == b.__closure__):
+                    in_a = "in A:\n"
+                    in_b = "in B:\n"
+                    for x in a.__closure__:
+                        xc = x.cell_contents
+                        in_a += f"\t{id(xc)} {type(xc) }{_safe_str(xc)[:20]}\n"
+                    for x in b.__closure__:
+                        in_b += f"\t{id(xc)} {type(xc)} {_safe_str(xc)[:20]}\n"
+                    return f"The function closures differed. Differences: \n{in_a} \n {in_b}"
+                else:
+                    return "The functions were identical"
+            else:
+                return "Could not get code & closure on both functions"
+        else:
+            return "Could not get code & closure on both functions"
+        # return ~(hasattr(b, "__code__") and hasattr(b, "__closure__"))
 
     @staticmethod
     def function_to_str(func):
@@ -1373,11 +1416,14 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
             if global_pipegraph.run_mode.is_strict():
                 raise exceptions.JobRedefinitionError(
-                    "FunctionInvariant %s created twice with different functions: \n%s\n%s"
+                    "FunctionInvariant %s created twice with different functions: \n%s\n%s\n%s"
                     % (
                         job_id,
                         FunctionInvariant.function_to_str(function),
                         FunctionInvariant.function_to_str(self.function),
+                        FunctionInvariant.debug_function_differences(
+                            self.function, function
+                        ),
                     )
                 )
 
@@ -1537,10 +1583,45 @@ class ParameterInvariant(_InvariantMixin, Job):
             raise TypeError(msg)
 
 
+class ValuePlusHash:
+    """Wrapper to signal AttributeLoading/DataLoadingJob that you have already calculated a hash on this"""
+
+    def __init__(self, value, hexdigest):
+        self.value = value
+        self.hexdigest = hexdigest
+
+
+def _hash_object(obj):
+    if isinstance(obj, str):
+        my_hash = hashers.hash_bytes(obj.encode("utf-8"))
+    elif isinstance(obj, bytes):
+        my_hash = hashers.hash_bytes(obj)
+    elif isinstance(
+        obj, (int, float, complex)
+    ):  # for these types, the build in hash should be good enough. This also covers numpy floats
+        my_hash = hash(obj)
+    elif isinstance(obj, ValuePlusHash):
+        my_hash = obj.hexdigest
+        obj = obj.value
+    else:
+        raise ValueError(f"Could not derive a hash for {type(obj)}")
+    return obj, my_hash
+
+
 class DataLoadingJob(Job):
     """A job that manipulates the currently running python program.
 
-    Note that these don't run if they have no dependents
+    Note that these don't run if they have no dependents.
+
+    Also note that if this runs, and the load_function returns None,
+    it *will* invalidate it's downstreams, possibly triggering reruns
+    you did not want.
+
+    The answer is to return something that's we can feed to
+    hasher.hash_bytes - bytes or a string.
+
+    Alternatively, if you have a hash handy, you may return it wrapped in
+    an ValuePlusHash.
     """
 
     job_kind = JobKind.Loading
@@ -1559,26 +1640,25 @@ class DataLoadingJob(Job):
             self._handle_function_dependency(self.load_function)
 
     def run(self, runner, historical_output):
-        self.load_function()
+        load_res = self.load_function()
 
         log_trace(
             f"dl {self.job_id} - historical: {historical_output.get(self.outputs[0], False)}"
         )
         log_trace(f"dl {self.job_id} - {escape_logging(historical_output)}")
-        return {
-            self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
-        }  # so the downstream get's invalidated
-
-        # todo: there is a judgment call here
-        # we could also invalidate on a hash based on the return of load_function.
-        # (which is more naturally available in an AttributeLoadingJob
-        # that would be more inline with the 'only-recalc-if-the-input-actually-changed'
-        # philosophy.
-        # but it will cause false positives if you return things that have an instable str
-        # (or what ever hash source we use)
-        # and it will cause false negatives if the load_function is just for the side effects...
-        # option a) separate into calculate and store, so that we always have the actual value?
-        # that's of course an API change compared to the pypipegraph. Hm.
+        if load_res is None:
+            log_warning(
+                f"DataLoadingJob {self.job_id} returned None - downstreams will be invalidated whenever this runs."
+            )
+            try:
+                my_hash = historical_output.get(self.outputs[0], 0) + 1
+            except TypeError:
+                my_hash = 0  # start over. Historical can't have been 0
+            # so the downstream get's invalidated when ever this runs. This is a safe,
+            # but potentially wasteful
+        else:
+            _, my_hash = _hash_object(load_res)  # could be a ValuePlusHash
+        return {self.outputs[0]: my_hash}
 
 
 def CachedDataLoadingJob(
@@ -1598,8 +1678,10 @@ def CachedDataLoadingJob(
     def load():
         try:
             with open(cache_filename, "rb") as op:
-                res = pickle.load(op)
+                raw = op.read()
+                res = pickle.loads(raw)
                 load_function(res)
+                return raw
         except pickle.UnpicklingError as e:
             raise pickle.UnpicklingError(
                 f"Unpickling error in file {cache_filename}", e
@@ -1625,7 +1707,9 @@ def CachedDataLoadingJob(
     return CachedJobTuple(load_job, cache_job)
 
 
-class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
+class AttributeLoadingJob(
+    Job
+):  # Todo: refactor with DataLoadingJob. Also figure out how to hash the result?
     job_kind = JobKind.Loading
 
     def __new__(cls, job_id, *args, **kwargs):
@@ -1671,10 +1755,16 @@ class AttributeLoadingJob(Job):  # Todo: refactor with DataLoadingJob
             self._handle_function_dependency(self.callback)
 
     def run(self, _runner, historical_output):
-        setattr(self.object, self.attribute_name, self.callback())
-        return {
-            self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
-        }  # so the downstream get's invalidated
+        value = self.callback()
+        if value is None:
+            try:
+                hash = historical_output.get(self.outputs[0], 0) + 1
+            except TypeError:
+                hash = 0
+        else:
+            value, hash = _hash_object(value)
+        setattr(self.object, self.attribute_name, value)
+        return {self.outputs[0]: hash}
 
 
 def CachedAttributeLoadingJob(
@@ -1691,10 +1781,13 @@ def CachedAttributeLoadingJob(
         with open(output_filename, "wb") as op:
             pickle.dump(data_function(), op, pickle.HIGHEST_PROTOCOL)
 
-    def load():
+    def load(object=object, attribute_name=attribute_name):
         try:
             with open(cache_filename, "rb") as op:
-                return pickle.load(op)
+                raw = op.read()
+                return ValuePlusHash(
+                    pickle.loads(raw), hashers.hash_bytes(raw)
+                )  # for hashing
         except pickle.UnpicklingError as e:
             raise pickle.UnpicklingError(
                 f"Unpickling error in file {cache_filename}", e
@@ -2008,9 +2101,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
     """
 
-    def __new__(cls, output_dir_prefix, files, *args, **kwargs):
+    def __new__(cls, output_dir_prefix, files, *_args, **_kwargs):
         output_dir_prefix = Path(output_dir_prefix)
-        files = cls._validate_files_argument(files)[0]
+        files = cls._validate_files_argument(files, allow_absolute=True)[0]
         files = [output_dir_prefix / "__never_placed_here__" / f for f in files]
         return Job.__new__(cls, [str(x) for x in files])
 
@@ -2018,19 +2111,21 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         self,
         output_dir_prefix: Path,
         files: List[Path],  # todo: extend type attribute to allow mapping
-        generating_function: Callable[List[Path]],
+        generating_function: Callable[[List[Path]], None],
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
-        empty_ok=True,
-        always_capture_output=True,
-        remove_build_dir_on_error=True,
-        remove_unused=True,
+        empty_ok: bool = True,
+        always_capture_output: bool = True,
+        remove_build_dir_on_error: bool = True,
+        remove_unused: bool = True,
     ):
         self.output_dir_prefix = Path(output_dir_prefix)
 
         self.generating_function = self._validate_func_argument(generating_function)
         self.depend_on_function = depend_on_function
-        self.files, self._lookup = self._validate_files_argument(files)
+        self.files, self._lookup = self._validate_files_argument(
+            files, allow_absolute=True
+        )
         self.org_files = [
             (self.output_dir_prefix / "__never_placed_here__" / f) for f in self.files
         ]
@@ -2137,9 +2232,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         # return self._map_filename(self.files[0])
         # else:
         if self._lookup:
-            return {k: self._map_filename(f) for (k, f) in self._lookup.items()}
+            return ({k: self._map_filename(f) for (k, f) in self._lookup.items()}, self.target_folder)
         else:
-            return [self._map_filename(f) for f in self.files]
+            return ([self._map_filename(f) for f in self.files], self.target_folder)
 
     def output_needed(self, runner):
         output_name = self._derive_output_name(runner)
@@ -2209,3 +2304,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             for dir in remove:
                 log_trace(f"Identified {dir} as no longer in use by any PPG. Removing")
                 shutil.rmtree(dir)
+
+
+[1, 2, 3]

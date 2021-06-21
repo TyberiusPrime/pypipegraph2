@@ -227,7 +227,7 @@ class JobStatus:
                         ds_should_run = self.runner.job_states[downstream_id].should_run
                         if ds_should_run == ShouldRun.Yes:
                             log_job_trace(
-                                f"{self.job_id} update_should_run-> yes case Downstream needs me"
+                                f"{self.job_id} update_should_run-> yes case Downstream needs me: {downstream_id}"
                             )
                             result = ShouldRun.Yes
                             break

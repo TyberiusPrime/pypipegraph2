@@ -528,6 +528,7 @@ class TestModifyDag:
 
 
 def test_prevent_absolute_paths(ppg2_per_test):
+    ppg2_per_test.new(prevent_absolute_paths=True)
     with pytest.raises(ValueError):
         ppg.FileGeneratingJob("/tmp/absolute", lambda of: of.write_text("a"))
     ppg2_per_test.new(prevent_absolute_paths=False)

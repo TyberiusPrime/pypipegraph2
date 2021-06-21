@@ -12,6 +12,7 @@ from .jobs import (
     TempFileGeneratingJob,
     MultiTempFileGeneratingJob,
     DataLoadingJob,
+    ValuePlusHash,
     AttributeLoadingJob,
     CachedDataLoadingJob,
     CachedAttributeLoadingJob,
@@ -46,7 +47,7 @@ _last_new_arguments = {}
 
 
 def _last_or_default(name, value, default_value):
-    if value is default:
+    if value is default:  # pragma: no cover
         result = default_value
     elif value is reuse_last_or_default:
         result = _last_new_arguments.get(name, default_value)
@@ -67,7 +68,7 @@ def new(
     allow_short_filenames=reuse_last_or_default,
     log_retention=reuse_last_or_default,
     cache_dir=reuse_last_or_default,
-    prevent_absolute_paths=reuse_last_or_default
+    prevent_absolute_paths=reuse_last_or_default,
 ):
     """create a new pipegraph.
     You may pass reuse_last_or_default to all values
@@ -95,7 +96,7 @@ def new(
             ("run_mode", RunMode.CONSOLE),
             ("log_retention", 3),
             ("cache_dir", Path("cache")),
-            ('prevent_absolute_paths', True)
+            ("prevent_absolute_paths", True),
         ]
     }
     util.do_job_trace_log = arguments["log_level"] <= 6
@@ -109,6 +110,7 @@ global_pipegraph = None
 
 
 def change_global_pipegraph(value):
+    """Helper to swap out the global pipegraph from ppg1-compability.util"""
     global global_pipegraph
     global_pipegraph = value
 
@@ -131,8 +133,6 @@ def run(
 
 
 def inside_ppg():
-    from . import global_pipegraph
-
     return global_pipegraph is not None
 
 
@@ -186,6 +186,7 @@ __all__ = [
     "MultiTempFileGeneratingJob",
     "MultiFileGeneratingJob",
     "DataLoadingJob",
+    "ValuePlusHash",
     "AttributeLoadingJob",
     "CachedDataLoadingJob",
     "CachedAttributeLoadingJob",

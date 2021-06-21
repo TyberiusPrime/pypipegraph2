@@ -3,6 +3,7 @@ from xxhash import xxh3_128
 
 
 def hash_file(path: Path):
+    """delegate to a fast and somewhat collision resistant hash function"""
     # I profiled a bunch of hash functions
     # and xx3 and spooky were the fastest 128bit hashers
     # (we want 128 bit to prevent collisions).
@@ -34,3 +35,8 @@ def hash_file(path: Path):
         "mtime": int(stat.st_mtime),
         "size": stat.st_size,
     }
+
+def hash_bytes(input: bytes):
+    hasher = xxh3_128()
+    hasher.update(input)
+    return hasher.hexdigest()

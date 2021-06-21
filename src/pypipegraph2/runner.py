@@ -85,6 +85,8 @@ class Runner:
 
             # assert flat_before == flat_after
             import json
+            for job_id in self.jobs:
+                log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
 
             log_job_trace(
                 "dag "
@@ -671,17 +673,20 @@ class Runner:
                         log_trace(f"Go {job_id}")
                         log_trace(f"\tExecuting {job_id}")
 
-                        outputs = job.run(self, job_state.historical_output)
-                        if os.getcwd() != cwd:
-                            os.chdir(
-                                cwd
-                            )  # restore and hope we can recover enough to actually print the exception, I suppose.
-                            log_error(
-                                f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
-                            )
-                            raise exceptions.JobContractError(
-                                f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
-                            )
+                        try:
+                            outputs = job.run(self, job_state.historical_output)
+                        finally:
+                            # we still check the cwd, even if the job failed!
+                            if os.getcwd() != cwd:
+                                os.chdir(
+                                    cwd
+                                )  # restore and hope we can recover enough to actually print the exception, I suppose.
+                                log_error(
+                                    f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
+                                )
+                                raise exceptions.JobContractError(
+                                    f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
+                                )
                         log_job_trace(f"pushing success {job_id}")
                         self._push_event("JobSuccess", (job_id, outputs))
                 except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit

@@ -24,9 +24,9 @@ from rich.console import Console
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
-if "pytest" in sys.modules:
+if "pytest" in sys.modules:  # pragma: no branch
     log_out = sys.stderr
-else:
+else:  # pragma: no cover
     log_out = RichHandler(markup=True, console=console)
 logger.add(
     sink=log_out,
@@ -224,14 +224,10 @@ class PyPipeGraph:
             del result
             for job_id, job_state in final_result.items():
                 if job_state.state == JobState.Failed:
-                    if (
-                        raise_on_job_error
-                        and not "At least one job failed" in self.do_raise
-                    ):
-                        self.do_raise.append("At least one job failed")
+                    self.do_raise.append(job_state.error)
             self.last_run_result = final_result
-            if self.do_raise and not self._restart_afterwards:
-                raise exceptions.JobsFailed(*self.do_raise)
+            if raise_on_job_error and self.do_raise and not self._restart_afterwards:
+                raise exceptions.JobsFailed("At least one job failed", self.do_raise)
             ok = True
             return final_result
         finally:
@@ -251,7 +247,7 @@ class PyPipeGraph:
                 subprocess.check_call([sys.executable] + sys.argv, cwd=start_cwd)
 
     def run_for_these(self, jobs):
-        """Run graph for just these jobs (and their upstreams)"""
+        """Run graph for just these jobs (and their upstreams), ignoring everything else"""
         if not isinstance(jobs, list):
             jobs = [jobs]
         return self._run(
@@ -260,7 +256,7 @@ class PyPipeGraph:
 
     def _cleanup_logs(self):
         """Clean up old logs"""
-        if not self.log_dir or self.log_retention is None:
+        if not self.log_dir or self.log_retention is None:  # pragma: no cover
             return
         fn = Path(sys.argv[0]).name
         pattern = f"{fn}-*.log"
@@ -272,7 +268,7 @@ class PyPipeGraph:
 
     def _cleanup_errors(self):
         """Cleanup old errors"""
-        if not self.error_dir or self.log_retention is None:
+        if not self.error_dir or self.log_retention is None:  # pragma: no cover
             return
         err_dirs = sorted(
             [x for x in (self.error_dir / self.time_str).parent.glob("*") if x.is_dir()]
@@ -314,7 +310,7 @@ class PyPipeGraph:
             lines = []
             if not rt_file.exists():
                 lines.append("jobid\trun_start_time\truntime_s")
-            for job_id, job_result in job_results.items():
+            for job_id, job_result in job_results.items():  # pragma: no branch
                 if job_result.state is JobState.Success:
                     if job_result.run_time >= 1:
                         lines.append(
@@ -354,7 +350,8 @@ class PyPipeGraph:
                                 # log_trace(f"unpickleing error {e}")
                                 if job_id is None:
                                     raise exceptions.JobsFailed(
-                                        "Could not depickle job id - history file is borked beyond automatic recovery"
+                                        "Could not depickle job id - history file is borked beyond automatic recovery",
+                                        [],
                                     )
                                 else:
                                     msg = (
@@ -363,7 +360,7 @@ class PyPipeGraph:
                                         "Job will rerun, probably until the (de)pickling bug is fixed."
                                         f"\n Exception: {e}"
                                     )
-                                    self.do_raise.append(msg)
+                                    self.do_raise.append(ValueError(msg))
                                     self.invariant_loading_issues.add(job_id)
                                 # use pickle tools to read the pickles op codes until
                                 # the end of the current pickle, hopefully allowing decoding of the next one
@@ -377,7 +374,8 @@ class PyPipeGraph:
                                     raise exceptions.JobsFailed(
                                         "Could not depickle invariants - "
                                         f"depickling of {job_id} failed, could not skip to next pickled dataset"
-                                        f" Exception was {e}"
+                                        f" Exception was {e}",
+                                        [],
                                     )
 
                     except EOFError:
@@ -480,13 +478,10 @@ class PyPipeGraph:
     def _restore_signals(self):
         """Restore signals to pre-run values"""
         log_trace("_restore_signals")
-        if hasattr(self, "_old_signal_hup"):
+        if hasattr(self, "_old_signal_hup"):  # pragma: no branch
             signal.signal(signal.SIGHUP, self._old_signal_hup)
-        if hasattr(self, "_old_signal_int"):
+        if hasattr(self, "_old_signal_int"):  # pragma: no branch
             signal.signal(signal.SIGINT, self._old_signal_int)
-        else:
-            pass
-            # raise ValueError("WHen does this happen")
 
     def add(self, job):
         """Add a job.
