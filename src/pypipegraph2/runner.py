@@ -10,7 +10,6 @@ from .enums import (
     ValidationState,
     JobState,
     RunMode,
-    UpstreamCompleted,
     ShouldRun,
 )
 from .exceptions import _RunAgain
@@ -21,7 +20,6 @@ import threading
 from rich.console import Console
 from .interactive import ConsoleInteractive
 from .util import log_info, log_error, log_warning, log_debug, log_trace, log_job_trace
-from .jobs import _DownstreamNeedsMeChecker, _ConditionalJobClone
 import copy
 from .job_status import JobStatus
 
@@ -59,7 +57,6 @@ class Runner:
             self.job_states = (
                 {}
             )  # get's partially filled by modify_dag, and then later in this function
-
             # flat_before = networkx.readwrite.json_graph.node_link_data(
             # job_graph.job_dag
             # )
@@ -203,17 +200,9 @@ class Runner:
         """A a conditional job is one that only runs if it's downstreams need it.
         Examples are DataLoadingJobs and TempFileGeneratingJobs.
 
-        They need to run
-        - when their downstream has not (output_needed() == True)
-        - when their downstream is invalidated.
+        We prune them if they have no downstreams,
+        and we add cleanups
 
-        We achieve the second by cloning the 'hull' of dependencies
-        of the downstream. The hull is the direct dependencies, but
-        conditional are replaced by their hull.
-
-        We need to clone the conditonal jobs per downstream job -
-        mixing the hulls can lead to cycles otherwise (also unnecessary
-        recalcs, I presume)
         """
         # upstreams = dag.predecessors(job.job_id)
         # todo: should just prune instead?
@@ -323,7 +312,7 @@ class Runner:
         todo = len(self.dag)
         for job_id in self.dag.nodes: # those are without the pruned nodes
             no_inputs = not self.job_inputs[job_id]
-            output_needed = self.jobs[job_id].output_needed(self)
+            # output_needed = self.jobs[job_id].output_needed(self)
             failed_last_time = self._job_failed_last_time(job_id)
             if no_inputs:  # could be an initial job
                 log_job_trace(f"{job_id} failed_last_time: {failed_last_time}")
@@ -430,18 +419,6 @@ class Runner:
             raise _RunAgain(self.job_states)
         log_trace("Left runner.run()")
 
-        for job in self.jobs.values():
-            if isinstance(job, _ConditionalJobClone):
-                if not job.parent_job.job_id in self.job_states:
-                    # store it
-                    self.job_states[job.parent_job.job_id] = self.job_states[job.job_id]
-                elif self.job_states[job.job_id].state == JobState.Failed:
-                    # the others might have been skipped
-                    self.job_states[job.parent_job.job_id] = self.job_states[job.job_id]
-                # del self.job_states[job.job_id] # as if it was never cloned
-            log_trace(
-                f"history for {job.job_id} in: {len(self.job_states[job.job_id].updated_input)} out {len(self.job_states[job.job_id].updated_output)}"
-            )
 
         return self.job_states
 
@@ -538,6 +515,7 @@ class Runner:
                     f"Should be {escape_logging(str(set(job.outputs)))}, was {escape_logging(str(set(job_outputs.keys())))}"
                 )
             )
+            log_error(job_state.error)
         else:
             for name, hash in job_outputs.items():
                 log_trace(f"\tCapturing hash for {name} {escape_logging(hash)}")
@@ -585,12 +563,8 @@ class Runner:
                     else:
                         ef.write(str(job_state.error))
                         ef.write("no stack available")
-                if isinstance(job, _ConditionalJobClone):
-                    ji = job.parent_job.job_id
-                else:
-                    ji = job_id
                 log(
-                    f"Failed after {job_state.run_time:.2}s: [bold]{ji}[/bold]. Exception (incl. locals) logged to {error_file}"
+                    f"Failed after {job_state.run_time:.2}s: [bold]{job_id}[/bold]. Exception (incl. locals) logged to {error_file}"
                 )
             else:
                 log(f"Failed job: {job_id}")
@@ -729,7 +703,7 @@ class Runner:
 
 class JobCollector:
     """only in place during the dag modification step of Runner.__init__,
-    so that the jobs that are only created during run (cleanup, _DownstreamNeedsMeChecker)
+    so that the jobs that are only created during run (cleanup, )
     do not end up in the actual graph.
     """
 

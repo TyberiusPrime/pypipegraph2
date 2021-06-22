@@ -16,11 +16,13 @@ class JobState(Enum):
             JobState.Failed,
             JobState.UpstreamFailed,
         )
+
     def is_failed(self):
         return self in (
             JobState.Failed,
             JobState.UpstreamFailed,
         )
+
 
 class ShouldRun(Enum):
     Maybe = auto()
@@ -88,9 +90,3 @@ class Resources(Enum):
             return 0  # which the core lock does not like!
         else:
             raise ValueError("Not a Resource with a given number of cores")
-
-
-class UpstreamCompleted(Enum):
-    All = auto()
-    AllButConditional = auto()
-    No = auto()

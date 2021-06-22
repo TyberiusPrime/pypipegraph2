@@ -78,7 +78,7 @@ def assert_uniqueness_of_object(
         raise ValueError(
             "Names must not contain /, it confuses the directory calculations"
         )
-    if pipegraph is None:
+    if pipegraph is None:  # pragma: no cover
         return
     if not hasattr(pipegraph, "object_uniquifier"):
         pipegraph.object_uniquifier = {}
@@ -141,6 +141,7 @@ def log_job_trace(msg):
     if do_jobtrace_log:
         logger.opt(depth=1).log("JobTrace", msg)
 
+
 def log_trace(msg):
-    if do_jobtrace_log:
+    if do_jobtrace_log:  # pragma: no cover
         logger.opt(depth=1).trace(msg)

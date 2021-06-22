@@ -17,7 +17,7 @@ from . import exceptions
 from .runner import Runner, JobState
 from .util import CPUs, console
 from .enums import RunMode
-from .exceptions import _RunAgain
+from .exceptions import JobsFailed, _RunAgain
 from .util import log_info, log_error, log_warning, log_debug, log_trace
 from rich.logging import RichHandler
 from rich.console import Console
@@ -28,11 +28,11 @@ if "pytest" in sys.modules:  # pragma: no branch
     log_out = sys.stderr
 else:  # pragma: no cover
     log_out = RichHandler(markup=True, console=console)
-logger.add(
-    sink=log_out,
-    format="{elapsed} {message}",
-    level=logging.INFO,
-)
+#logger.add(
+    #sink=log_out,
+    #format="{elapsed} {message}",
+    #level=logging.INFO,
+#)
 
 time_format = "%Y-%m-%d_%H-%M-%S"
 
@@ -112,13 +112,16 @@ class PyPipeGraph:
         dump_graphml=False,
     ) -> Dict[str, JobState]:
         """Run the complete pypipegraph"""
-        return self._run(
-            print_failures,
-            raise_on_job_error,
-            event_timeout,
-            None,
-            dump_graphml=dump_graphml,
-        )
+        try:
+            return self._run(
+                print_failures,
+                raise_on_job_error,
+                event_timeout,
+                None,
+                dump_graphml=dump_graphml,
+            )
+        except JobsFailed as e: # shorten the traceback considerably!
+            raise JobsFailed(e.args[0], exceptions=e.exceptions)
 
     def _run(
         self,
@@ -148,6 +151,7 @@ class PyPipeGraph:
         if self.error_dir:
             self._cleanup_errors()
             (self.error_dir / self.time_str).mkdir(exist_ok=True, parents=True)
+        log_id = None
         if self.log_dir:
             self._cleanup_logs()
             self.log_dir.mkdir(exist_ok=True, parents=True)
@@ -167,7 +171,7 @@ class PyPipeGraph:
                     ),
                     level=self.log_level,
                 )
-            logger.add(sink=sys.stdout, level=self.log_level)  # pragma: no cover
+            log_id = logger.add(sink=sys.stdout, level=self.log_level)  # pragma: no cover
             import threading
 
             log_info(
@@ -239,6 +243,8 @@ class PyPipeGraph:
             if print_failures:
                 self._print_failures()
             self._restore_signals()
+            if log_id is not None:
+                logger.remove(log_id)
             self.running = False
             if (
                 self._restart_afterwards

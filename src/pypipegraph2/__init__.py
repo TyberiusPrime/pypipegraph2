@@ -36,6 +36,7 @@ from .exceptions import (
     RunFailedInternally,
     JobsFailed,
     JobError,
+    JobEvaluationFailed,
 )
 from .enums import Resources, RunMode
 from . import util
@@ -207,6 +208,7 @@ __all__ = [
     "RunFailedInternally",
     "JobsFailed",
     "JobError",
+    "JobEvaluationFailed",
     "Resources",
     "RunMode",
     "replace_ppg1",

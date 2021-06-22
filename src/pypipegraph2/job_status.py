@@ -1,4 +1,5 @@
 from .enums import JobState, ValidationState, ShouldRun, JobKind
+from . import exceptions
 import time
 
 from .util import (
@@ -52,7 +53,7 @@ class JobStatus:
             log_job_trace(f"{self.job_id} Can't undo or set again a terminal state")
             raise ValueError("Can't undo or set again a terminal state")
         self._state = value
-        #if value.is_terminal(): # this is always true
+        # if value.is_terminal(): # this is always true
         self.job_became_terminal()
         if value in (JobState.ReadyToRun, JobState.Skipped):
             self.job_decided_wether_to_run()
@@ -183,8 +184,10 @@ class JobStatus:
                                         f"\t -> run (was cleanup, parent success)"
                                     )
                                     result = ShouldRun.Yes
-                                elif parent_state == JobState.Failed: # pragma: no cover
-                                    raise ValueError( # pragma: no cover
+                                elif (
+                                    parent_state == JobState.Failed
+                                ):  # pragma: no cover
+                                    raise ValueError(  # pragma: no cover
                                         "Why are we asking a job with failed upstream if it should run? (1)"
                                     )
                                     # todo: this is a judgment call. Is it the right one?
@@ -192,14 +195,16 @@ class JobStatus:
                                     #    f"\t -> run (was cleanup, parent failed)"
                                     # )
                                     # result = ShouldRun.Yes
-                                elif parent_state == JobState.UpstreamFailed: # pragma: no cover
-                                    raise ValueError( # pragma: no cover
+                                elif (
+                                    parent_state == JobState.UpstreamFailed
+                                ):  # pragma: no cover
+                                    raise ValueError(  # pragma: no cover
                                         "Why are we asking a job with failed upstream if it should run? (1)"
                                     )
                                     # result = ShouldRun.No
                                 elif parent_state == JobState.Waiting:
                                     result = ShouldRun.Maybe
-                                else: # pragma: no cover
+                                else:  # pragma: no cover
                                     raise ValueError(
                                         f"Should not happen {parent_state}"
                                     )
@@ -207,8 +212,10 @@ class JobStatus:
                             else:
                                 if self.validation_state == ValidationState.Unknown:
                                     result = ShouldRun.Maybe
-                                else: # pragma: no cover
-                                    raise ValueError(f"I did not expect this case {self.validation_state}")
+                                else:  # pragma: no cover
+                                    raise ValueError(
+                                        f"I did not expect this case {self.validation_state}"
+                                    )
 
                 else:  # a conditional job...
                     log_job_trace(
@@ -243,10 +250,12 @@ class JobStatus:
                                     f"\t {self.job_id} -> no ds_count ==ds_no_count & validated"
                                 )
                                 result = ShouldRun.No
-                            elif self.validation_state == ValidationState.Invalidated: # pragma: no cover
+                            elif (
+                                self.validation_state == ValidationState.Invalidated
+                            ):  # pragma: no cover
                                 raise ValueError("Did not expect this case")
                                 # log_job_trace(
-                                    # f"\t {self.job_id} -> yes ds_count ==ds_no_count & invalidated"
+                                # f"\t {self.job_id} -> yes ds_count ==ds_no_count & invalidated"
                                 # )
                                 # result = ShouldRun.Yes
                             else:
@@ -294,7 +303,19 @@ class JobStatus:
                     self.job_id,
                     self.updated_output,
                 )
-                ds.update_should_run()
+                try:
+                    ds.update_should_run()
+                except Exception as e:
+                    self.runner._push_event(
+                        "JobFailed",
+                        (
+                            ds.job_id,
+                            exceptions.JobEvaluationFailed(
+                                "Update should run had an exception", e
+                            ),
+                        ),
+                    ) # which will in turn upstream fail all downstreams
+
                 # log_job_trace("run_now in update_should_run")
                 # ds.run_now_if_ready()
 
@@ -357,7 +378,7 @@ class JobStatus:
 
     def skip(self):
         log_job_trace(f"{self.job_id} skip called")
-        if self.state != JobState.Waiting: # pragma: no cover
+        if self.state != JobState.Waiting:  # pragma: no cover
             raise ValueError("Run/skip called twice")
         # log_job_trace(f"{job_id} skipped")
         self.runner._push_event("JobSkipped", (self.job_id,))  # for accounting
@@ -365,7 +386,7 @@ class JobStatus:
 
     def run(self):
         log_job_trace(f"{self.job_id} run called")
-        if self.state != JobState.Waiting: # pragma: no cover
+        if self.state != JobState.Waiting:  # pragma: no cover
             raise ValueError("Run/skip called twice")
         self._state = JobState.ReadyToRun
         self.runner.jobs_to_run_que.put(self.job_id)

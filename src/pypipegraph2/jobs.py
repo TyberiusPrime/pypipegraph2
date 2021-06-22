@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import json
 import signal
 
@@ -15,8 +16,9 @@ from typing import Union, List, Dict, Optional, Tuple, Callable
 from pathlib import Path
 from io import StringIO
 from collections import namedtuple
+
 from . import hashers, exceptions, ppg_traceback
-from .enums import JobKind, Resources
+from .enums import JobKind, Resources, ValidationState
 from .util import escape_logging
 import hashlib
 import shutil
@@ -61,7 +63,7 @@ def _mark_function_wrapped(outer, inner, desc="callback"):
     return outer
 
 
-def _safe_str(x):
+def _safe_str(x): # pragma: no cover
     try:
         return str(x)
     except:  # noqa:E722
@@ -224,6 +226,19 @@ class Job:
     def compare_hashes(self, old_hash, new_hash):
         return old_hash == new_hash
 
+    def extract_strict_hash(self, a_hash) -> bytes:
+        """Our regular 'hashes' contain things
+        like mtime/size, per-python-bytecode etc
+        to allow flexible compare_hashes.
+
+        For the Shared jobs, we need something that
+        is strictly a set of bytes to compare.
+
+        Note that we call this with only a single output hash.
+
+        """
+        raise NotImplementedError() # pragma: no cover
+
     def depends_on_func(self, function, name=None):
         """Create a function invariant.
         Return a NamedTumple (invariant, self)
@@ -301,138 +316,6 @@ class Job:
             return e.args[1]
         else:  # pragma: no cover - defensive
             raise ValueError("No stacktrace available")
-
-
-class _DownstreamNeedsMeChecker(Job):
-    """Internal to the modified dag in runner,
-
-    Signals whether the downstream jobs has output_needed via
-    the invalidation machinery.
-    """
-
-    job_kind = JobKind.Invariant
-
-    def __new__(cls, job_to_check):
-        return _dedup_job(cls, f"_DownstreamNeedsMeChecker_{job_to_check.job_id}")
-
-    def __init__(self, job_to_check):
-        self.job_to_check = job_to_check
-        Job.__init__(self, [f"_DownstreamNeedsMeChecker_{job_to_check.job_id}"])
-
-    def output_needed(self, _ignored_runner):
-        return True
-
-    def run(self, runner, _historical_output):
-        if self.job_to_check.output_needed(runner):
-            log_trace(f" {self.job_id} ExplodePlease")
-            return {
-                self.job_id: "ExplodePlease"
-            }  # magic value, not being compared to previous run!
-        else:
-            log_trace(f" {self.job_id} IgnorePlease")
-            return {self.job_id: "IgnorePlease"}
-
-    def compare_hashes(self, old_hash, new_hash):
-        if new_hash == "ExplodePlease":
-            return False
-        if new_hash == "IgnorePlease":
-            return True
-        raise NotImplementedError("Should not be reached")  # pragma: no cover
-
-
-class _ConditionalJobClone(Job):
-    """Internal to the modified dag in runner.
-    This 'mirrors' one conditional job multiple times, so
-    it can be outfitted with 'hulls' per downstream job"""
-
-    @staticmethod
-    def _name_job(parent_job, downstream_job_id, only_one):
-        if only_one:  # this makes reading the logs somewhat easier..
-            return "(CJC:" + parent_job.job_id + ")"
-        else:
-            return "(CJC:" + parent_job.job_id + ":" + downstream_job_id + ")"
-
-    def __new__(cls, parent_job, clone_number, other_clones, first_output, only_one):
-        job_id = cls._name_job(parent_job, clone_number, only_one)
-        return object.__new__(cls)
-
-    def __init__(
-        self, parent_job, downstream_job_id, other_clones, first_output, only_one
-    ):
-        import threading
-
-        self.job_id = self._name_job(parent_job, downstream_job_id, only_one)
-        self.resources = parent_job.resources
-        self.outputs = [self.job_id + x for x in parent_job.outputs]
-        self.dependency_callbacks = []
-        # self._validate()
-        # self.readd()
-        self._pruned = False
-        self.job_kind = parent_job.job_kind
-        self.job_number = parent_job.job_number
-        self.cleanup_job_class = parent_job.cleanup_job_class
-
-        self.parent_job = parent_job
-        self.other_clones = other_clones
-        self.first_output = first_output
-        if not other_clones:
-            self.lock = threading.Condition()
-        else:
-            self.lock = self.other_clones[0].lock
-        self.other_clones.append(self)
-
-    def __del__(self):
-        self.other_clones = None  # break cycle
-
-    def output_needed(self, runner):
-        log_trace(f"Forwarding output_needed to {self.parent_job}")
-        # do perverse things with pythons conscept of methods,
-        # like on purpose calling them with the wrong class
-        self.parent_job.__class__.output_needed(self, runner)
-
-    def compare_hashes(self, old_hash, new_hash):
-        return self.parent_job.compare_hashes(old_hash, new_hash)
-
-    def run(self, runner, historical_output):
-        if self.first_output:  # one of the siblings has run
-            log_trace(
-                f"{self.job_id}, output available - ok: {self.first_output[0][0]}"
-            )
-            # paranoia
-            if len(self.first_output) > 1:
-                raise ValueError(
-                    "First output had multiple outputs - this should not happen"
-                )
-            ok, res = self.first_output[0]
-            if ok:
-                result = {self.job_id + k: v for (k, v) in res.items()}
-                return result  # translate parent outputs ot my outputs
-            else:
-                raise res
-        else:
-            if self.lock.acquire(blocking=False):
-                # we are the first
-                log_trace(f"{self.job_id}, lock aquired")
-                try:
-                    modified_historical_output = {
-                        k[len(self.job_id) :]: v for (k, v) in historical_output.items()
-                    }
-                    result = self.parent_job.run(runner, modified_historical_output)
-                    self.first_output.append((True, result))
-                except Exception as e:
-                    self.first_output.append((False, e))
-                finally:
-                    self.lock.notify_all()  # tell all others to resume
-                    self.lock.release()
-            else:
-                log_trace(f"{self.job_id}, concurrent calculation - waiting")
-                self.lock.wait()  # wait for notification
-                # todo: in an ideal world, release core lock, increase thread count here?
-            # now output. reuse code from if self.first_output
-            assert self.first_output  # paranoia
-            return self.run(
-                runner, historical_output
-            )  # recurse and go into output available case
 
 
 class MultiFileGeneratingJob(Job):
@@ -532,6 +415,7 @@ class MultiFileGeneratingJob(Job):
         self.files = [self._map_filename(fn) for fn in self.org_files]
         for fn in self.files:  # we rebuild anyway!
             if fn.exists():
+                log_error(f"unlinking {fn}")
                 fn.unlink()
         input = self.get_input()
         if self.resources in (
@@ -761,12 +645,12 @@ class MultiFileGeneratingJob(Job):
 
     def get_input(self):
         if self._single_file:
-            return (self.files[0], )
+            return (self.files[0],)
         else:
             if self._lookup:
-                return (self._lookup, )
+                return (self._lookup,)
             else:
-                return (self.files, )
+                return (self.files,)
 
     def output_needed(self, runner):
         for fn in self.files:
@@ -796,6 +680,9 @@ class MultiFileGeneratingJob(Job):
 
     def compare_hashes(self, old_hash, new_hash):
         return new_hash["hash"] == old_hash.get("hash", "")
+
+    def extract_strict_hash(self, a_hash) -> bytes:
+        return a_hash["hash"].encode("utf-8")
 
 
 class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
@@ -902,6 +789,7 @@ class _FileCleanupJob(Job):
     def run(self, _ignored_runner, _historical_output):
         for fn in self.parent_job.files:
             if fn.exists():
+                log_error(f"unlinking {fn}")
                 fn.unlink()
 
         return {self.outputs[0]: None}  # todo: optimize this awy?
@@ -1087,6 +975,9 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             res = new_hash["source"] == old_hash["source"]
             # log_trace(f"Comparing based on source: result {res}")
             return res
+
+    def extract_strict_hash(self, a_hash) -> bytes:
+        return a_hash["source"].encode("utf-8")
 
     def get_source_file(self):
         if self.is_python_function(self.function):
@@ -1524,6 +1415,9 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     def compare_hashes(self, old_hash, new_hash):
         return new_hash["hash"] == old_hash.get("hash", "")
 
+    def extract_strict_hash(self, a_hash) -> bytes:
+        return a_hash["hash"].encode('utf-8')
+
 
 class ParameterInvariant(_InvariantMixin, Job):
     job_kind = JobKind.Invariant
@@ -1582,6 +1476,9 @@ class ParameterInvariant(_InvariantMixin, Job):
             msg = "Unsupported type: %r - needs __hash__ support" % type(obj).__name__
             raise TypeError(msg)
 
+    def extract_strict_hash(self, a_hash) -> bytes:
+        return str(ParameterInvariant.freeze(a_hash)).encode("utf-8")
+
 
 class ValuePlusHash:
     """Wrapper to signal AttributeLoading/DataLoadingJob that you have already calculated a hash on this"""
@@ -1599,7 +1496,11 @@ def _hash_object(obj):
     elif isinstance(
         obj, (int, float, complex)
     ):  # for these types, the build in hash should be good enough. This also covers numpy floats
-        my_hash = hash(obj)
+        # todo: does it vary across python versionS?
+        # todo: these do not get salted. at least up to 3.8..
+        # todo: probably would be better to choose something deterministic...
+        # but also lot of work.
+        my_hash = str(hash(obj)) # since the others are also strings.
     elif isinstance(obj, ValuePlusHash):
         my_hash = obj.hexdigest
         obj = obj.value
@@ -1659,6 +1560,9 @@ class DataLoadingJob(Job):
         else:
             _, my_hash = _hash_object(load_res)  # could be a ValuePlusHash
         return {self.outputs[0]: my_hash}
+
+    def extract_strict_hash(self, a_hash) -> bytes:
+        return a_hash.encode("utf-8")
 
 
 def CachedDataLoadingJob(
@@ -1766,6 +1670,9 @@ class AttributeLoadingJob(
         setattr(self.object, self.attribute_name, value)
         return {self.outputs[0]: hash}
 
+    def extract_strict_hash(self, a_hash) -> bytes:
+        return a_hash.encode("utf-8")
+
 
 def CachedAttributeLoadingJob(
     cache_filename,
@@ -1827,14 +1734,11 @@ class _AttributeCleanupJob(Job):
     def __init__(self, parent_job):
         Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
         self.parent_job = parent_job  # what are we cleaning up?
-        self.real_parent_job = (
-            parent_job  #  parent_job may be replaced by _ConditionalJobClone
-        )
         # and that is necessary for the invalidation to do it's thing
         # but the real parent will the one we read the files from
 
     def run(self, _ignored_runner, _historical_output):
-        delattr(self.real_parent_job.object, self.real_parent_job.attribute_name)
+        delattr(self.parent_job.object, self.parent_job.attribute_name)
 
         return {self.outputs[0]: None}  # todo: optimize this awy?
 
@@ -1885,6 +1789,9 @@ class JobGeneratingJob(Job):
         return {
             self.outputs[0]: historical_output.get(self.outputs[0], 0) + 1
         }  # so the downstream get's invalidated
+
+    def extract_strict_hash(self, a_hash) -> bytes:
+        return b""  # job generating jobs never influence the input of SharedMultiFileGeneratingJobs by fiat
 
 
 def _save_plot(
@@ -2081,30 +1988,34 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
     Sharing means that this can be produced by multiple pypipegraphs,
     each with it's own history.
 
-    The outputs are placed in a folder keyed for he input hashes.
-    That means, no double work is being done (if they don't run in parallel,
-    that is).
+    The trick here is that we hash the inputs into one hash,
+    by which we name the target directory.
 
-    Building happens in a folder named for hostname + pid + time,
-    renaming to final input-keyed folder is atomic.
+    But that's actually a symlink to another directory,
+    named by the output hashes!
 
-    That still means that one will clober the other, but since their
-    outputs are supposed to be identical, this will be safe.
+    That way, changing the input will trigger a recalc.
+    But we will not store the output multiple times
+    if it's identical.
 
-    If the job dies, the build folder is removed (except if @remove_build_dir_on_error is False).
+    Multiple graphs, with the same input hashes,
+    will not do the work twice. (Provided their runtimes don't overlap).
+    Otherwise calc will happen twice, but one thrown away ( if identical )
+    or with an exception ( if not identical: input-defines-output invariant violated).
 
-    There is also a log file for mapping ppg-history-filenames ->
-    target folders.
+    Broken builds get removed by default.
 
-    This is used to identify unused output folders,
-    which then get removed as well (except if @remove_unused is False).
+    Each pipegraph also logs it's use (on first usage & rebuild) and by default
+    cleans up no longer used outputs / symlinks.
 
     """
 
     def __new__(cls, output_dir_prefix, files, *_args, **_kwargs):
         output_dir_prefix = Path(output_dir_prefix)
         files = cls._validate_files_argument(files, allow_absolute=True)[0]
-        files = [output_dir_prefix / "__never_placed_here__" / f for f in files]
+        files = [output_dir_prefix / "__never_placed_here__" / f for f in files] + [
+            output_dir_prefix
+        ]
         return Job.__new__(cls, [str(x) for x in files])
 
     def __init__(
@@ -2121,8 +2032,18 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
     ):
         self.output_dir_prefix = Path(output_dir_prefix)
 
+        self.build_dir = self.output_dir_prefix / "build"
+        self.output_dir = self.output_dir_prefix / "done"  # done outputs
+        self.input_dir = self.output_dir_prefix / "by_input"  # symlinks
+        self.usage_dir = self.output_dir_prefix / "used_by"  # symlinks
+        self.build_dir.mkdir(exist_ok=True, parents=True)
+        self.output_dir.mkdir(exist_ok=True)
+        self.input_dir.mkdir(exist_ok=True)
+        self.usage_dir.mkdir(exist_ok=True)
+
         self.generating_function = self._validate_func_argument(generating_function)
         self.depend_on_function = depend_on_function
+
         self.files, self._lookup = self._validate_files_argument(
             files, allow_absolute=True
         )
@@ -2140,12 +2061,10 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             raise ValueError(
                 "Paths were present multiple times in files argument. Fix your input"
             )
-        self._output_name_history_name = str(
-            self.output_dir_prefix / ".ppg_output_name"
-        )
-        self.files.append(self._output_name_history_name)
-        Job.__init__(self, [str(x) for x in self.files], resources)
-        self.files.remove(self._output_name_history_name)
+
+        init_files = self.files + [self.output_dir_prefix]
+        Job.__init__(self, [str(x) for x in init_files], resources)
+
         self.empty_ok = empty_ok
         self.always_capture_output = always_capture_output
         self.stdout = "not captured"
@@ -2153,9 +2072,10 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         self.pid = None
         self.remove_build_dir_on_error = remove_build_dir_on_error
         self.remove_unused = remove_unused
-        # todo refactor
+        self.building = False
 
     def depends_on(self, *args, **kwargs):
+        # make sure that we throw away the _target_folder if the dependency list changes.
         if hasattr(self, "_target_folder"):
             delattr(self, "_target_folder")
         super().depends_on(*args, **kwargs)
@@ -2172,94 +2092,226 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 "Target folder is only available after a run (and disappears on .depends_on)"
             )
 
-    def run(self, runner, _historical_output):
-        output_name = self._derive_output_name(runner)
-        self._target_folder = self.output_dir_prefix / output_name
+    def run(self, runner, historical_output):
+        import socket
+        from . import global_pipegraph
 
-        if all((self._map_filename(fn).exists() for fn in self.org_files)):
-            log_trace(f"{self.job_id} -  all files existed - just hashing")
-            res = {
-                str(of): hashers.hash_file(self._map_filename(of))
-                for of in self.org_files
-            }
-        else:
-            import socket
+        by_input_key = self._derive_output_name(runner)
+        log_trace(f"{self.job_id} run input key {by_input_key}")
+        self._target_folder = self.input_dir / by_input_key
+        self._cleanup(runner)
+        ii = 0
+
+        fns = [self._map_filename(fn).absolute() for fn in self.org_files]
+        existing_files = [
+            self._map_filename(fn).absolute().exists() for fn in self.org_files
+        ]
+        symlink = self.input_dir / by_input_key
+        if all(existing_files):
+            log_trace(f"{self.output_dir_prefix} -  all files existed - just hashing")
+            self.files = [self._map_filename(fn) for fn in self.org_files]
+            mfg_res = None
+        elif not any(existing_files):
 
             log_trace(f"{self.job_id} - output files missing, building them")
             # temp replace for the actual run
             self._target_folder = (
-                self.output_dir_prefix
-                / f"build_{socket.gethostname()}_{os.getpid()}_{time.time()}"
+                self.build_dir / f"{socket.gethostname()}_{os.getpid()}_{time.time()}"
             )
             self._target_folder.mkdir(exist_ok=True, parents=True)
+            log_trace(
+                f"target folder during build {self._target_folder} {ii} {os.getpid()}"
+            )
+            ii += 1
+            self.building = True
             try:
-                res = MultiFileGeneratingJob.run(self, runner, _historical_output)
+                mfg_res = MultiFileGeneratingJob.run(self, runner, historical_output)
             except:  # noqa:E722
                 if self.remove_build_dir_on_error:
                     shutil.rmtree(self._target_folder)
                 raise
+            self.building = False
 
-            real_target = self.output_dir_prefix / output_name
+            # calculate output shash
+            output_key = self._hash_hashes(mfg_res, runner)
+            store_folder = self.output_dir / output_key
+
             if (
-                real_target.exists()
-            ):  # either a previous partial, or parallel build. -> clobber
-
+                store_folder.exists()
+            ):  # either a previous partial, or parallel build. let's keep that one
                 shutil.rmtree(
-                    real_target
+                    self._target_folder
                 )  # pragma: no cover - too much work to figure out how to trigger it
-            self._target_folder.rename(real_target)
-            self._target_folder = real_target
+            else:
+                self._target_folder.rename(store_folder)
+
+            try:
+                symlink.symlink_to(
+                    Path("..")
+                    / self.output_dir.relative_to(self.output_dir_prefix)
+                    / output_key,
+                )
+            except FileExistsError as e:  # existed, or race condition... symlink.exist()   is lying.
+                if not symlink.is_symlink():  # pragma: no cover
+                    # can only happen in race condition, other wise captured in output_needed
+                    # we really expect this to be a symlink to be a symlink,k?
+                    raise ValueError(
+                        f"{symlink.absolute()} was not a symlink. Fubared output directory."
+                    )
+                if symlink.resolve().absolute() != store_folder.absolute():
+                    raise exceptions.JobContractError(
+                        f"{self.job_id} created two different outputs from identical inputs. "
+                        "This is a violation of the concept of SharedMultiFileGeneratingJobs - the output must be 100% determined by the input"
+                    )
+            # weg get here, everything is peachy
+
+            self._target_folder = symlink  # so the downstream knows where to look
             self.files = [self._map_filename(fn) for fn in self.org_files]
-        self._log_and_cleanup(runner, output_name)
-        res[self._output_name_history_name] = {
-            "hash": output_name,
-            "size": len(self.files),
-            "mtime": 0,
-        }
+
+        else:
+            self._raise_partial_result_exception()
+        assert all([x.exists() for x in fns])  # paranioa...
+
+        # now log that we're the ones using this.
+        # our key is a hash of our history path.
+        abs_hd = str(global_pipegraph.get_history_filename().absolute())
+        usage_dir_hash = hashlib.sha512(abs_hd.encode("utf-8")).hexdigest()[:10]
+        log_trace(f"usage_dir_hash {usage_dir_hash}")
+        lookup_file = self.usage_dir / (usage_dir_hash + ".source")
+        lookup_text = abs_hd
+        if lookup_file.exists():
+            if lookup_file.read_text() != lookup_text:  # pragma: no cover
+                raise ValueError(
+                    "There was a output log directory collision. "
+                    "I really did not expect tha to happen with our sha512 hash. "
+                    "But it is possible. "
+                    "Rename your project dir / history file, I suppose?"
+                )
+        lookup_file.write_text(abs_hd)
+        used_symlink = self.usage_dir / (usage_dir_hash + ".uses")
+        target = (
+            Path("..")
+            / self.input_dir.relative_to(self.output_dir_prefix)
+            / by_input_key
+        )
+        try:
+            used_symlink.symlink_to(target)
+        except FileExistsError as e:  # existed, or race condition...
+            log_trace(f"unlinking symlink that already existed {used_symlink}")
+            used_symlink.unlink()
+            used_symlink.symlink_to(target)
+
+        # log_error(f"{used_symlink.resolve().absolute()} {symlink.resolve().absolute()}")
+        assert used_symlink.resolve().absolute() == symlink.resolve().absolute()
+        log_trace(f"output symlink {symlink}")
+        # now let's apply the same logic we use in MultiFileGeneratingJobs.
+        # same mtime, same size as the last time we saw this
+        # no calcualting the hash again.
+        # even if we're getting triggered and triggered by a JobGeneratingJob...
+        # (which we ignore in input, by virtuo of extract_strict_hash being constant)
+        res = {}
+        for of in self.org_files:
+            if mfg_res:
+                res[str(of)] = mfg_res[str(of)]
+            else:
+                h = None
+                of_on_disk = self._map_filename(of)
+                if str(of) in historical_output:
+                    stat = of_on_disk.stat()
+                    hist = historical_output.get(str(of))
+                    if (
+                        hist is not None
+                        and hist["mtime"] == int(stat.st_mtime)
+                        and hist["size"] == stat.st_size
+                    ):
+                        h = hist
+                if h is None:
+                    h = hashers.hash_file(of_on_disk)
+                res[str(of)] = h
+
+        res[str(self.output_dir_prefix)] = {
+            "hash": by_input_key,
+            "size": 0,
+            "mtime": time.time(),
+        }  # so we can detect if the target changed
         return res
+
+    def _raise_partial_result_exception(self):
+        raise exceptions.JobContractError(
+            f"{self.job_id} some result files existed, some didn't. "
+            "In the normal operation of SharedMultiFileGeneratingJob this is impossible."
+            " This means your callback is not deterministic "
+            ", ie your input does not define your output "
+            "or something has gone terribly wrong in an unforseen way. "
+            "for example, files were deleted from an output folder"
+        )
 
     def _map_filename(self, filename):
         parts = filename.parts
-        if not hasattr(self, "_target_folder"):
-            tf = "__never_placed_here__"
-        else:
-            tf = self._target_folder.name
-        parts = [tf if x == "__never_placed_here__" else x for x in parts]
-        return Path(*parts)
+        # if not hasattr(self, "_target_folder"):
+        # tf = "__never_placed_here__"
+        # else:
+        tf = self.target_folder.name
+        out_parts = []
+        for x in parts:
+            if x == "__never_placed_here__":
+                if self.building:
+                    out_parts.append("build")
+                else:
+                    out_parts.append("by_input")
+                out_parts.append(tf)
+            else:
+                out_parts.append(x)
+
+        return Path(*out_parts)
 
     def get_input(self):  # todo: fold in?
         # if self._single_file:
         # return self._map_filename(self.files[0])
         # else:
         if self._lookup:
-            return ({k: self._map_filename(f) for (k, f) in self._lookup.items()}, self.target_folder)
+            return (
+                {k: self._map_filename(f) for (k, f) in self._lookup.items()},
+                self.target_folder,
+            )
         else:
             return ([self._map_filename(f) for f in self.files], self.target_folder)
 
     def output_needed(self, runner):
-        output_name = self._derive_output_name(runner)
-        self._target_folder = self.output_dir_prefix / output_name
+
+        if runner.job_states[self.job_id].validation_state == ValidationState.Unknown:
+            log_trace("output needed = False because invalidated not done")
+            return False
+        log_trace(
+            f"{self.job_id} invalidation state {runner.job_states[self.job_id].validation_state}"
+        )
+        by_input_name = self._derive_output_name(runner)
+        self._target_folder = self.input_dir / by_input_name
         if not self._target_folder.exists():
+            log_trace(f"target folder did not exist {self._target_folder}")
             return True
+
+        if not self._target_folder.is_symlink():
+            raise exceptions.JobEvaluationFailed(
+                f"The target folder was no symlink {self._target_folder}"
+            )
         for fn in self.org_files:
             if not self._map_filename(fn).exists():  # pragma: no cover
                 # this case is unlikely ( same hash, but additional outputfiles?)
                 # but it could happen...
-                return True
+                self._raise_partial_result_exception()
             if (
                 str(fn) not in runner.job_states[self.job_id].historical_output
             ):  # we must record the hashes
+                log_trace("hash did not exist")
                 return True
-            else:  # we have a hash... but our inputs may have changed us to a different folder
-                # so we need to verify this.
-                if (
-                    runner.job_states[self.job_id]
-                    .historical_output.get(self._output_name_history_name, {})
-                    .get("hash", None)
-                    != output_name
-                ):
-                    return True
+            # else:
+            # we have a hash... but our inputs may have changed us to a new target folder
+            # but only if they changed. which is handled by invalidation
+            # so we can safely ignore this case
+            # pass # pragma: no cover
 
+        log_trace("output needed = False")
         return False
 
     def _call_result(self):
@@ -2269,41 +2321,92 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             return [self._map_filename(f) for f in self.files]
 
     def _derive_output_name(self, runner):
+        """Given the set of inputs, get as the key for by_input"""
+        if (
+            runner.job_states[self.job_id].validation_state == ValidationState.Unknown
+        ):  # pragma: no cover
+            raise ValueError(
+                "deriving output name on SharedMultiFileGeneratingJob "
+                "before all parent hashes are available is impossible"
+            )
+
         input_names = runner.job_inputs[self.job_id]
         if not input_names:
-            return "done_no_input"
+            return "no_input"
         actual_input = runner.job_states[self.job_id].updated_input
+        return self._hash_hashes(actual_input, runner)
+
+    def extract_strict_hash(self, a_hash) -> bytes:
+        return a_hash["hash"].encode("utf-8")
+
+    def _hash_hashes(self, hashes, runner):
+        """The problem at this point is that the hashes
+        are not strictly what-the-input-depends-on
+        but also things we use to
+        omit recalculating (expensive) hashes if possible,
+        e.g. size/mtime for FileInvariants or
+        per-python-version-bytecodes for FunctionInvariants.
+
+        We have to extract just the relevant data,
+        and for that we need to lookup the actual jobs.
+        """
         hasher = hashlib.sha512()
-        for (key, value) in sorted(actual_input.items()):
+        for (key, value) in sorted(hashes.items()):
+            job_id = runner.job_graph.outputs_to_job_ids[key]
+            job = runner.jobs[job_id]
+            if isinstance(job, SharedMultiFileGeneratingJob) and key == str(
+                job.output_dir_prefix
+            ):
+                continue
             hasher.update(key.encode("utf-8"))
-            hasher.update(str(ParameterInvariant.freeze(value)).encode("utf-8"))
-        output_name = "done_" + hasher.hexdigest()
-        return output_name
+            hasher.update(job.extract_strict_hash(value))
+        return hasher.hexdigest()[:10]
 
-    def _log_and_cleanup(self, runner, output_name):
-        history_filename = runner.job_graph.get_history_filename().absolute()
-        log_filename = self.output_dir_prefix / ".ppgs_using_this"
-        known = {}
-        # todo: this should get some kind of locking?
-        if log_filename.exists():
-            with open(log_filename) as op:
-                known = json.load(op)
-        log_trace(f"setting {history_filename} {output_name}")
-        known[str(history_filename)] = output_name
-        with open(log_filename, "w") as op:
-            json.dump(known, op)
-
+    def _cleanup(self, runner):
+        """Remove outputs / symlinks that have no longer entries in the used folder"""
         if self.remove_unused:
-            keep = set(known.values())
-            log_trace("Removing - keep {keep}")
-            remove = [
-                x
-                for x in self.output_dir_prefix.glob("*")
-                if x.name.startswith("done_") and x.is_dir() and not x.name in keep
-            ]
-            for dir in remove:
-                log_trace(f"Identified {dir} as no longer in use by any PPG. Removing")
-                shutil.rmtree(dir)
+            used_symlinks = set()
+            used_outputs = set()
+            for fn in self.usage_dir.glob("*.uses"):
+                symlink = Path(os.readlink(fn))
+                used_symlinks.add(symlink.name)
+                target = Path(os.readlink(self.input_dir / symlink))
+                used_outputs.add(target.name)
 
+            log_error(f"symlinks {used_symlinks}")
+            log_error(f"outputs {used_outputs}")
+            for fn in self.input_dir.glob("*"):
+                if fn.name not in used_symlinks:
+                    log_error(f"unlink fn {fn}")
+                    fn.unlink()
 
-[1, 2, 3]
+            for fn in self.output_dir.glob("*"):
+                if fn.name not in used_outputs:
+                    log_trace(
+                        f"Identified {fn} as no longer in use by any PPG. Removing"
+                    )
+                    log_error(f"rmtree fn {fn}")
+                    shutil.rmtree(fn)
+
+    def find_file(self, output_filename):
+        "Search for a file named output_filename in the job's known created files"
+        return self[output_filename]
+
+    def __getitem__(self, key):
+        if not self._lookup:
+            if isinstance(key, int):
+                return self._map_filename(self.org_files[key])
+            else:
+                for org_fn in self.org_files:
+                    fn = str(org_fn)
+                    fn = fn[
+                        fn.find("__never_placed_here__/")
+                        + len("__never_placed_here__/") :
+                    ]
+                    if fn == key:
+                        return self._map_filename(org_fn)
+                else:
+                    raise KeyError(
+                        f"Could not find {key} in {self.job_id}. Available {self.org_files}"
+                    )
+        return self._map_filename(self._lookup[key])
