@@ -26,9 +26,6 @@ class JobStatus:
         # )
         # self._validation_state = ValidationState.Validated
         self.should_run = ShouldRun.Maybe
-        self.input_done_counter = 0
-        self.upstreams_completed = False
-        self.run_non_invalidated = False
         self.historical_input = historical_input
         self.historical_output = historical_output
         self.updated_input = {}
@@ -51,7 +48,7 @@ class JobStatus:
         log_job_trace(f"{self.job_id} set state. Was {self._state}, becomes {value}")
         if self._state.is_terminal():  # pragma: no cover
             log_job_trace(f"{self.job_id} Can't undo or set again a terminal state")
-            raise ValueError("Can't undo or set again a terminal state")
+            raise ValueError(f"Can't undo or set again a terminal state Was {self.state}, becomes {value}")
         self._state = value
         # if value.is_terminal(): # this is always true
         self.job_became_terminal()
@@ -63,7 +60,7 @@ class JobStatus:
 
     def __repr__(self):
         if self.state is JobState.UpstreamFailed:  # pragma: no cover
-            return f"JobStatus({self.state} - {self.error})"
+            return f"JobStatus({self.job_id} {self.state} - {self.error})"
         return f"JobStatus({self.state})"
 
     @property
@@ -303,18 +300,19 @@ class JobStatus:
                     self.job_id,
                     self.updated_output,
                 )
-                try:
-                    ds.update_should_run()
-                except Exception as e:
-                    self.runner._push_event(
-                        "JobFailed",
-                        (
-                            ds.job_id,
-                            exceptions.JobEvaluationFailed(
-                                "Update should run had an exception", e
+                if not ds.state.is_terminal():
+                    try:
+                        ds.update_should_run()
+                    except Exception as e:
+                        self.runner._push_event(
+                            "JobFailed",
+                            (
+                                ds.job_id,
+                                exceptions.JobEvaluationFailed(
+                                    "Update should run had an exception", e
+                                ),
                             ),
-                        ),
-                    ) # which will in turn upstream fail all downstreams
+                        ) # which will in turn upstream fail all downstreams
 
                 # log_job_trace("run_now in update_should_run")
                 # ds.run_now_if_ready()
@@ -356,7 +354,7 @@ class JobStatus:
         log_job_trace(f"{self.job_id} upstream failed {msg}")
         if self.state != JobState.UpstreamFailed:
             self.error = msg
-            self.invalidation_state = ValidationState.UpstreamFailed
+            self.validation_state = ValidationState.UpstreamFailed
             self.state = JobState.UpstreamFailed
             self.runner._push_event(
                 "JobUpstreamFailed", (self.job_id,)
@@ -406,6 +404,9 @@ class JobStatus:
         if self.job.job_kind == JobKind.Cleanup:
             return False
         if self.all_upstreams_terminal_or_conditional():
+            if self.validation_state == ValidationState.UpstreamFailed:
+                return False
+                
             invalidated = self._consider_invalidation()
             log_job_trace(
                 f"{self.job_id} - invalidation considered. Result: {invalidated}"

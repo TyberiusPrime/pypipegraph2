@@ -24,10 +24,10 @@ from rich.console import Console
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
-if "pytest" in sys.modules:  # pragma: no branch
-    log_out = sys.stderr
-else:  # pragma: no cover
-    log_out = RichHandler(markup=True, console=console)
+#if "pytest" in sys.modules:  # pragma: no branch
+    #log_out = sys.stderr
+#else:  # pragma: no cover
+    #log_out = RichHandler(markup=True, console=console)
 #logger.add(
     #sink=log_out,
     #format="{elapsed} {message}",

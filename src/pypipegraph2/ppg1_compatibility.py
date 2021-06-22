@@ -1,5 +1,4 @@
 from pathlib import Path
-import warnings
 import types
 import inspect
 import os

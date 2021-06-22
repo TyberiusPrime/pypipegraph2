@@ -167,7 +167,6 @@ class Runner:
     def _add_cleanup(self, dag, job):
         cleanup_job = job.cleanup_job_class(job)
         cleanup_job.job_number = len(self.jobs)
-        job._cleanup_job_id = cleanup_job.job_id
         self.jobs[cleanup_job.job_id] = cleanup_job
         dag.add_node(cleanup_job.job_id)
         log_trace(f"creating cleanup {cleanup_job.job_id}")
@@ -306,7 +305,6 @@ class Runner:
         )
         self.last_job_states = last_job_states
 
-        job_ids_topological = list(networkx.algorithms.dag.topological_sort(self.dag))
         self.events = queue.Queue()
 
         todo = len(self.dag)

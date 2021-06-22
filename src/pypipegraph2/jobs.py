@@ -1387,7 +1387,7 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         return True
 
     def run(self, _runner, historical_output):
-        self.did_hash_last_run = False
+        self.did_hash_last_run = False # for testing.
         if not self.file.exists():
             raise FileNotFoundError(f"{self.file} did not exist")
         stat = self.file.stat()
@@ -2388,7 +2388,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                     log_error(f"rmtree fn {fn}")
                     shutil.rmtree(fn)
 
-    def find_file(self, output_filename):
+    def find_file(self, output_filename): # for compability with ppg1.
         "Search for a file named output_filename in the job's known created files"
         return self[output_filename]
 

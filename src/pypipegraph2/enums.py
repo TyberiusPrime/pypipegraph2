@@ -17,13 +17,6 @@ class JobState(Enum):
             JobState.UpstreamFailed,
         )
 
-    def is_failed(self):
-        return self in (
-            JobState.Failed,
-            JobState.UpstreamFailed,
-        )
-
-
 class ShouldRun(Enum):
     Maybe = auto()
     Yes = auto()
