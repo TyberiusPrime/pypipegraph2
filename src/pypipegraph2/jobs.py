@@ -16,6 +16,7 @@ from typing import Union, List, Dict, Optional, Tuple, Callable
 from pathlib import Path
 from io import StringIO
 from collections import namedtuple
+from threading import Lock
 
 from . import hashers, exceptions, ppg_traceback
 from .enums import JobKind, Resources, ValidationState
@@ -317,6 +318,14 @@ class Job:
         else:  # pragma: no cover - defensive
             raise ValueError("No stacktrace available")
 
+    @property
+    def upstreams(self):
+        """Return a list of jobs that are directly upstream of this one by querying the 
+        global pipegraph"""
+        from . import global_pipegraph
+        gg = global_pipegraph
+        return [gg.jobs[job_id] for job_id in gg.job_dag.predecessors(self.job_id)]
+
 
 class MultiFileGeneratingJob(Job):
     job_kind = JobKind.Output
@@ -415,7 +424,7 @@ class MultiFileGeneratingJob(Job):
         self.files = [self._map_filename(fn) for fn in self.org_files]
         for fn in self.files:  # we rebuild anyway!
             if fn.exists():
-                log_error(f"unlinking {fn}")
+                log_trace(f"unlinking {fn}")
                 fn.unlink()
         input = self.get_input()
         if self.resources in (
@@ -789,7 +798,7 @@ class _FileCleanupJob(Job):
     def run(self, _ignored_runner, _historical_output):
         for fn in self.parent_job.files:
             if fn.exists():
-                log_error(f"unlinking {fn}")
+                log_trace(f"unlinking {fn}")
                 fn.unlink()
 
         return {self.outputs[0]: None}  # todo: optimize this awy?
@@ -2009,6 +2018,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
     cleans up no longer used outputs / symlinks.
 
     """
+    _log_local_lock = Lock()
+    log_filename = 'SharedMultiFileGeneratingJobs.json'
 
     def __new__(cls, output_dir_prefix, files, *_args, **_kwargs):
         output_dir_prefix = Path(output_dir_prefix)
@@ -2233,7 +2244,23 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         }  # so we can detect if the target changed
 
         self._cleanup(runner)
+        self._log_local_usage(by_input_key)
         return res
+
+    def _log_local_usage(self, key):
+        """Write the input key we used to a log file,
+        so that non-ppg-interactive stuff may read it back
+        and find the files"""
+        from . import global_pipegraph
+        fn = global_pipegraph.history_dir / SharedMultiFileGeneratingJob.log_filename
+        with SharedMultiFileGeneratingJob._log_local_lock:
+            if fn.exists():
+                keys = json.loads(fn.read_text())
+            else:
+                keys = {}
+            keys[str(self.output_dir_prefix)] = key
+            fn.write_text(json.dumps(keys))
+
 
     def _raise_partial_result_exception(self):
         raise exceptions.JobContractError(
@@ -2372,24 +2399,24 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 target = Path(os.readlink(self.input_dir / symlink))
                 used_outputs.add(target.name)
 
-            log_error(f"symlinks {used_symlinks}")
-            log_error(f"outputs {used_outputs}")
+            log_trace(f"symlinks {used_symlinks}")
+            log_trace(f"outputs {used_outputs}")
             for fn in self.input_dir.glob("*"):
                 if fn.name not in used_symlinks:
-                    log_error(f"unlink fn {fn}")
+                    log_trace(f"unlink fn {fn}")
                     fn.unlink()
                 else:
-                    log_error(f"keeping fn {fn}")
+                    log_trace(f"keeping fn {fn}")
 
             for fn in self.output_dir.glob("*"):
                 if fn.name not in used_outputs:
                     log_trace(
                         f"Identified {fn} as no longer in use by any PPG. Removing"
                     )
-                    log_error(f"rmtree fn {fn}")
+                    log_trace(f"rmtree fn {fn}")
                     shutil.rmtree(fn)
                 else:
-                    log_error(f"keeping fn {fn}")
+                    log_trace(f"keeping fn {fn}")
 
     def find_file(self, output_filename): # for compability with ppg1.
         "Search for a file named output_filename in the job's known created files"

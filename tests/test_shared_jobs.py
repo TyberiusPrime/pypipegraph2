@@ -615,3 +615,65 @@ class TestSharedJob:
         job.depends_on(ppg.ParameterInvariant("d", "d"))
         ppg.run()
         assert len(list(Path("out/done").glob("*"))) == 1
+
+
+    def test_local_log_usage(self):
+        def load():
+            import json
+            fn = ppg.global_pipegraph.history_dir / ppg.SharedMultiFileGeneratingJob.log_filename
+            return json.loads(fn.read_text())
+
+        def doit(output_files, prefix):
+            count = str(counter("doit"))
+            for f in output_files:
+                f.write_text(f.name + count)
+        job = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit, remove_unused=False)
+        ppg.run()
+        known = load()
+        assert (Path('out/by_input' ) / known[str(job.output_dir_prefix)] / 'a').read_text() == 'a0'
+        job.depends_on_params('shu')
+        ppg.run()
+        known2 = load()
+        assert (Path('out/by_input' ) / known2[str(job.output_dir_prefix)] / 'a').read_text() == 'a1'
+        assert known != known2
+
+    def test_more_files(self):
+        def doit(output_files, prefix):
+            count = str(counter("doit"))
+            for f in output_files:
+                f.write_text(f.name + count)
+
+        a = ppg.SharedMultiFileGeneratingJob('out', ['a'], doit)
+        ppg.run()
+        assert a['a'].read_text() == 'a0'
+        assert Path('doit').read_text() == '1'
+        ppg.run()
+        assert a['a'].read_text() == 'a0'
+        assert Path('doit').read_text() == '1'
+        ppg.new()
+        a = ppg.SharedMultiFileGeneratingJob('out', ['a','b'], doit)
+        ppg.run()
+        assert Path('doit').read_text() == '2'
+        assert a['a'].read_text() == 'a1'
+        assert a['b'].read_text() == 'b1'
+        ppg.run()
+        assert Path('doit').read_text() == '2'
+        assert a['a'].read_text() == 'a1'
+        assert a['b'].read_text() == 'b1'
+
+        ppg.new()
+        a = ppg.SharedMultiFileGeneratingJob('out', ['b'], doit)
+        ppg.run()
+        assert Path('doit').read_text() == '3'
+        assert a['b'].read_text() == 'b2'
+
+
+    def test_same_output_dir_multple_jobs(self):
+        def doit(output_files, prefix):
+            count = str(counter("doit"))
+            for f in output_files:
+                f.write_text(f.name + count)
+        a = ppg.SharedMultiFileGeneratingJob('out', ['a'], doit)
+        with pytest.raises(ppg.JobOutputConflict):
+            b = ppg.SharedMultiFileGeneratingJob('out', ['b'], doit)
+

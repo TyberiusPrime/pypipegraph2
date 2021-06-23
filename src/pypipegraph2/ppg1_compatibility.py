@@ -351,8 +351,7 @@ class PPG1AdaptorBase:
 
     @property
     def prerequisites(self):
-        gg = ppg2.global_pipegraph
-        return [gg.jobs[job_id] for job_id in gg.job_dag.predecessors(self.job_id)]
+        return self.upstreams
 
 
 class PPG1Adaptor(wrapt.ObjectProxy, PPG1AdaptorBase):
