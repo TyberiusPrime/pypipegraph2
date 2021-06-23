@@ -2099,8 +2099,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         by_input_key = self._derive_output_name(runner)
         log_trace(f"{self.job_id} run input key {by_input_key}")
         self._target_folder = self.input_dir / by_input_key
-        self._cleanup(runner)
-        ii = 0
 
         fns = [self._map_filename(fn).absolute() for fn in self.org_files]
         existing_files = [
@@ -2120,9 +2118,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             )
             self._target_folder.mkdir(exist_ok=True, parents=True)
             log_trace(
-                f"target folder during build {self._target_folder} {ii} {os.getpid()}"
+                f"target folder during build {self._target_folder} {os.getpid()}"
             )
-            ii += 1
             self.building = True
             try:
                 mfg_res = MultiFileGeneratingJob.run(self, runner, historical_output)
@@ -2234,6 +2231,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             "size": 0,
             "mtime": time.time(),
         }  # so we can detect if the target changed
+
+        self._cleanup(runner)
         return res
 
     def _raise_partial_result_exception(self):
@@ -2379,6 +2378,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 if fn.name not in used_symlinks:
                     log_error(f"unlink fn {fn}")
                     fn.unlink()
+                else:
+                    log_error(f"keeping fn {fn}")
 
             for fn in self.output_dir.glob("*"):
                 if fn.name not in used_outputs:
@@ -2387,6 +2388,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                     )
                     log_error(f"rmtree fn {fn}")
                     shutil.rmtree(fn)
+                else:
+                    log_error(f"keeping fn {fn}")
 
     def find_file(self, output_filename): # for compability with ppg1.
         "Search for a file named output_filename in the job's known created files"

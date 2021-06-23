@@ -592,3 +592,26 @@ class TestSharedJob:
         # It just doesn't do the rebild
 
         # attribute loadin gjob, dataloadingjob, FileInvariant, MultiFileGeneratingJob
+
+    def test_cleanup_multiple(self):
+        def doit(output_files, prefix):
+            count = str(counter("doit"))
+            for f in output_files:
+                f.write_text(f.name + count)
+
+        job = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit, remove_unused=False)
+        ppg.run()
+        job.depends_on(ppg.ParameterInvariant("b", "b"))
+        ppg.run()
+        job.depends_on(ppg.ParameterInvariant("c", "c"))
+        ppg.run()
+        assert len(list(Path("out/done").glob("*"))) == 3
+        ppg.new()
+        job = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit, remove_unused=True)
+        job.depends_on(ppg.ParameterInvariant("b", "b"))
+        job.depends_on(ppg.ParameterInvariant("c", "c"))
+        ppg.run() # job does not run
+        assert len(list(Path("out/done").glob("*"))) == 3
+        job.depends_on(ppg.ParameterInvariant("d", "d"))
+        ppg.run()
+        assert len(list(Path("out/done").glob("*"))) == 1
