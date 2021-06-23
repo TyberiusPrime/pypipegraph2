@@ -1093,6 +1093,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                         xc = x.cell_contents
                         in_a += f"\t{id(xc)} {type(xc) }{_safe_str(xc)[:20]}\n"
                     for x in b.__closure__:
+                        xc = x.cell_contents
                         in_b += f"\t{id(xc)} {type(xc)} {_safe_str(xc)[:20]}\n"
                     return f"The function closures differed. Differences: \n{in_a} \n {in_b}"
                 else:
@@ -2386,7 +2387,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 continue
             hasher.update(key.encode("utf-8"))
             hasher.update(job.extract_strict_hash(value))
-        return hasher.hexdigest()[:10]
+        return hasher.hexdigest()
 
     def _cleanup(self, runner):
         """Remove outputs / symlinks that have no longer entries in the used folder"""
