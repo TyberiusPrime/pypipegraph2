@@ -87,3 +87,12 @@ class TestcompatibilityLayerMore:
         b.depends_on(a)
         assert list(b.prerequisites) == [a]
 
+    def test_depends_on_file_param_returns_wrapped(self):
+        a = ppg1.FileGeneratingJob('a', lambda of: counter(of))
+        Path('input').write_text('hello')
+        b = a.depends_on_file('input').invariant
+        assert isinstance(b, ppg2.ppg1_compatibility.FileInvariant)
+        c = a.depends_on_params('shu').invariant
+        assert isinstance(c, ppg2.ppg1_compatibility.ParameterInvariant)
+
+
