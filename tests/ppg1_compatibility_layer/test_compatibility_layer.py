@@ -79,7 +79,6 @@ class TestcompatibilityLayerMore:
         with pytest.raises(NotImplementedError):
             ppg1.MemMappedDataLoadingJob()
 
-
     def test_predecessors(self):
         a = ppg1.TempFileGeneratingJob("A", lambda: 55)
         b = ppg1.TempFileGeneratingJob("b", lambda of: 55)
@@ -88,11 +87,45 @@ class TestcompatibilityLayerMore:
         assert list(b.prerequisites) == [a]
 
     def test_depends_on_file_param_returns_wrapped(self):
-        a = ppg1.FileGeneratingJob('a', lambda of: counter(of))
-        Path('input').write_text('hello')
-        b = a.depends_on_file('input').invariant
+        a = ppg1.FileGeneratingJob("a", lambda of: counter(of))
+        Path("input").write_text("hello")
+        b = a.depends_on_file("input").invariant
         assert isinstance(b, ppg2.ppg1_compatibility.FileInvariant)
-        c = a.depends_on_params('shu').invariant
+        c = a.depends_on_params("shu").invariant
         assert isinstance(c, ppg2.ppg1_compatibility.ParameterInvariant)
 
+    def test_callback_adaption_with_default_parameters(self):
+        def no_args():
+            pass
 
+        def all_default_args(a=123, b=234):
+            pass
+
+        def new_style(of, a=123, b=234):
+            pass
+
+        a = ppg1.FileGeneratingJob("a", no_args)
+        assert hasattr(
+            a.generating_function, "wrapped_function"
+        )  # is a wrapped function
+        b = ppg1.FileGeneratingJob("b", new_style)
+        assert not hasattr(
+            b.generating_function, "wrapped_function"
+        )  # is a wrapped function
+        with pytest.raises(TypeError):
+            c = ppg1.FileGeneratingJob("c", all_default_args)
+        ppg1.new_pipegraph()
+        a = ppg1.MultiFileGeneratingJob(["a"], no_args)
+        assert hasattr(
+            a.generating_function, "wrapped_function"
+        )  # is a wrapped function
+        b = ppg1.MultiFileGeneratingJob(["b"], new_style)
+        assert not hasattr(
+            b.generating_function, "wrapped_function"
+        )  # is a wrapped function
+        c = ppg1.MultiFileGeneratingJob(
+            ["c"], all_default_args
+        )  # mfg never passed [output_files]
+        assert hasattr(
+            a.generating_function, "wrapped_function"
+        )  # is a wrapped function

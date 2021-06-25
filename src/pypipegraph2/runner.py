@@ -563,8 +563,15 @@ class Runner:
                     else:
                         ef.write(str(job_state.error))
                         ef.write("no stack available")
+                    ef.write("\n\n")
+                    ef.write("job stdout:\n")
+                    ef.write(job.stdout)
+                    ef.write("\n\n")
+                    ef.write("job stderr:\n")
+                    ef.write(job.stderr)
+
                 log(
-                    f"Failed after {job_state.run_time:.2}s: [bold]{job_id}[/bold]. Exception (incl. locals) logged to {error_file}"
+                    f"Failed after {job_state.run_time:.2}s: [bold]{job_id}[/bold]. Exception (incl. locals, stdout and stderr) logged to {error_file}"
                 )
             else:
                 log(f"Failed job: {job_id}")

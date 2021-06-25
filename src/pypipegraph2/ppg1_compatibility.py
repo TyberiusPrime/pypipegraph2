@@ -385,9 +385,26 @@ def assert_ppg_created():
         raise ValueError("Must instantiate a pipegraph before creating any Jobs")
 
 
-def _wrap_func_if_no_output_file_params(function):
+def _first_param_empty(signature):
+    """Check whether the first argument to this call is
+    empty, ie. no with a default value"""
+    try:
+        first = next((signature.parameters.items()).__iter__())
+        return first[1].default == inspect._empty
+    except StopIteration:
+        return True
+
+
+def _wrap_func_if_no_output_file_params(function, accept_all_defaults=False):
     sig = inspect.signature(function)
-    if len(sig.parameters) == 0:
+    if len(sig.parameters) == 0 or not _first_param_empty(sig):
+        # no or only default parameters = do it oldstyle.
+        if not accept_all_defaults and not _first_param_empty(sig):
+            raise TypeError(
+                f"Could not correctly wrap {function}, "
+                "it has default parameter that would have been replaced"
+                "with output_filename in ppg1 already. Fix your function arguments"
+            )
 
         def wrapper(of):  # pragma: no cover - runs in spawned process
             function()
@@ -424,7 +441,7 @@ class FileGeneratingJob(PPG1AdaptorBase, ppg2.FileGeneratingJob):
 
 class MultiFileGeneratingJob(PPG1AdaptorBase, ppg2.MultiFileGeneratingJob):
     def __init__(self, output_filenames, function, rename_broken=False, empty_ok=False):
-        func = _wrap_func_if_no_output_file_params(function)
+        func = _wrap_func_if_no_output_file_params(function, accept_all_defaults=True)
         res = super().__init__(output_filenames, func, empty_ok=empty_ok)
 
 
@@ -436,7 +453,7 @@ class TempFileGeneratingJob(PPG1AdaptorBase, ppg2.TempFileGeneratingJob):
 
 class MultiTempFileGeneratingJob(PPG1AdaptorBase, ppg2.MultiTempFileGeneratingJob):
     def __init__(self, output_filenames, function, rename_broken=False):
-        func = _wrap_func_if_no_output_file_params(function)
+        func = _wrap_func_if_no_output_file_params(function, accept_all_defaults=True)
         super().__init__(output_filenames, func)
 
 
