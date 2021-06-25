@@ -64,11 +64,21 @@ def _mark_function_wrapped(outer, inner, desc="callback"):
     return outer
 
 
-def _safe_str(x): # pragma: no cover
+def _safe_str(x):  # pragma: no cover
     try:
         return str(x)
     except:  # noqa:E722
         return "could not str(x)"
+
+
+class JobList(list):
+    """Jobs.depends_on already takes any iterable of jobs.
+    But sometimes you want to say [jobs,...].depends_on,
+    and this allows that"""
+
+    def depends_on(self, *args, **kwargs):
+        for job in self:
+            job.depends_on(*args, **kwargs)
 
 
 class Job:
@@ -238,7 +248,7 @@ class Job:
         Note that we call this with only a single output hash.
 
         """
-        raise NotImplementedError() # pragma: no cover
+        raise NotImplementedError()  # pragma: no cover
 
     def depends_on_func(self, function, name=None):
         """Create a function invariant.
@@ -320,9 +330,10 @@ class Job:
 
     @property
     def upstreams(self):
-        """Return a list of jobs that are directly upstream of this one by querying the 
+        """Return a list of jobs that are directly upstream of this one by querying the
         global pipegraph"""
         from . import global_pipegraph
+
         gg = global_pipegraph
         return [gg.jobs[job_id] for job_id in gg.job_dag.predecessors(self.job_id)]
 
@@ -419,6 +430,10 @@ class MultiFileGeneratingJob(Job):
         super().readd()
         if self.depend_on_function:
             self._handle_function_dependency(self.generating_function)
+
+    def callback(self):
+        self.generating_function(*self.get_input())
+
 
     def run(self, runner, _historical_output):  # noqa:C901
         self.files = [self._map_filename(fn) for fn in self.org_files]
@@ -1089,13 +1104,26 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                 elif not (a.__closure__ == b.__closure__):
                     in_a = "in A:\n"
                     in_b = "in B:\n"
+                    set_a = set()
+                    set_b = set()
                     for x in a.__closure__:
                         xc = x.cell_contents
-                        in_a += f"\t{id(xc)} {type(xc) }{_safe_str(xc)[:20]}\n"
+                        in_a += f"\t{id(xc)} {type(xc) }{_safe_str(xc)[:40]}\n"
+                        try:
+                            set_a.add(xc)
+                        except:
+                            pass
                     for x in b.__closure__:
                         xc = x.cell_contents
-                        in_b += f"\t{id(xc)} {type(xc)} {_safe_str(xc)[:20]}\n"
-                    return f"The function closures differed. Differences: \n{in_a} \n {in_b}"
+                        in_b += f"\t{id(xc)} {type(xc)} {_safe_str(xc)[:40]}\n"
+                        try:
+                            set_b.add(xc)
+                        except:
+                            pass
+                    only_in_a = sorted(_safe_str(xc) for xc in set_a.difference(set_b))
+                    only_in_b = sorted(_safe_str(xc) for xc in set_b.difference(set_a))
+
+                    return f"The function closures differed. Contents:: \n{in_a} \n {in_b}\n Only in a {only_in_a}\nOnly in b {only_in_b}"
                 else:
                     return "The functions were identical"
             else:
@@ -1397,7 +1425,7 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         return True
 
     def run(self, _runner, historical_output):
-        self.did_hash_last_run = False # for testing.
+        self.did_hash_last_run = False  # for testing.
         if not self.file.exists():
             raise FileNotFoundError(f"{self.file} did not exist")
         stat = self.file.stat()
@@ -1426,7 +1454,7 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         return new_hash["hash"] == old_hash.get("hash", "")
 
     def extract_strict_hash(self, a_hash) -> bytes:
-        return a_hash["hash"].encode('utf-8')
+        return a_hash["hash"].encode("utf-8")
 
 
 class ParameterInvariant(_InvariantMixin, Job):
@@ -1510,7 +1538,7 @@ def _hash_object(obj):
         # todo: these do not get salted. at least up to 3.8..
         # todo: probably would be better to choose something deterministic...
         # but also lot of work.
-        my_hash = str(hash(obj)) # since the others are also strings.
+        my_hash = str(hash(obj))  # since the others are also strings.
     elif isinstance(obj, ValuePlusHash):
         my_hash = obj.hexdigest
         obj = obj.value
@@ -2019,8 +2047,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
     cleans up no longer used outputs / symlinks.
 
     """
+
     _log_local_lock = Lock()
-    log_filename = 'SharedMultiFileGeneratingJobs.json'
+    log_filename = "SharedMultiFileGeneratingJobs.json"
 
     def __new__(cls, output_dir_prefix, files, *_args, **_kwargs):
         output_dir_prefix = Path(output_dir_prefix)
@@ -2090,7 +2119,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         # make sure that we throw away the _target_folder if the dependency list changes.
         if hasattr(self, "_target_folder"):
             delattr(self, "_target_folder")
-        super().depends_on(*args, **kwargs)
+        return super().depends_on(*args, **kwargs)
 
     @property
     def target_folder(self):
@@ -2129,9 +2158,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 self.build_dir / f"{socket.gethostname()}_{os.getpid()}_{time.time()}"
             )
             self._target_folder.mkdir(exist_ok=True, parents=True)
-            log_trace(
-                f"target folder during build {self._target_folder} {os.getpid()}"
-            )
+            log_trace(f"target folder during build {self._target_folder} {os.getpid()}")
             self.building = True
             try:
                 mfg_res = MultiFileGeneratingJob.run(self, runner, historical_output)
@@ -2253,6 +2280,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         so that non-ppg-interactive stuff may read it back
         and find the files"""
         from . import global_pipegraph
+
         fn = global_pipegraph.history_dir / SharedMultiFileGeneratingJob.log_filename
         with SharedMultiFileGeneratingJob._log_local_lock:
             if fn.exists():
@@ -2261,7 +2289,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 keys = {}
             keys[str(self.output_dir_prefix)] = key
             fn.write_text(json.dumps(keys))
-
 
     def _raise_partial_result_exception(self):
         raise exceptions.JobContractError(
@@ -2419,7 +2446,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                 else:
                     log_trace(f"keeping fn {fn}")
 
-    def find_file(self, output_filename): # for compability with ppg1.
+    def find_file(self, output_filename):  # for compability with ppg1.
         "Search for a file named output_filename in the job's known created files"
         return self[output_filename]
 
@@ -2437,7 +2464,11 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                     if fn == key:
                         return self._map_filename(org_fn)
                 else:
+                    search = [fn[
+                        fn.find("__never_placed_here__/")
+                        + len("__never_placed_here__/") :
+                    ] for fn in [str(fn) for fn in self.org_files]]
                     raise KeyError(
-                        f"Could not find {key} in {self.job_id}. Available {self.org_files}"
+                        f"Could not find {key} in {self.job_id}. Available {search}"
                     )
         return self._map_filename(self._lookup[key])

@@ -108,7 +108,7 @@ with ppg2 objects. Aspires to be a drop-in replacement.
     ppg1.util = util
     ppg1.graph = graph
     ppg1.job = job
-    ppg1.JobList = list
+    ppg1.JobList = ppg2.JobList
     ppg1.ppg_exceptions = ppg_exceptions
     ppg1.inside_ppg = ppg2.inside_ppg
     ppg1.assert_uniqueness_of_object = ppg2.assert_uniqueness_of_object
@@ -344,6 +344,16 @@ class PPG1AdaptorBase:
         else:
             super().depends_on(*args)
         return self
+
+    def depends_on_file(self, filename):
+        job = FileInvariant(filename)
+        self.depends_on(job)
+        return ppg2.jobs.DependsOnInvariant(job, self)
+
+    def depends_on_params(self, params):
+        job = ParameterInvariant(self.job_id, params)
+        self.depends_on(job)
+        return ppg2.jobs.DependsOnInvariant(job, self)
 
     @property
     def filenames(self):
