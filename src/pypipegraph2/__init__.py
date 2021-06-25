@@ -22,6 +22,7 @@ from .jobs import (
     ParameterInvariant,
     JobGeneratingJob,
     Job,
+    JobList,
     SharedMultiFileGeneratingJob,
 )
 from .exceptions import (
@@ -181,6 +182,7 @@ __all__ = [
     "new",
     "run",
     "Job",
+    "JobList",
     "FileGeneratingJob",
     "MultiFileGeneratingJob",
     "TempFileGeneratingJob",

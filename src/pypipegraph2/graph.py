@@ -189,6 +189,7 @@ class PyPipeGraph:
             max_runs = 5
             jobs_already_run = set()
             final_result = {}
+            aborted = False
             while True:
                 max_runs -= 1
                 if max_runs == 0:  # pragma: no cover
@@ -206,6 +207,7 @@ class PyPipeGraph:
                     result = self.runner.run(
                         self.run_id, result, print_failures=print_failures
                     )
+                    aborted = self.runner.aborted
                     del self.runner
                     self.run_id += 1
                     do_break = True
@@ -232,6 +234,8 @@ class PyPipeGraph:
             self.last_run_result = final_result
             if raise_on_job_error and self.do_raise and not self._restart_afterwards:
                 raise exceptions.JobsFailed("At least one job failed", self.do_raise)
+            if aborted:
+                raise KeyboardInterrupt("Run aborted")
             ok = True
             return final_result
         finally:

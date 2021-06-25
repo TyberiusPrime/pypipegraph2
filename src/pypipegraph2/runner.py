@@ -473,6 +473,8 @@ class Runner:
             todo -= 1
         elif event[0] == "JobUpstreamFailed":
             todo -= 1
+        elif event[0] == 'AbortRun':
+            todo = 0
         else:  # pragma: no cover # defensive
             raise NotImplementedError(event[0])
         return todo
