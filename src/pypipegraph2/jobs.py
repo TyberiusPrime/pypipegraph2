@@ -434,7 +434,6 @@ class MultiFileGeneratingJob(Job):
     def callback(self):
         self.generating_function(*self.get_input())
 
-
     def run(self, runner, _historical_output):  # noqa:C901
         self.files = [self._map_filename(fn) for fn in self.org_files]
         for fn in self.files:  # we rebuild anyway!
@@ -618,9 +617,19 @@ class MultiFileGeneratingJob(Job):
                                 "Process did not exit, did not signal, but is dead?. Figure out and extend, I suppose"
                             )
             finally:
-                stdout.close()  # unlink these soonish.
-                stderr.close()
-                exception_out.close()
+                try:
+                    stdout.close()  # unlink these soonish.
+                except FileNotFoundError:
+                    pass
+                try:
+                    stderr.close()
+                except FileNotFoundError:
+                    pass
+                try:
+                    exception_out.close()
+                except FileNotFoundError:
+                    pass
+
                 self.pid = None
         else:
             self.generating_function(*input)
@@ -645,7 +654,10 @@ class MultiFileGeneratingJob(Job):
             stdout.flush()
             stdout.seek(0, os.SEEK_SET)
             stdout_text = stdout.read()
-            stdout.close()
+            try:
+                stdout.close()
+            except FileNotFoundError:
+                pass
         except ValueError as e:  # pragma: no cover - defensive
             if "I/O operation on closed file" in str(e):
                 stdout_text = (
@@ -657,7 +669,10 @@ class MultiFileGeneratingJob(Job):
             stderr.flush()
             stderr.seek(0, os.SEEK_SET)
             stderr_text = stderr.read()
-            stderr.close()
+            try:
+                stderr.close()
+            except FileNotFoundError:
+                pass
         except ValueError as e:  # pragma: no cover - defensive
             if "I/O operation on closed file" in str(e):
                 stderr_text = (
@@ -1046,10 +1061,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if function.__doc__:
             for prefix in ['"""', "'''", '"', "'"]:
                 if prefix + function.__doc__ + prefix in source:
-                    source = source.replace(
-                        prefix + function.__doc__ + prefix,
-                        "",
-                    )
+                    source = source.replace(prefix + function.__doc__ + prefix, "",)
         return source
 
     @classmethod
@@ -1640,9 +1652,7 @@ def CachedDataLoadingJob(
     )
 
     load_job = DataLoadingJob(
-        "load" + str(cache_filename),
-        load,
-        depend_on_function=depend_on_function,
+        "load" + str(cache_filename), load, depend_on_function=depend_on_function,
     )
     load_job.depends_on(cache_job)
     # do this after you have sucessfully created both jobs
@@ -2464,10 +2474,13 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                     if fn == key:
                         return self._map_filename(org_fn)
                 else:
-                    search = [fn[
-                        fn.find("__never_placed_here__/")
-                        + len("__never_placed_here__/") :
-                    ] for fn in [str(fn) for fn in self.org_files]]
+                    search = [
+                        fn[
+                            fn.find("__never_placed_here__/")
+                            + len("__never_placed_here__/") :
+                        ]
+                        for fn in [str(fn) for fn in self.org_files]
+                    ]
                     raise KeyError(
                         f"Could not find {key} in {self.job_id}. Available {search}"
                     )

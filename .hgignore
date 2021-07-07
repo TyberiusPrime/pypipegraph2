@@ -1,0 +1,3 @@
+syntax: glob
+*.pyc
+src/*.egg-info
