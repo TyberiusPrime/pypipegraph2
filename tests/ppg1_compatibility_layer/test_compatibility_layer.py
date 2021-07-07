@@ -104,6 +104,9 @@ class TestcompatibilityLayerMore:
         def new_style(of, a=123, b=234):
             pass
 
+        def new_style2(of):
+            pass
+
         a = ppg1.FileGeneratingJob("a", no_args)
         assert hasattr(
             a.generating_function, "wrapped_function"
@@ -112,6 +115,11 @@ class TestcompatibilityLayerMore:
         assert not hasattr(
             b.generating_function, "wrapped_function"
         )  # is a wrapped function
+        b1 = ppg1.FileGeneratingJob("b1", new_style)
+        assert not hasattr(
+            b1.generating_function, "wrapped_function"
+        )  # is a wrapped function
+
         with pytest.raises(TypeError):
             c = ppg1.FileGeneratingJob("c", all_default_args)
         ppg1.new_pipegraph()

@@ -401,8 +401,9 @@ def _wrap_func_if_no_output_file_params(function, accept_all_defaults=False):
         # no or only default parameters = do it oldstyle.
         if not accept_all_defaults and not _first_param_empty(sig):
             raise TypeError(
-                f"Could not correctly wrap {function}, "
-                "it has default parameter that would have been replaced"
+                f"Could not correctly wrap {function}.\n"
+                f"{ppg2.FunctionInvariant.function_to_str(function)}\n"
+                "It has default parameter that would have been replaced "
                 "with output_filename in ppg1 already. Fix your function arguments"
             )
 
