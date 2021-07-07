@@ -324,7 +324,7 @@ class PyPipeGraph:
                 if job_result.state is JobState.Success:
                     if job_result.run_time >= 1:
                         lines.append(
-                            f"{job_id}\t{int(run_start_time)}\t{job_result.run_time:.2}"
+                            f"{job_id}\t{int(run_start_time)}\t{job_result.run_time:.2f}"
                         )
             with open(rt_file, "a+") as op:
                 op.write("\n".join(lines))

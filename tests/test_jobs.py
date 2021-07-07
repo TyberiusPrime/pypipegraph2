@@ -1709,6 +1709,29 @@ class TestTempFileGeneratingJob:
         assert "Upstream" in str(b.exception)
 
 
+    def test_temp_ds_fail_not_rerun(self, job_trace_log):
+        def tf(of):
+            of.write_text("A")
+            counter('tf')
+        jtf = ppg.TempFileGeneratingJob('A', tf)
+        def j(of):
+            if counter('j') == "0":
+                raise ValueError()
+            of.write_text('J')
+        jj = ppg.FileGeneratingJob('J', j)
+        jj.depends_on(jtf)
+        with pytest.raises(ppg.JobsFailed):
+            ppg.run()
+        assert Path('A').read_text() == 'A'
+        assert Path('tf').read_text() == '1'
+        assert Path('j').read_text() == '1'
+        assert not Path('J').exists()
+        ppg.run()
+        assert Path("J").read_text() == "J"
+        assert Path('j').read_text() == '2'
+        assert Path('tf').read_text() == '1'
+
+
 @pytest.mark.usefixtures("create_out_dir")
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestMultiTempFileGeneratingJob:

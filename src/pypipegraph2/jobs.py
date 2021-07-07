@@ -434,12 +434,62 @@ class MultiFileGeneratingJob(Job):
     def callback(self):
         self.generating_function(*self.get_input())
 
-    def run(self, runner, _historical_output):  # noqa:C901
+    def run(self, runner, historical_output):  # noqa:C901
         self.files = [self._map_filename(fn) for fn in self.org_files]
-        for fn in self.files:  # we rebuild anyway!
+        # we only rebuild the file if
+        # - we were invalidated
+        # - it was missing or
+        # - we had no historical output (hash) to compare to or
+        # - it is identical in mtime and size to the historical output
+        # - it is identical in size and hash to the historical output
+        # the later two cases are for tempfile jobs
+        # so that when their downstream failed,
+        # and they were not cleaned up
+        # we still don't rebuild them every  time.
+
+        all_present = True
+        del_counter = 0
+        for fn in self.files:
             if fn.exists():
+                # if we were invalidated, we run!
+                log_error(f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}")
+                if all_present: # so far...
+                    if (
+                        runner.job_states[self.job_id].validation_state
+                        is not ValidationState.Invalidated # both Valid and Unknown are ok here
+                    ):
+                        if str(fn) in historical_output:
+                            stat = fn.stat()
+                            mtime_the_same = int(stat.st_mtime) == historical_output[
+                                str(fn)
+                            ].get("mtime", -1)
+                            size_the_same = stat.st_size == historical_output[str(fn)].get(
+                                "size", -1
+                            )
+                            if mtime_the_same and size_the_same:
+                                continue
+                            if size_the_same:
+                                new_hash = hashers.hash_file(fn)
+                                if new_hash[hash] == historical_output[str(fn)].get(
+                                    "hash", "No hash "
+                                ):  # hash the same
+                                    continue
+                            raise ValueError(historical_output, stat.st_mtime, stat.st_size)
                 log_trace(f"unlinking {fn}")
                 fn.unlink()
+                all_present = False
+            else:
+                all_present = False
+        if all_present:
+            return historical_output
+        elif del_counter != len(self.files):
+            # ok, we triggered rebuild - nuke all output files
+            for fn in self.files:
+                if fn.exists():
+                    log_trace(f"unlinking {fn}")
+                    fn.unlink()
+
+
         input = self.get_input()
         if self.resources in (
             Resources.SingleCore,
@@ -539,10 +589,10 @@ class MultiFileGeneratingJob(Job):
                     finally:
                         stdout.flush()
                         stderr.flush()
-                        #sys.stdout = stdout_
-                        #sys.stderr = stderr_
-                        #os.dup2(stdout_, 1)
-                        #os.dup2(stderr_, 2)
+                        # sys.stdout = stdout_
+                        # sys.stderr = stderr_
+                        # os.dup2(stdout_, 1)
+                        # os.dup2(stderr_, 2)
                         os._exit(error_exit_code)
                 else:
                     sleep_time = 0.01  # which is the minimum time a job can take...
