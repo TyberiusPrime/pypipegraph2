@@ -485,6 +485,9 @@ class MultiFileGeneratingJob(Job):
                         stderr_ = sys.stderr
                         sys.stdout = stdout
                         sys.stderr = stderr
+                        os.dup2(stdout.fileno(), 1)
+                        os.dup2(stderr.fileno(), 2)
+
                         try:
                             self.generating_function(*input)
                             stdout.flush()
@@ -536,8 +539,10 @@ class MultiFileGeneratingJob(Job):
                     finally:
                         stdout.flush()
                         stderr.flush()
-                        sys.stdout = stdout_
-                        sys.stderr = stderr_
+                        #sys.stdout = stdout_
+                        #sys.stderr = stderr_
+                        #os.dup2(stdout_, 1)
+                        #os.dup2(stderr_, 2)
                         os._exit(error_exit_code)
                 else:
                     sleep_time = 0.01  # which is the minimum time a job can take...

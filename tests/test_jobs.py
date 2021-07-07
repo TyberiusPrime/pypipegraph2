@@ -368,6 +368,27 @@ class TestFileGeneratingJob:
         assert job.stdout == "stdout is cool\n"
         assert job.stderr == "I am stderr"  # no \n here
 
+    def test_simple_filegeneration_captures_stdout_stderr_of_spawned_processe(self):
+        of = "out/a"
+        data_to_write = "hello"
+
+        def do_write(of):
+            import subprocess
+            subprocess.check_call('echo stdout is cool', shell=True)
+            subprocess.check_call('echo I am stderr>&2', shell=True)
+            of.write_text('hello')
+
+        job = ppg.FileGeneratingJob(of, do_write)
+        ppg.run()
+        assert Path(of).exists()
+        op = open(of, "r")
+        data = op.read()
+        op.close()
+        assert data == data_to_write
+        assert job.stdout == "stdout is cool\n"
+        assert job.stderr == "I am stderr\n"  # no \n here
+
+
     def test_simple_filegeneration_disabled_stdout_capture(self):
         of = "out/a"
         data_to_write = "hello"
