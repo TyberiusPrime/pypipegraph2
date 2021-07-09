@@ -48,7 +48,9 @@ class JobStatus:
         log_job_trace(f"{self.job_id} set state. Was {self._state}, becomes {value}")
         if self._state.is_terminal():  # pragma: no cover
             log_job_trace(f"{self.job_id} Can't undo or set again a terminal state")
-            raise ValueError(f"Can't undo or set again a terminal state Was {self.state}, becomes {value}")
+            raise ValueError(
+                f"Can't undo or set again a terminal state Was {self.state}, becomes {value}"
+            )
         self._state = value
         # if value.is_terminal(): # this is always true
         self.job_became_terminal()
@@ -220,54 +222,53 @@ class JobStatus:
                     )  # todo: maybe not recurse back to the job we came from?
                     if self.should_run in (ShouldRun.Yes, ShouldRun.No):
                         log_job_trace(f"\t{self.job_id} - was already decided")
-                    else:
-                        ds_count = 0
-                        ds_no_count = 0
-                        for downstream_id in self.downstreams():
-                            if (
-                                self.runner.jobs[downstream_id].job_kind == JobKind.Cleanup
-                            ):  # those don't count
-                                continue
-                            log_job_trace(f"\t downstream: {downstream_id}")
-                            ds_count += 1
-                            self.runner.job_states[downstream_id].update_should_run()
-                            ds_should_run = self.runner.job_states[downstream_id].should_run
-                            if ds_should_run == ShouldRun.Yes:
+                    ds_count = 0
+                    ds_no_count = 0
+                    for downstream_id in self.downstreams():
+                        if (
+                            self.runner.jobs[downstream_id].job_kind == JobKind.Cleanup
+                        ):  # those don't count
+                            continue
+                        log_job_trace(f"\t downstream: {downstream_id}")
+                        ds_count += 1
+                        self.runner.job_states[downstream_id].update_should_run()
+                        ds_should_run = self.runner.job_states[downstream_id].should_run
+                        if ds_should_run == ShouldRun.Yes:
+                            log_job_trace(
+                                f"{self.job_id} update_should_run-> yes case Downstream needs me: {downstream_id}"
+                            )
+                            result = ShouldRun.Yes
+                            break
+                        elif ds_should_run == ShouldRun.No:
+                            # if they are all no, I may have my answer
+                            ds_no_count += 1
+                        # else maybe...
+                    else:  # no break
+                        if ds_count == ds_no_count:  # no downstream needs me
+                            self.update_invalidation()
+                            if self.validation_state == ValidationState.Validated:
                                 log_job_trace(
-                                    f"{self.job_id} update_should_run-> yes case Downstream needs me: {downstream_id}"
+                                    f"\t {self.job_id} -> no ds_count ==ds_no_count & validated"
                                 )
-                                result = ShouldRun.Yes
-                                break
-                            elif ds_should_run == ShouldRun.No:
-                                # if they are all no, I may have my answer
-                                ds_no_count += 1
-                            # else maybe...
-                        else:  # no break
-                            if ds_count == ds_no_count:  # no downstream needs me
-                                self.update_invalidation()
-                                if self.validation_state == ValidationState.Validated:
-                                    log_job_trace(
-                                        f"\t {self.job_id} -> no ds_count ==ds_no_count & validated"
-                                    )
-                                    result = ShouldRun.No
-                                elif (
-                                    self.validation_state == ValidationState.Invalidated
-                                ):  # pragma: no cover
-                                    raise ValueError("Did not expect this case")
-                                    # log_job_trace(
-                                    # f"\t {self.job_id} -> yes ds_count ==ds_no_count & invalidated"
-                                    # )
-                                    # result = ShouldRun.Yes
-                                else:
-                                    log_job_trace(
-                                        f"\t {self.job_id} -> maybe ds_count ==ds_no_count & unknown validation"
-                                    )
-                                    result = ShouldRun.Maybe
+                                result = ShouldRun.No
+                            elif (
+                                self.validation_state == ValidationState.Invalidated
+                            ):  # pragma: no cover
+                                raise ValueError("Did not expect this case")
+                                # log_job_trace(
+                                # f"\t {self.job_id} -> yes ds_count ==ds_no_count & invalidated"
+                                # )
+                                # result = ShouldRun.Yes
                             else:
                                 log_job_trace(
-                                    f"\t {self.job_id} -> maybe ds_count != ds_no_count"
+                                    f"\t {self.job_id} -> maybe ds_count ==ds_no_count & unknown validation"
                                 )
                                 result = ShouldRun.Maybe
+                        else:
+                            log_job_trace(
+                                f"\t {self.job_id} -> maybe ds_count != ds_no_count"
+                            )
+                            result = ShouldRun.Maybe
         log_job_trace(
             f"{self.job_id} == update_should_run. Was {self.should_run} becomes {result}"
         )
@@ -315,7 +316,7 @@ class JobStatus:
                                     "Update should run had an exception", e
                                 ),
                             ),
-                        ) # which will in turn upstream fail all downstreams
+                        )  # which will in turn upstream fail all downstreams
 
                 # log_job_trace("run_now in update_should_run")
                 # ds.run_now_if_ready()
@@ -409,7 +410,9 @@ class JobStatus:
         if self.all_upstreams_terminal_or_conditional():
             if self.validation_state == ValidationState.UpstreamFailed:
                 return False
-                
+            if self.validation_state == ValidationState.Invalidated:
+                return False
+
             invalidated = self._consider_invalidation()
             log_job_trace(
                 f"{self.job_id} - invalidation considered. Result: {invalidated}"
@@ -440,7 +443,7 @@ class JobStatus:
         )
         if len(new_input) != len(old_input):  # we lost or gained an input -> invalidate
             log_info(
-                f"{self.job_id} No of inputs changed (now {len(new_input)}, was {len(old_input)}) -> invalidated "
+                f"{self.job_id} No of inputs changed (now {len(new_input)}, was {len(old_input)}) -> invalidated {self.validation_state}"
             )
             invalidated = True
         else:  # same length.

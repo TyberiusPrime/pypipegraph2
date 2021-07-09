@@ -1731,6 +1731,27 @@ class TestTempFileGeneratingJob:
         assert Path('j').read_text() == '2'
         assert Path('tf').read_text() == '1'
 
+    def test_file_already_presen(self):
+        def doit(output_filename):
+            counter('tf')
+            output_filename.write_text('done')
+
+
+        j = ppg.TempFileGeneratingJob('.ppg/deleteme', doit)
+        j2 = ppg.FileGeneratingJob('.ppg/shu', lambda of : counter('j2') and of.write_text('hello'))
+        j2.depends_on(j)
+        j2()
+        assert Path('j2').read_text() == '1'
+        assert Path('tf').read_text() == '1'
+
+        Path('.ppg/shu').unlink()
+        Path('.ppg/deleteme').write_text('done')
+        j2()
+        assert Path('tf').read_text() == '1' # same hash, file present
+        assert Path('j2').read_text() == '2'
+
+
+
 
 @pytest.mark.usefixtures("create_out_dir")
 @pytest.mark.usefixtures("ppg2_per_test")

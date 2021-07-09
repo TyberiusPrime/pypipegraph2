@@ -452,7 +452,7 @@ class MultiFileGeneratingJob(Job):
         for fn in self.files:
             if fn.exists():
                 # if we were invalidated, we run!
-                log_error(f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}")
+                log_job_trace(f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}")
                 if all_present: # so far...
                     if (
                         runner.job_states[self.job_id].validation_state
@@ -470,7 +470,7 @@ class MultiFileGeneratingJob(Job):
                                 continue
                             if size_the_same:
                                 new_hash = hashers.hash_file(fn)
-                                if new_hash[hash] == historical_output[str(fn)].get(
+                                if new_hash['hash'] == historical_output[str(fn)].get(
                                     "hash", "No hash "
                                 ):  # hash the same
                                     continue

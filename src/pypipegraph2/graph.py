@@ -171,7 +171,8 @@ class PyPipeGraph:
                     ),
                     level=self.log_level,
                 )
-            log_id = logger.add(sink=sys.stdout, level=self.log_level)  # pragma: no cover
+            if "pytest" in sys.modules:  # pragma: no branch
+                log_id = logger.add(sink=sys.stdout, level=self.log_level)  # pragma: no cover
             import threading
 
             log_info(
