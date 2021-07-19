@@ -295,6 +295,9 @@ class Runner:
 
         log_trace("Runner.__run__")
 
+        self.pid = (
+            os.getpid()
+        )  # so we can detect if we return inside a forked process and exit (safety net)
         self.aborted = False
         self.stopped = False
         self.print_failures = print_failures
@@ -609,9 +612,6 @@ class Runner:
 
     def _executing_thread(self):
         """The inner function of the threads actually executing the jobs"""
-        my_pid = (
-            os.getpid()
-        )  # so we can detect if we return inside a forked process and exit (safety net)
         cwd = (
             os.getcwd()
         )  # so we can detect if the job cahnges the cwd (don't do that!)
@@ -676,7 +676,7 @@ class Runner:
                     log_trace(
                         "SystemExit in spawned process -> converting to hard exit"
                     )
-                    if os.getpid() != my_pid:
+                    if os.getpid() != self.pid:
                         os._exit(e.args[0])
                 except Exception as e:
                     if isinstance(e, KeyboardInterrupt):

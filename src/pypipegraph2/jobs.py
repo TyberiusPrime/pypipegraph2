@@ -452,20 +452,22 @@ class MultiFileGeneratingJob(Job):
         for fn in self.files:
             if fn.exists():
                 # if we were invalidated, we run!
-                log_job_trace(f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}")
-                if all_present: # so far...
+                log_error(
+                    f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}"
+                )
+                if all_present:  # so far...
                     if (
                         runner.job_states[self.job_id].validation_state
-                        is not ValidationState.Invalidated # both Valid and Unknown are ok here
+                        is not ValidationState.Invalidated  # both Valid and Unknown are ok here
                     ):
                         if str(fn) in historical_output:
                             stat = fn.stat()
                             mtime_the_same = int(stat.st_mtime) == historical_output[
                                 str(fn)
                             ].get("mtime", -1)
-                            size_the_same = stat.st_size == historical_output[str(fn)].get(
-                                "size", -1
-                            )
+                            size_the_same = stat.st_size == historical_output[
+                                str(fn)
+                            ].get("size", -1)
                             if mtime_the_same and size_the_same:
                                 continue
                             if size_the_same:
@@ -474,7 +476,9 @@ class MultiFileGeneratingJob(Job):
                                     "hash", "No hash "
                                 ):  # hash the same
                                     continue
-                            raise ValueError(historical_output, stat.st_mtime, stat.st_size)
+                            raise ValueError(
+                                historical_output, stat.st_mtime, stat.st_size
+                            )
                 log_trace(f"unlinking {fn}")
                 fn.unlink()
                 all_present = False
@@ -489,7 +493,6 @@ class MultiFileGeneratingJob(Job):
                     log_trace(f"unlinking {fn}")
                     fn.unlink()
 
-
         input = self.get_input()
         if self.resources in (
             Resources.SingleCore,
@@ -499,20 +502,12 @@ class MultiFileGeneratingJob(Job):
             # que = multiprocessing.Queue() # replace by pipe
             log_trace(f"Forking for {self.job_id}")
             # these only get closed by the parent process
-            stdout = tempfile.NamedTemporaryFile(
-                mode="w+",
-                dir=runner.job_graph.run_dir,
-                suffix=f"__{self.job_number}.stdout",
-            )
-            stderr = tempfile.NamedTemporaryFile(
-                mode="w+",
-                dir=runner.job_graph.run_dir,
-                suffix=f"__{self.job_number}.stderr",
-            )
-            exception_out = tempfile.NamedTemporaryFile(
-                mode="wb+",
-                dir=runner.job_graph.run_dir,
-                suffix=f"__{self.job_number}.exception",
+            # and we can't use tempfiles.
+            # they would get closed by other forked jobs running in parallel
+            stdout = open(runner.job_graph.run_dir / f"{self.job_number}.stdout", "w+b")
+            stderr = open(runner.job_graph.run_dir / f"{self.job_number}.stderr", "w+b")
+            exception_out = open(
+                runner.job_graph.run_dir / f"{self.job_number}.exception", "w+b"
             )
 
             def aborted(sig, stack):
@@ -526,9 +521,6 @@ class MultiFileGeneratingJob(Job):
                 ):  # pragma: no cover - coverage doesn't see this, since the spawned job os._exits()
                     try:
                         signal.signal(signal.SIGUSR1, aborted)
-                        for x in stdout, stderr, exception_out:
-                            x.delete = False  # that's the parent's job!
-                            x._closer.delete = False  # that's the parent's job!
 
                         # log_info(f"tempfilename: {stderr.name}")
                         stdout_ = sys.stdout
@@ -672,18 +664,12 @@ class MultiFileGeneratingJob(Job):
                                 "Process did not exit, did not signal, but is dead?. Figure out and extend, I suppose"
                             )
             finally:
-                try:
-                    stdout.close()  # unlink these soonish.
-                except FileNotFoundError:
-                    pass
-                try:
-                    stderr.close()
-                except FileNotFoundError:
-                    pass
-                try:
-                    exception_out.close()
-                except FileNotFoundError:
-                    pass
+                stdout.close()  # unlink these soonish.
+                os.unlink(stdout.name)
+                stderr.close()
+                os.unlink(stderr.name)
+                exception_out.close()
+                os.unlink(exception_out.name)
 
                 self.pid = None
         else:
@@ -917,7 +903,9 @@ class _FileInvariantMixin:
         # the draw back is the complexity for the common case,
         # and the weakness of the md5 algorithm (can't easily upgrade though)
         md5sum_path = Path(file.with_name(file.name + ".md5sum"))
-        if md5sum_path.exists():
+        if (
+            False or md5sum_path.exists()
+        ):  # I think it's a good idea no to rely on files produced by ppg1
             new_stat = file.stat
             st_md5 = os.stat(md5sum_path)
             if stat.st_mtime == st_md5.st_mtime:
@@ -1116,7 +1104,10 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if function.__doc__:
             for prefix in ['"""', "'''", '"', "'"]:
                 if prefix + function.__doc__ + prefix in source:
-                    source = source.replace(prefix + function.__doc__ + prefix, "",)
+                    source = source.replace(
+                        prefix + function.__doc__ + prefix,
+                        "",
+                    )
         return source
 
     @classmethod
@@ -1707,7 +1698,9 @@ def CachedDataLoadingJob(
     )
 
     load_job = DataLoadingJob(
-        "load" + str(cache_filename), load, depend_on_function=depend_on_function,
+        "load" + str(cache_filename),
+        load,
+        depend_on_function=depend_on_function,
     )
     load_job.depends_on(cache_job)
     # do this after you have sucessfully created both jobs
