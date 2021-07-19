@@ -904,7 +904,7 @@ class _FileInvariantMixin:
         # and the weakness of the md5 algorithm (can't easily upgrade though)
         md5sum_path = Path(file.with_name(file.name + ".md5sum"))
         if (
-            False or md5sum_path.exists()
+            False and md5sum_path.exists()
         ):  # I think it's a good idea no to rely on files produced by ppg1
             new_stat = file.stat
             st_md5 = os.stat(md5sum_path)
