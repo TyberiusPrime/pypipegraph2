@@ -37,11 +37,23 @@ CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
 PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
 
 
+def _normalize_path(path):
+    path = Path(path)
+    if path.is_absolute():
+        return path.resolve()
+    else:
+        return path.resolve().relative_to(Path(".").absolute())
+
+
 def _dedup_job(cls, job_id):
     from . import global_pipegraph
 
     if global_pipegraph is None:
         raise ValueError("Must instantiate a pipegraph before creating any Jobs")
+    if not isinstance(job_id, str):
+        raise TypeError(
+            f"at this point, job_id must be str, was {job_id!r}, {type(job_id)}"
+        )
     if "/../" in job_id:
         raise TypeError(f".. in job id not allowed. Was {job_id}")
     if global_pipegraph.run_mode.is_strict() and job_id in global_pipegraph.jobs:
@@ -413,17 +425,16 @@ class MultiFileGeneratingJob(Job):
         for f in files:
             if not isinstance(f, (str, Path)):
                 raise TypeError("Files for (Multi)FileGeneratingJob must be Path/str")
-            if (global_pipegraph.prevent_absolute_paths or allow_absolute) and Path(
-                f
-            ).is_absolute():
+            if (
+                global_pipegraph is not None
+                and global_pipegraph.prevent_absolute_paths
+                or allow_absolute
+            ) and Path(f).is_absolute():
                 raise ValueError(
                     f"Absolute file path as job_ids prevented by graph.prevent_absolute_paths. Was {f}"
                 )
         path_files = (Path(x) for x in files)
-        abs_files = [
-            x if x.is_absolute() else x.resolve().relative_to(Path(".").absolute())
-            for x in path_files
-        ]
+        abs_files = [_normalize_path(x) for x in path_files]
         if lookup:
             lookup = {lookup[ii]: abs_files[ii] for ii in range(len(lookup))}
         return sorted(abs_files), lookup
@@ -902,7 +913,7 @@ class _FileInvariantMixin:
         # and the weakness of the md5 algorithm (can't easily upgrade though)
         md5sum_path = Path(file.with_name(file.name + ".md5sum"))
         if (
-            False and md5sum_path.exists()
+            True and md5sum_path.exists()
         ):  # I think it's a good idea no to rely on files produced by ppg1
             new_stat = file.stat
             st_md5 = os.stat(md5sum_path)
@@ -1461,17 +1472,13 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     job_kind = JobKind.Invariant
 
     def __new__(cls, file):
-        return super().__new__(
-            cls, [str(Path(file).resolve().relative_to(Path(".").absolute()))]
-        )
+        return super().__new__(cls, [str(_normalize_path(file))])
 
     def __init__(self, file):
         from . import global_pipegraph
 
         self.file = Path(file)
-        super().__init__(
-            [str(Path(file).resolve().relative_to(Path(".").absolute()))]
-        )
+        super().__init__([str(_normalize_path(file))])
 
         self.files = [
             self.file
@@ -1627,9 +1634,13 @@ class DataLoadingJob(Job):
     job_kind = JobKind.Loading
 
     def __new__(cls, job_id, *args, **kwargs):
+        if isinstance(job_id, Path):
+            job_id = str(_normalize_path(job_id))
         return _dedup_job(cls, job_id)
 
     def __init__(self, job_id, load_function, depend_on_function=True):
+        if isinstance(job_id, Path):
+            job_id = str(_normalize_path(job_id))
         self.depend_on_function = depend_on_function
         self.load_function = load_function
         super().__init__([job_id])
@@ -1968,7 +1979,7 @@ def PlotJob(  # noqa:C901
     plot_job = FileGeneratingJob(
         output_filename, do_plot, depend_on_function=depend_on_function
     )
-    output_filename = plot_job.files[0] # that's resolved!
+    output_filename = plot_job.files[0]  # that's resolved!
     param_job = ParameterInvariant(output_filename, render_args)
     plot_job.depends_on(param_job)
 
