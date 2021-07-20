@@ -101,7 +101,7 @@ def new(
             ("prevent_absolute_paths", True),
         ]
     }
-    util.do_job_trace_log = arguments["log_level"] <= 6
+    util.do_jobtrace_log = arguments["log_level"] <= 6
     # if arguments['run_mode'] != RunMode.NONINTERACTIVE:
     # raise ValueError()
     global_pipegraph = PyPipeGraph(**arguments)

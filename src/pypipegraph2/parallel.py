@@ -1,6 +1,7 @@
 """Parlallel computation / threading support helpers"""
 from threading import Lock, Condition
 import ctypes
+from .util import log_info
 
 
 class _CoreLockContextManager:
@@ -30,9 +31,19 @@ class CoreLock:
         self.remaining = max_cores
         self.lock = Lock()
         self.condition = Condition()
+        self.terminated = False
 
     def using(self, cores):
         return _CoreLockContextManager(self, cores)
+
+    def terminate(self):
+        log_info("Terminating core lock")
+        self.terminated = True
+        self.condition.acquire() # wake them all up.
+        self.condition.notify_all()
+        self.condition.release()
+        log_info("Terminating core lock2")
+
 
     def _acquire(self, count):
         # logger.info(f" {_thread.get_ident()} - acquire({count}) called")
@@ -43,16 +54,31 @@ class CoreLock:
                 op.write("yes")
             raise ValueError("Count == 0")
         while True:
-            with self.lock:
+            locked = False
+            try:
+                locked = self.lock.acquire(timeout=10)
+                if not locked:
+                    continue
                 # logger.info(f"{_thread.get_ident()} lock acquired, - remaining: {self.remaining}")
-                if self.remaining >= count:
+                if self.terminated:
+                    log_info("inner core lock termination")
+                    raise KeyboardInterrupt('Terminated lock')
+                elif self.remaining >= count:
                     self.remaining -= count
                     # logger.info(f"{_thread.get_ident()}, had available")
                     return
                 else:
                     pass
+            finally:
+                self.lock.release()
             self.condition.acquire()
-            self.condition.wait()
+            try:
+                self.condition.wait(10)
+            except RuntimeError:
+                if self.terminated:
+                    log_info("inner core lock termination2")
+                    raise KeyboardInterrupt('Terminated lock')
+
             self.condition.release()
             # logger.info(f"{_thread.get_ident()} condition triggered")
 

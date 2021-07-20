@@ -10,6 +10,7 @@ import tty
 import threading
 from .util import console
 import rich.status
+from .parallel import async_raise
 
 
 class ConsoleInteractive:
@@ -40,6 +41,7 @@ class ConsoleInteractive:
         self.thread = threading.Thread(target=self.loop)
         self._set_terminal_raw()
         self.stopped = False
+        self.exit_now = False
         self.thread.start()
         print("Type 'help<enter>' to receive a list of valid commands")
         self._cmd = ""
@@ -47,8 +49,11 @@ class ConsoleInteractive:
         self.status.start()
 
     def stop(self):
+        """Called from the runner"""
         self.stopped = True
-        if hasattr(self, 'thread'):
+        self.exit_now = True
+        if hasattr(self, "thread"):
+            async_raise(self.thread.ident, KeyboardInterrupt)
             self._end_terminal_raw()
             log_job_trace("Terminating interactive thread")
             self.thread.join()
@@ -69,15 +74,17 @@ class ConsoleInteractive:
         log_info("Entering interactive loop")
         while True:
             try:
-                if self.stopped:
+                if self.exit_now: # can still send other commands, even if stopping
                     break
                 try:
                     input = bool(select.select([sys.stdin], [], [], 1)[0])
                 except io.UnsupportedOperation as e:
-                    if 'redirected stdin is pseudofile' in str(e): # running under pytest - no interactivity, but suport requesting it?
+                    if "redirected stdin is pseudofile" in str(
+                        e
+                    ):  # running under pytest - no interactivity, but suport requesting it?
                         input = False
                     else:
-                        raise 
+                        raise
                 if input:
                     value = sys.stdin.read(1)
                     # log_info(f"received {repr(value)}")
@@ -104,8 +111,11 @@ class ConsoleInteractive:
                                     print("No such command")
                             else:
                                 self._cmd_default()
+                            self.report_status(*self.last_report_status_args)
                         except Exception as e:
-                            log_error(e)
+                            log_error(
+                                f"An exception occured during command: {e} {type(e)}"
+                            )
                             self.cmd = ""
                             continue
 
@@ -115,11 +125,14 @@ class ConsoleInteractive:
 
     def report_status(self, jobs_done, jobs_failed, jobs_total):
         self.last_report_status_args = jobs_done, jobs_failed, jobs_total
-        msg = f"[red]Progress[/red] {jobs_done} / {jobs_total}. "
+        msg = f"[red]Progress[/red] {jobs_done} / {jobs_total}. In flight: {len(self.runner.jobs_in_flight)} "
         if self.cmd:
             msg += f"Cmd: {self.cmd}"
         else:
-            msg += "Type help<enter> for commands"
+            if self.stopped:
+                msg += "Exiting..."
+            else:
+                msg += "Type help<enter> for commands"
         self.status.update(status=msg)
 
     def _cmd_help(self, _args):
@@ -144,23 +157,35 @@ class ConsoleInteractive:
             rt = t - self.runner.jobs[job_id].start_time
             to_sort.append((rt, job_id))
         to_sort.sort()
-        for rt, job_id in to_sort:
+        print("Status\tJob_Number\tRuntime\tJob id")
+        for ii, (rt, job_id) in enumerate(to_sort):
             job_no = self.runner.jobs[job_id].job_number
-            print(f"{job_no} {job_id}: Running for {rt:.2f} seconds")
+            if not hasattr(self.runner.jobs[job_id], "aquired_cores"):
+                rt = '-'
+            else:
+                rt = f"{rt:.2f}s"
+
+            multi_count = job_id.count(":::")
+            if multi_count >= 1:
+                print_job_id = job_id[: job_id.find(":::") + 3] + "+" + str(multi_count)
+            else:
+                print_job_id = job_id
+            print(f"{job_no}\t{rt}s\tt{print_job_id}")
         print("")
 
     def _cmd_abort(self, _args):
         """Kill current jobs and exit (safely) asap"""
-        log_info("Run aborted by command")
+        log_info("Run aborted by command. Safely shutting down")
         self.runner.abort()
         self.stopped = True
 
     def _cmd_stop(self, _args):
         """Exit after current jobs finished"""
-        log_info("Run stopped by command")
-        print(f"Having to wait for jobs: {self.runner.jobs_in_flight}")
-        self.runner.stop()
-        self.stopped = True
+        if not self.stopped:
+            log_info("Run stopped by command")
+            print(f"Having to wait for jobs: {self.runner.jobs_in_flight}")
+            self.runner.stop()
+            self.stopped = True
 
     def _cmd_again(self, _args):
         """Restart the current python program after all jobs have completed"""
@@ -169,10 +194,11 @@ class ConsoleInteractive:
 
     def _cmd_stop_and_again(self, _args):
         "Stop after current jobs, then restart the current python program"
-        log_info("Stop_and_again command issued")
-        self.runner.stop()
-        self.stopped = True
-        self.runner.job_graph.restart_afterwards()
+        if not self.stopped:
+            log_info("Stop_and_again command issued")
+            self.runner.stop()
+            self.stopped = True
+            self.runner.job_graph.restart_afterwards()
 
     def _cmd_kill(self, args):
         try:

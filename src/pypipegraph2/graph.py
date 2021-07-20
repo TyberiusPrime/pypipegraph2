@@ -151,12 +151,14 @@ class PyPipeGraph:
         if self.error_dir:
             self._cleanup_errors()
             (self.error_dir / self.time_str).mkdir(exist_ok=True, parents=True)
+            self._link_errors()
         log_id = None
         if self.log_dir:
             self._cleanup_logs()
             self.log_dir.mkdir(exist_ok=True, parents=True)
             fn = Path(sys.argv[0]).name
             self.log_file = self.log_dir / f"{fn}-{self.time_str}.log"
+            logger.remove() #no default logging
             logger.add(
                 open(self.log_file, "w"), level=min(self.log_level, logging.INFO)
             )
@@ -171,14 +173,16 @@ class PyPipeGraph:
                     ),
                     level=self.log_level,
                 )
-            if "pytest" in sys.modules:  # pragma: no branch
-                log_id = logger.add(
-                    sink=sys.stdout, level=self.log_level
-                )  # pragma: no cover
+            #if "pytest" in sys.modules:  # pragma: no branch
+            log_id = logger.add(
+                sink=sys.stdout, level=logging.INFO # don't spam stdout
+            )  # pragma: no cover
             import threading
 
+            self._link_logs()
+
             log_info(
-                f"Run is go {threading.get_ident()} pid: {os.getpid()}, run_id {self.run_id}"
+                f"Run is go {threading.get_ident()} pid: {os.getpid()}, run_id {self.run_id}, log_level = {self.log_level}"
             )
         self.history_dir.mkdir(exist_ok=True, parents=True)
         self.run_dir.mkdir(exist_ok=True, parents=True)
@@ -242,8 +246,6 @@ class PyPipeGraph:
             ok = True
             return final_result
         finally:
-            self._link_logs()
-            self._link_errors()
             if ok:
                 log_info("Run is done")
             else:
@@ -427,6 +429,7 @@ class PyPipeGraph:
             # "Could not load history data", e, fn.absolute()
             # )
 
+        log_info(f"Loaded {len(history)} history entries")
         return history
 
     def _save_history(self, historical):
@@ -545,23 +548,19 @@ class PyPipeGraph:
         if job.job_id in self.jobs and self.jobs[job.job_id] is not job:
             if self.run_mode.is_strict():
                 raise ValueError(
-                    "Added new job in place of old?" f"new job: {job} id: {id(job)}",
+                    "Added new job in place of old not supported in run_mode == strict"
+                    f"new job: {job} id: {id(job)}",
                     f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
                 )
-            else:
-                print(
-                    "Added new job in place of old?" f"new job: {job} id: {id(job)}",
-                    f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
-                )
+            # else:
+            # print(
+            # "Added new job in place of old?" f"new job: {job} id: {id(job)}",
+            # f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
+            # )
         self.jobs[job.job_id] = job
         self.job_dag.add_node(job.job_id)
-        if not hasattr(job, "job_number"):
+        if not hasattr(job, "job_number"):  # don't reassign
             job.job_number = len(self.jobs) - 1
-        numbers = set()
-        for job in self.jobs.values():
-            if job.job_number in numbers:
-                raise ValueError("Duplicate job number", job.job_number)
-            numbers.add(job.job_number)
 
     def add_edge(self, upstream_job, downstream_job):
         """Declare a dependency between jobs

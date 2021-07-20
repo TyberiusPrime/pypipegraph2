@@ -11,6 +11,7 @@ from .enums import (
     JobState,
     RunMode,
     ShouldRun,
+    Resources,
 )
 from .exceptions import _RunAgain
 from .parallel import CoreLock, async_raise
@@ -69,23 +70,6 @@ class Runner:
                 raise exceptions.NotADag(
                     f"Not a directed *acyclic* graph. See {error_fn}. Cycles between {cycles}"
                 )
-            job_numbers = set()
-            for job_id, job in self.jobs.items():
-                log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
-                job_numbers.add(job.job_number)
-            if len(job_numbers) != len(
-                self.jobs
-            ):  # paranoid checking that job_numbers are unique
-                import collections
-
-                c = collections.defaultdict(set)
-                for job_id, job in self.jobs.items():
-                    c[job.job_number].add((job_id, job.__class__.__name__))
-                duplicates = {k: len(v) for (k, v) in c.items() if len(v) > 1}
-                raise ValueError(f"We reused job numbers. Duplicates: {duplicates}")
-            else:
-                raise ValueError("al lok")
-
 
             self.dag = self.modify_dag(
                 job_graph,
@@ -104,16 +88,9 @@ class Runner:
             for job_id, job in self.jobs.items():
                 log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
                 job_numbers.add(job.job_number)
-            if len(job_numbers) != len(
+            assert len(job_numbers) == len(
                 self.jobs
-            ):  # paranoid checking that job_numbers are unique
-                import collections
-
-                c = collections.defaultdict(set)
-                for job_id, job in self.jobs.items():
-                    c[job.job_number].add((job_id, job.__class__.__name__))
-                duplicates = {k: v for (k, v) in c.items() if len(v) > 1}
-                raise ValueError(f"We reused job numbers. Duplicates: {duplicates}")
+            )  # paranoid checking that job_numbers are unique
 
             log_job_trace(
                 "dag "
@@ -196,7 +173,7 @@ class Runner:
 
     def _add_cleanup(self, dag, job):
         cleanup_job = job.cleanup_job_class(job)
-        cleanup_job.job_number = len(self.jobs) -1
+        cleanup_job.job_number = len(self.jobs)
         self.jobs[cleanup_job.job_id] = cleanup_job
         dag.add_node(cleanup_job.job_id)
         log_trace(f"creating cleanup {cleanup_job.job_id}")
@@ -372,8 +349,9 @@ class Runner:
                 try:
                     ev = self.events.get(timeout=self.event_timeout)
                     if ev[0] == "AbortRun":
-                        log_trace("AbortRun run on external request")
+                        log_info("Aborting/Stopping run as requested")
                         todo = 0
+                        # self.stopped = True no need to tell the threads, we KeyboardInterrupt them.
                         break
                 except queue.Empty:
                     # long time, no event.
@@ -413,19 +391,31 @@ class Runner:
                         # log_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
                         self._handle_event(ev)
 
-            else:
-                for t in self.threads:
-                    log_trace(
-                        f"Asking thread to terminate at next Python call {time.time() - self.abort_time}"
+            else: # aborted
+                log_info(f"No of threads when aborting {len(self.threads)}")
+                for t in self.threads: 
+                    log_job_trace(
+                        f"Asking thread {t.ident} to terminate at next Python call {time.time() - self.abort_time}"
                     )
-                    async_raise(t.ident, KeyboardInterrupt)
+                    try:
+                        async_raise(t.ident, KeyboardInterrupt)
+                    except ValueError:
+                        pass
+
+                # import psutil
+                # parent_id = psutil.Process(os.getpid())
+                # for child in parent.children(recursive=True):
+                    # log_info(f"Killing child process {child}")
+                    # child.kill()
         finally:
-            log_trace("Joining threads")
+            log_info(f"Joining threads {len(self.threads)}")
+            self.core_lock.terminate()
 
             for t in self.threads:
                 self.jobs_to_run_que.put(ExitNow)
             for t in self.threads:
                 t.join()
+            log_info("joined threads")
             # now capture straglers
             # todo: replace this with something guranteed to work.
             while True:
@@ -439,6 +429,7 @@ class Runner:
 
             if hasattr(self, "_status"):
                 self._status.stop()
+            log_info("interactive stop")
             self._interactive_stop()
 
         if len(global_pipegraph.jobs) != job_count and not self.aborted:
@@ -517,7 +508,7 @@ class Runner:
         decide on downstreams"""
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
-        msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold] no: {job.job_number}"
+        msg = f"Done in {job_state.run_time:.2f}s [bold]{job_id}[/bold] no: {job.job_number}"
         if job.run_time >= 1:
             if job.job_kind in (
                 JobKind.Temp,
@@ -640,6 +631,8 @@ class Runner:
         Note that we don't fire up threads without limit - at one point, you can still
         stall the graph
         """
+        if self.stopped or self.aborted:
+            return
         t = Thread(target=self._executing_thread)
         self.threads.append(t)
         t.start()
@@ -686,6 +679,10 @@ class Runner:
                     if c == 0:
                         log_error(f"Cores was 0! {job.job_id} {job.resources}")
                     with self.core_lock.using(c):
+                        if self.stopped or self.aborted: # we were asked to stop while waiting for the core lock
+                            raise KeyboardInterrupt("PPG run stopped")
+
+                        job.aquired_cores = True
                         job.start_time = time.time()  # the *actual* start time
                         log_trace(f"Go {job_id}")
                         log_trace(f"\tExecuting {job_id}")
@@ -713,7 +710,8 @@ class Runner:
                     if os.getpid() != self.pid:
                         os._exit(e.args[0])
                 except Exception as e:
-                    if isinstance(e, KeyboardInterrupt):
+                    if isinstance(e, KeyboardInterrupt):# happens on abort
+
                         raise
                     elif isinstance(e, exceptions.JobError):
                         pass  # take it at face value
@@ -735,7 +733,7 @@ class Runner:
                     self.jobs_in_flight.remove(job_id)
                     if c > 1:
                         self.jobs_all_cores_in_flight -= 1
-        except (KeyboardInterrupt, SystemExit):
+        except (KeyboardInterrupt, SystemExit): # happens on abort
             log_trace(f"Keyboard Interrupt received {time.time() - self.abort_time}")
             pass
         except Exception as e:
