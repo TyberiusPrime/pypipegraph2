@@ -487,7 +487,7 @@ class Runner:
         decide on downstreams"""
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
-        msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
+        msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold] no: {job.job_number}"
         if job.run_time >= 1:
             if job.job_kind in (
                 JobKind.Temp,
@@ -559,18 +559,22 @@ class Runner:
                     / (str(job.job_number) + "_exception.txt")
                 )
                 with open(error_file, "w") as ef:
-                    ef.write(f"{job_id}\n")
+                    ef.write(f"JobId: {job_id}\n")
+                    ef.write(f"Class: {job.__class__.__name__}\n")
                     if stacks is not None:
-                        ef.write(stacks._format_rich_traceback_fallback(True))
-
+                        ef.write(
+                            stacks._format_rich_traceback_fallback(
+                                include_locals=True, include_formating=False
+                            )
+                        )
                     else:
                         ef.write(str(job_state.error))
                         ef.write("no stack available")
-                    if hasattr(job, 'stdout'):
+                    if hasattr(job, "stdout"):
                         ef.write("\n\n")
                         ef.write("job stdout:\n")
                         ef.write(str(job.stdout))
-                    if hasattr(job, 'stderr'):
+                    if hasattr(job, "stderr"):
                         ef.write("\n\n")
                         ef.write("job stderr:\n")
                         ef.write(str(job.stderr))

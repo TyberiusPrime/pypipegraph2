@@ -124,16 +124,28 @@ class Trace:
     def __str__(self):
         return self._format_rich_traceback_fallback(False)
 
-    def _format_rich_traceback_fallback(self, include_locals=False):
+    def _format_rich_traceback_fallback(self, include_locals=False, include_formating=True):
         """Pretty print a traceback.
 
         We don't use rich's own facility, since it is
         not time-bounded /  does not cut the output
         """
+        def bold(x):
+            if include_formating:
+                return f'[bold]{x}[/bold]'
+            else:
+                return x
+        def red(x):
+            if include_formating:
+                return f'[red]{x}[/red]'
+            else:
+                return x
+
+
         if include_locals:
 
             def render_locals(frame):
-                out.append("[bold]Locals[/bold]:")
+                out.append(bold("Locals") + ":")
                 scope = frame.locals
                 items = sorted(scope.items())
                 len_longest_key = max((len(x[0]) for x in items))
@@ -164,9 +176,9 @@ class Trace:
                 if len(exc_value) > 1000:
                     exc_value = exc_value[:1000] + "…"
                 out.append(
-                    f"[bold]Exception[/bold]: [red][bold]{stack.exc_type}[/bold] {exc_value}[/red]"
+                    f"{bold('Exception')}: {red(bold(stack.exc_type) + ' ' + exc_value)}"
                 )
-                out.append("[bold]Traceback[/bold] (most recent call last):")
+                out.append("{bold('Traceback')} (most recent call last):")
 
                 for frame in stack.frames:
                     out.append(f'{frame.filename}":{frame.lineno}, in {frame.name}')
@@ -200,7 +212,7 @@ class Trace:
                         if frame.locals:
                             render_locals(frame)
                 out.append(
-                    f"[bold]Exception[/bold] (repeated from above): [red][bold]{stack.exc_type}[/bold] {exc_value}[/red]"
+                    f"{bold('Exception')} (repeated from above): {red(bold(stack.exc_type) + ' ' +  exc_value)}"
                 )
         return "\n".join(out)
 
