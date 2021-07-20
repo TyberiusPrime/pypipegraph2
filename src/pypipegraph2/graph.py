@@ -527,6 +527,8 @@ class PyPipeGraph:
         """Add a job.
         Automatically called when a Job() is created
         """
+        if not hasattr(self, "max_job_count"):
+            self.max_job_count = set()
 
         for output in job.outputs:
             if output in self.outputs_to_job_ids:
@@ -542,9 +544,36 @@ class PyPipeGraph:
             self.outputs_to_job_ids[
                 output
             ] = job.job_id  # todo: seperate this into two dicts?
+        if job.job_id in self.jobs and self.jobs[job.job_id] is not job:
+            print(
+                ValueError(
+                    "Readding new job in place of old?",
+                    id(job),
+                    id(self.jobs[job.job_id]),
+                    job,
+                    self.jobs[job.job_id],
+                    len(self.jobs) - 1,
+                    self.jobs[job.job_id].job_number,
+                )
+            )
         self.jobs[job.job_id] = job
+        if len(self.jobs) < len(self.max_job_count):  # con
+            missing = self.max_job_count.difference(self.jobs.keys())
+            raise ValueError(
+                "number of jobs went down?!",
+                len(self.jobs),
+                len(self.max_job_count),
+                missing,
+            )
+        self.max_job_count = set(self.jobs.keys())
         self.job_dag.add_node(job.job_id)
-        job.job_number = len(self.jobs) - 1
+        if not hasattr(job, "job_number"):
+            job.job_number = len(self.jobs) - 1
+        numbers = set()
+        for job in self.jobs.values():
+            if job.job_number in numbers:
+                raise ValueError("Duplicate job number", job.job_number)
+            numbers.add(job.job_number)
 
     def add_edge(self, upstream_job, downstream_job):
         """Declare a dependency between jobs

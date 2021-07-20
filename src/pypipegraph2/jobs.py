@@ -451,8 +451,8 @@ class MultiFileGeneratingJob(Job):
         del_counter = 0
         for fn in self.files:
             if fn.exists():
-                # if we were invalidated, we run!
-                log_error(
+                # if we were invalidated, we run-  mabye
+                log_job_trace(
                     f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}"
                 )
                 if all_present:  # so far...
@@ -504,8 +504,8 @@ class MultiFileGeneratingJob(Job):
             # these only get closed by the parent process
             # and we can't use tempfiles.
             # they would get closed by other forked jobs running in parallel
-            stdout = open(runner.job_graph.run_dir / f"{self.job_number}.stdout", "w+")
-            stderr = open(runner.job_graph.run_dir / f"{self.job_number}.stderr", "w+")
+            stdout = open(runner.job_graph.run_dir / f"{runner.start_time:.2f}_{self.job_number}.stdout", "w+")
+            stderr = open(runner.job_graph.run_dir / f"{runner.start_time:.2f}_{self.job_number}.stderr", "w+")
             exception_out = open(
                 runner.job_graph.run_dir / f"{self.job_number}.exception", "w+b"
             ) # note the binary!

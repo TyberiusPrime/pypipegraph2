@@ -69,6 +69,23 @@ class Runner:
                 raise exceptions.NotADag(
                     f"Not a directed *acyclic* graph. See {error_fn}. Cycles between {cycles}"
                 )
+            job_numbers = set()
+            for job_id, job in self.jobs.items():
+                log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
+                job_numbers.add(job.job_number)
+            if len(job_numbers) != len(
+                self.jobs
+            ):  # paranoid checking that job_numbers are unique
+                import collections
+
+                c = collections.defaultdict(set)
+                for job_id, job in self.jobs.items():
+                    c[job.job_number].add((job_id, job.__class__.__name__))
+                duplicates = {k: len(v) for (k, v) in c.items() if len(v) > 1}
+                raise ValueError(f"We reused job numbers. Duplicates: {duplicates}")
+            else:
+                raise ValueError("al lok")
+
 
             self.dag = self.modify_dag(
                 job_graph,
@@ -82,8 +99,21 @@ class Runner:
 
             # assert flat_before == flat_after
             import json
-            for job_id in self.jobs:
+
+            job_numbers = set()
+            for job_id, job in self.jobs.items():
                 log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
+                job_numbers.add(job.job_number)
+            if len(job_numbers) != len(
+                self.jobs
+            ):  # paranoid checking that job_numbers are unique
+                import collections
+
+                c = collections.defaultdict(set)
+                for job_id, job in self.jobs.items():
+                    c[job.job_number].add((job_id, job.__class__.__name__))
+                duplicates = {k: v for (k, v) in c.items() if len(v) > 1}
+                raise ValueError(f"We reused job numbers. Duplicates: {duplicates}")
 
             log_job_trace(
                 "dag "
@@ -166,7 +196,7 @@ class Runner:
 
     def _add_cleanup(self, dag, job):
         cleanup_job = job.cleanup_job_class(job)
-        cleanup_job.job_number = len(self.jobs)
+        cleanup_job.job_number = len(self.jobs) -1
         self.jobs[cleanup_job.job_id] = cleanup_job
         dag.add_node(cleanup_job.job_id)
         log_trace(f"creating cleanup {cleanup_job.job_id}")
@@ -298,6 +328,7 @@ class Runner:
         self.pid = (
             os.getpid()
         )  # so we can detect if we return inside a forked process and exit (safety net)
+        self.start_time = time.time()
         self.aborted = False
         self.stopped = False
         self.print_failures = print_failures
@@ -311,7 +342,7 @@ class Runner:
         self.events = queue.Queue()
 
         todo = len(self.dag)
-        for job_id in self.dag.nodes: # those are without the pruned nodes
+        for job_id in self.dag.nodes:  # those are without the pruned nodes
             no_inputs = not self.job_inputs[job_id]
             # output_needed = self.jobs[job_id].output_needed(self)
             failed_last_time = self._job_failed_last_time(job_id)
@@ -320,13 +351,13 @@ class Runner:
                 if failed_last_time:
                     log_job_trace(f"{job_id} Failing because of failure last time (1)")
                     self.job_states[job_id].failed(self.job_states[job_id].error)
-                    todo -= 1 # no need to send a message for this
+                    todo -= 1  # no need to send a message for this
                 else:
                     self.job_states[job_id].update_should_run()
             elif failed_last_time:
                 log_job_trace(f"{job_id} Failing because of failure last time (2)")
                 self.job_states[job_id].failed(self.job_states[job_id].error)
-                todo -= 1 # no need to send a message for this
+                todo -= 1  # no need to send a message for this
         log_job_trace("Finished initial pass")
 
         self.jobs_in_flight = []
@@ -420,7 +451,6 @@ class Runner:
             raise _RunAgain(self.job_states)
         log_trace("Left runner.run()")
 
-
         return self.job_states
 
     def _interactive_start(self):
@@ -476,7 +506,7 @@ class Runner:
             todo -= 1
         elif event[0] == "JobUpstreamFailed":
             todo -= 1
-        elif event[0] == 'AbortRun':
+        elif event[0] == "AbortRun":
             todo = 0
         else:  # pragma: no cover # defensive
             raise NotImplementedError(event[0])
