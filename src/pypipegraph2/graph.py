@@ -24,15 +24,15 @@ from rich.console import Console
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
-#if "pytest" in sys.modules:  # pragma: no branch
-    #log_out = sys.stderr
-#else:  # pragma: no cover
-    #log_out = RichHandler(markup=True, console=console)
-#logger.add(
-    #sink=log_out,
-    #format="{elapsed} {message}",
-    #level=logging.INFO,
-#)
+# if "pytest" in sys.modules:  # pragma: no branch
+# log_out = sys.stderr
+# else:  # pragma: no cover
+# log_out = RichHandler(markup=True, console=console)
+# logger.add(
+# sink=log_out,
+# format="{elapsed} {message}",
+# level=logging.INFO,
+# )
 
 time_format = "%Y-%m-%d_%H-%M-%S"
 
@@ -120,7 +120,7 @@ class PyPipeGraph:
                 None,
                 dump_graphml=dump_graphml,
             )
-        except JobsFailed as e: # shorten the traceback considerably!
+        except JobsFailed as e:  # shorten the traceback considerably!
             raise JobsFailed(e.args[0], exceptions=e.exceptions)
 
     def _run(
@@ -172,7 +172,9 @@ class PyPipeGraph:
                     level=self.log_level,
                 )
             if "pytest" in sys.modules:  # pragma: no branch
-                log_id = logger.add(sink=sys.stdout, level=self.log_level)  # pragma: no cover
+                log_id = logger.add(
+                    sink=sys.stdout, level=self.log_level
+                )  # pragma: no cover
             import threading
 
             log_info(
@@ -240,6 +242,8 @@ class PyPipeGraph:
             ok = True
             return final_result
         finally:
+            self._link_logs()
+            self._link_errors()
             if ok:
                 log_info("Run is done")
             else:
@@ -266,7 +270,7 @@ class PyPipeGraph:
         )
 
     def _cleanup_logs(self):
-        """Clean up old logs"""
+        """Clean up old logs and drop a 'latest' symlink"""
         if not self.log_dir or self.log_retention is None:  # pragma: no cover
             return
         fn = Path(sys.argv[0]).name
@@ -277,17 +281,42 @@ class PyPipeGraph:
             for f in remove:
                 os.unlink(f)
 
+    def _link_latest(self, dir, pattern, latest_name, target_is_directory):
+        link_name = dir / latest_name
+        if link_name.exists() or link_name.is_symlink():
+            print("unlinking", link_name)
+            link_name.unlink()
+        else:
+            print("not found", link_name)
+
+        files = sorted(dir.glob(pattern))
+        if files:
+            link_name.symlink_to(
+                files[-1].name, target_is_directory=target_is_directory
+            )
+
+    def _link_logs(self):
+        fn = Path(sys.argv[0]).name
+        self._link_latest(self.log_dir, f"{fn}-*.log", "latest", False)
+
     def _cleanup_errors(self):
-        """Cleanup old errors"""
+        """Cleanup old errors and drop a 'latest' symlink"""
         if not self.error_dir or self.log_retention is None:  # pragma: no cover
             return
         err_dirs = sorted(
-            [x for x in (self.error_dir / self.time_str).parent.glob("*") if x.is_dir()]
+            [
+                x
+                for x in (self.error_dir / self.time_str).parent.glob("*")
+                if x.is_dir() and not x.is_symlink()
+            ]
         )
         if len(err_dirs) > self.log_retention:
             remove = err_dirs[: -self.log_retention]
             for f in remove:
                 shutil.rmtree(f)
+
+    def _link_errors(self):
+        self._link_latest(self.error_dir, f"*", "latest", True)
 
     def _update_history(self, job_results, history):
         """Merge history from previous and this run"""
