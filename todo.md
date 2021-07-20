@@ -120,3 +120,4 @@ Open stuff
 	- 
 	
 	- - test case for running
+	- does adding an *output* file correctly triggere a rebuild? how about removing one?

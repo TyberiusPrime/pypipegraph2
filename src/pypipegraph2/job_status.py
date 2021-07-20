@@ -443,7 +443,7 @@ class JobStatus:
         )
         if len(new_input) != len(old_input):  # we lost or gained an input -> invalidate
             log_info(
-                f"{self.job_id} No of inputs changed (now {len(new_input)}, was {len(old_input)}) -> invalidated {self.validation_state}"
+                f"{self.job_id} No of inputs changed (now {len(new_input)}, was {len(old_input)}) -> invalidated Prev state: {self.validation_state}"
             )
             invalidated = True
         else:  # same length.
