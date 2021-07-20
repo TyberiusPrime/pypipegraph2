@@ -527,8 +527,6 @@ class PyPipeGraph:
         """Add a job.
         Automatically called when a Job() is created
         """
-        if not hasattr(self, "max_job_count"):
-            self.max_job_count = set()
 
         for output in job.outputs:
             if output in self.outputs_to_job_ids:
@@ -545,27 +543,17 @@ class PyPipeGraph:
                 output
             ] = job.job_id  # todo: seperate this into two dicts?
         if job.job_id in self.jobs and self.jobs[job.job_id] is not job:
-            print(
-                ValueError(
-                    "Readding new job in place of old?",
-                    id(job),
-                    id(self.jobs[job.job_id]),
-                    job,
-                    self.jobs[job.job_id],
-                    len(self.jobs) - 1,
-                    self.jobs[job.job_id].job_number,
+            if self.run_mode.is_strict():
+                raise ValueError(
+                    "Added new job in place of old?" f"new job: {job} id: {id(job)}",
+                    f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
                 )
-            )
+            else:
+                print(
+                    "Added new job in place of old?" f"new job: {job} id: {id(job)}",
+                    f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
+                )
         self.jobs[job.job_id] = job
-        if len(self.jobs) < len(self.max_job_count):  # con
-            missing = self.max_job_count.difference(self.jobs.keys())
-            raise ValueError(
-                "number of jobs went down?!",
-                len(self.jobs),
-                len(self.max_job_count),
-                missing,
-            )
-        self.max_job_count = set(self.jobs.keys())
         self.job_dag.add_node(job.job_id)
         if not hasattr(job, "job_number"):
             job.job_number = len(self.jobs) - 1
