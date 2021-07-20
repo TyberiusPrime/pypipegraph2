@@ -186,6 +186,7 @@ class TestPypipegraph2:
             ppg.run()
         assert Path("C").read_text() == "C"
         last = ppg.global_pipegraph.last_run_result
+        print(last.keys())
         assert last["A"].state == JobState.Failed
         assert last["B"].state == JobState.UpstreamFailed
         assert last["C"].state == JobState.Success
