@@ -374,9 +374,10 @@ class TestFileGeneratingJob:
 
         def do_write(of):
             import subprocess
-            subprocess.check_call('echo stdout is cool', shell=True)
-            subprocess.check_call('echo I am stderr>&2', shell=True)
-            of.write_text('hello')
+
+            subprocess.check_call("echo stdout is cool", shell=True)
+            subprocess.check_call("echo I am stderr>&2", shell=True)
+            of.write_text("hello")
 
         job = ppg.FileGeneratingJob(of, do_write)
         ppg.run()
@@ -387,7 +388,6 @@ class TestFileGeneratingJob:
         assert data == data_to_write
         assert job.stdout == "stdout is cool\n"
         assert job.stderr == "I am stderr\n"  # no \n here
-
 
     def test_simple_filegeneration_disabled_stdout_capture(self):
         of = "out/a"
@@ -1708,49 +1708,50 @@ class TestTempFileGeneratingJob:
         assert "thisisit" in str(a.exception)
         assert "Upstream" in str(b.exception)
 
-
     def test_temp_ds_fail_not_rerun(self, job_trace_log):
         def tf(of):
             of.write_text("A")
-            counter('tf')
-        jtf = ppg.TempFileGeneratingJob('A', tf)
+            counter("tf")
+
+        jtf = ppg.TempFileGeneratingJob("A", tf)
+
         def j(of):
-            if counter('j') == "0":
+            if counter("j") == "0":
                 raise ValueError()
-            of.write_text('J')
-        jj = ppg.FileGeneratingJob('J', j)
+            of.write_text("J")
+
+        jj = ppg.FileGeneratingJob("J", j)
         jj.depends_on(jtf)
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
-        assert Path('A').read_text() == 'A'
-        assert Path('tf').read_text() == '1'
-        assert Path('j').read_text() == '1'
-        assert not Path('J').exists()
+        assert Path("A").read_text() == "A"
+        assert Path("tf").read_text() == "1"
+        assert Path("j").read_text() == "1"
+        assert not Path("J").exists()
         ppg.run()
         assert Path("J").read_text() == "J"
-        assert Path('j').read_text() == '2'
-        assert Path('tf').read_text() == '1'
+        assert Path("j").read_text() == "2"
+        assert Path("tf").read_text() == "1"
 
     def test_file_already_presen(self):
         def doit(output_filename):
-            counter('tf')
-            output_filename.write_text('done')
+            counter("tf")
+            output_filename.write_text("done")
 
-
-        j = ppg.TempFileGeneratingJob('.ppg/deleteme', doit)
-        j2 = ppg.FileGeneratingJob('.ppg/shu', lambda of : counter('j2') and of.write_text('hello'))
+        j = ppg.TempFileGeneratingJob(".ppg/deleteme", doit)
+        j2 = ppg.FileGeneratingJob(
+            ".ppg/shu", lambda of: counter("j2") and of.write_text("hello")
+        )
         j2.depends_on(j)
         j2()
-        assert Path('j2').read_text() == '1'
-        assert Path('tf').read_text() == '1'
+        assert Path("j2").read_text() == "1"
+        assert Path("tf").read_text() == "1"
 
-        Path('.ppg/shu').unlink()
-        Path('.ppg/deleteme').write_text('done')
+        Path(".ppg/shu").unlink()
+        Path(".ppg/deleteme").write_text("done")
         j2()
-        assert Path('tf').read_text() == '1' # same hash, file present
-        assert Path('j2').read_text() == '2'
-
-
+        assert Path("tf").read_text() == "1"  # same hash, file present
+        assert Path("j2").read_text() == "2"
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1827,3 +1828,81 @@ class TestMultiTempFileGeneratingJob:
         param = "A"
         with pytest.raises(TypeError):
             ppg.MultiTempFileGeneratingJob(25, lambda of: write("out/A", param))
+
+
+@pytest.mark.usefixtures("ppg2_per_test")
+class TestNoDotDotInJobIds:
+    def test_no_dot_dot(self):
+        """ all ../ must be resolved before it becomes a job id"""
+        import unittest
+
+        collector = set()
+        org_dedup = ppg.jobs._dedup_job
+
+        def collecting_dedup(cls, job_id):
+            collector.add(job_id)
+            return org_dedup(cls, job_id)
+
+        with unittest.mock.patch("pypipegraph2.jobs._dedup_job", collecting_dedup):
+            j = ppg.MultiFileGeneratingJob(["something/../shu"], lambda of: 5)
+            assert j.job_id in collector
+            assert not ".." in j.job_id
+            assert not "something/../shu" in collector
+            collector.clear()
+
+            j = ppg.FileGeneratingJob("something/../shu2", lambda of: 5)
+            assert j.job_id in collector
+            assert not ".." in j.job_id
+            assert not "something/../shu2" in collector
+            collector.clear()
+
+            j = ppg.FileInvariant("something/../shu3")
+            assert j.job_id in collector
+            assert not ".." in j.job_id
+            assert not "something/../shu3" in collector
+            collector.clear()
+
+            with pytest.raises(TypeError):  # we don't resolve function invariant names
+                ppg.FunctionInvariant("something/../shu3b")
+
+            j = ppg.TempFileGeneratingJob("something/../shu4", lambda of: 5)
+            assert j.job_id in collector
+            assert not ".." in j.job_id
+            assert not "something/../shu4" in collector
+            collector.clear()
+
+            j = ppg.MultiTempFileGeneratingJob(["something/../shu5"], lambda of: 5)
+            assert j.job_id in collector
+            assert not ".." in j.job_id
+            assert not "something/../shu4" in collector
+            collector.clear()
+
+            o = object()
+            j = ppg.CachedAttributeLoadingJob("something/../shu6", o, "attr", lambda: 5)
+            assert j.calc.job_id in collector
+            assert j.load.job_id in collector
+            assert not ".." in j.calc.job_id
+            assert not ".." in j.load.job_id
+            assert not "something/../shu6" in collector
+            assert not "loadsomething/../shu6" in collector
+            collector.clear()
+
+            j = ppg.CachedDataLoadingJob(
+                "something/../shu7", lambda: 5, lambda value: 5
+            )
+            assert j.calc.job_id in collector
+            assert j.load.job_id in collector
+            assert not ".." in j.calc.job_id
+            assert not ".." in j.load.job_id
+            assert not "something/../shu7" in collector
+            collector.clear()
+
+            j = ppg.PlotJob(
+                "something/or_other/../shu.png", lambda: None, lambda data: None
+            )
+            assert j.plot.job_id in collector
+            assert j.cache.calc.job_id in collector
+            assert j.cache.load.job_id in collector
+            assert j.table.job_id in collector
+            for job_id in collector:
+                assert not ".." in job_id

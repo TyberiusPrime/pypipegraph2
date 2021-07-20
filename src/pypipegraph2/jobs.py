@@ -42,6 +42,8 @@ def _dedup_job(cls, job_id):
 
     if global_pipegraph is None:
         raise ValueError("Must instantiate a pipegraph before creating any Jobs")
+    if "/../" in job_id:
+        raise TypeError(f".. in job id not allowed. Was {job_id}")
     if global_pipegraph.run_mode.is_strict() and job_id in global_pipegraph.jobs:
         j = global_pipegraph.jobs[job_id]
         if type(j) != cls:
@@ -472,7 +474,7 @@ class MultiFileGeneratingJob(Job):
                                 continue
                             if size_the_same:
                                 new_hash = hashers.hash_file(fn)
-                                if new_hash['hash'] == historical_output[str(fn)].get(
+                                if new_hash["hash"] == historical_output[str(fn)].get(
                                     "hash", "No hash "
                                 ):  # hash the same
                                     continue
@@ -508,7 +510,7 @@ class MultiFileGeneratingJob(Job):
             stderr = open(runner.job_graph.run_dir / f"{runner.start_time:.2f}_{self.job_number}.stderr", "w+")
             exception_out = open(
                 runner.job_graph.run_dir / f"{self.job_number}.exception", "w+b"
-            ) # note the binary!
+            )  # note the binary!
 
             def aborted(sig, stack):
                 raise KeyboardInterrupt()  # pragma: no cover  todo: interactive testing
@@ -767,7 +769,7 @@ class MultiFileGeneratingJob(Job):
 
 class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
     def __new__(cls, output_filename, *args, **kwargs):
-        return _dedup_job(cls, str(output_filename))
+        return super().__new__(cls, [output_filename])
 
     def __init__(
         self,
@@ -799,10 +801,6 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
     """
 
     job_kind = JobKind.Temp
-
-    def __new__(cls, files, *args, **kwargs):
-        files = [Path(x).resolve().relative_to(Path(".").absolute()) for x in files]
-        return Job.__new__(cls, files)
 
     def __init__(
         self,
@@ -836,7 +834,7 @@ class TempFileGeneratingJob(
     job_kind = JobKind.Temp
 
     def __new__(cls, output_filename, *args, **kwargs):
-        return _dedup_job(cls, str(output_filename))
+        return super().__new__(cls, [output_filename])
 
     def __init__(
         self,
@@ -947,7 +945,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
     def __new__(cls, function, name=None):
         name, function = cls._parse_args(function, name)
-        return _dedup_job(cls, name)
+        return super().__new__(cls, [name])
 
     @classmethod
     def _parse_args(cls, function, name):
@@ -1463,13 +1461,18 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     job_kind = JobKind.Invariant
 
     def __new__(cls, file):
-        return _dedup_job(cls, str(Path(file)))
+        return super().__new__(
+            cls, [str(Path(file).resolve().relative_to(Path(".").absolute()))]
+        )
 
     def __init__(self, file):
         from . import global_pipegraph
 
         self.file = Path(file)
-        super().__init__([str(self.file)])
+        super().__init__(
+            [str(Path(file).resolve().relative_to(Path(".").absolute()))]
+        )
+
         self.files = [
             self.file
         ]  # so it's the same whether you are looking at FG, MFG, or FI
@@ -1698,7 +1701,7 @@ def CachedDataLoadingJob(
     )
 
     load_job = DataLoadingJob(
-        "load" + str(cache_filename),
+        "load_" + cache_job.job_id,
         load,
         depend_on_function=depend_on_function,
     )
@@ -1806,7 +1809,7 @@ def CachedAttributeLoadingJob(
         resources=resources,
     )
     load_job = AttributeLoadingJob(
-        "load" + str(cache_filename),
+        "load_" + cache_job.job_id,
         object,
         attribute_name,
         load,
@@ -1965,6 +1968,7 @@ def PlotJob(  # noqa:C901
     plot_job = FileGeneratingJob(
         output_filename, do_plot, depend_on_function=depend_on_function
     )
+    output_filename = plot_job.files[0] # that's resolved!
     param_job = ParameterInvariant(output_filename, render_args)
     plot_job.depends_on(param_job)
 
