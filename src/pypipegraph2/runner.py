@@ -54,7 +54,7 @@ class Runner:
                 job_graph.job_inputs
             )  #  job_graph.job_inputs.copy()
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
-            self.next_job_number = self.job_graph.next_job_number 
+            self.next_job_number = self.job_graph.next_job_number
             self.core_lock = CoreLock(job_graph.cores)
             self.job_states = (
                 {}
@@ -89,13 +89,7 @@ class Runner:
             for job_id, job in self.jobs.items():
                 log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
                 job_numbers.add(job.job_number)
-            if len(job_numbers) != len(
-                self.jobs
-                ):  # paranoid checking that job_numbers are unique
-                print(job_numbers)
-                for job in self.jobs.values():
-                    print(job, job.job_number)
-                raise ValueError(f"job numbers not unique? {len(job_numbers)=}, {len(self.jobs)=}")
+            assert len(job_numbers) == len(self.jobs)
 
             log_job_trace(
                 "dag "
@@ -397,9 +391,11 @@ class Runner:
                         # log_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
                         self._handle_event(ev)
 
-            if self.aborted: # it might have gotten set by an 'abort' following a stop in the meantim!
+            if (
+                self.aborted
+            ):  # it might have gotten set by an 'abort' following a stop in the meantim!
                 # log_job_tarce(f"No of threads when aborting {len(self.threads)}")
-                for t in self.threads: 
+                for t in self.threads:
                     log_job_trace(
                         f"Asking thread {t.ident} to terminate at next Python call {time.time() - self.abort_time}"
                     )
@@ -573,7 +569,9 @@ class Runner:
                     if self.aborted or self.stopped:
                         return
                     else:
-                        raise NotImplementedError("JobCanceled outside of stopped/aborted state?!")
+                        raise NotImplementedError(
+                            "JobCanceled outside of stopped/aborted state?!"
+                        )
                 if hasattr(job_state.error.args[1], "stacks"):
                     stacks = job_state.error.args[1]
                 else:
@@ -616,7 +614,9 @@ class Runner:
                     log(job_state.error)
                     log("no stack available")
             except Exception as e:
-                log_error(f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed.")
+                log_error(
+                    f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed."
+                )
 
     def _push_event(self, event, args, indent=0):
         """Push an event to be handled by the control thread"""
@@ -691,8 +691,8 @@ class Runner:
                         if self.stopped or self.aborted:
                             # log_job_trace(f"aborted waiting {job_id} -> skip")
                             self._push_event("JobSkipped", (job_id,))  # for accounting
-                            #self._push_event("JobFailed", (job_id, exceptions.JobError(exceptions.JobCanceled(), None)))
-                            continue # -> while not stopped -> break
+                            # self._push_event("JobFailed", (job_id, exceptions.JobError(exceptions.JobCanceled(), None)))
+                            continue  # -> while not stopped -> break
                         job.start_time = time.time()  # the *actual* start time
                         job.waiting = False
                         log_trace(f"Go {job_id}")
@@ -721,7 +721,7 @@ class Runner:
                     if os.getpid() != self.pid:
                         os._exit(e.args[0])
                 except Exception as e:
-                    if isinstance(e, KeyboardInterrupt):# happens on abort
+                    if isinstance(e, KeyboardInterrupt):  # happens on abort
 
                         raise
                     elif isinstance(e, exceptions.JobError):
@@ -745,7 +745,7 @@ class Runner:
                     if c > 1:
                         self.jobs_all_cores_in_flight -= 1
                     # log_trace(f"Leaving thread for {job_id}")
-        except (KeyboardInterrupt, SystemExit): # happens on abort
+        except (KeyboardInterrupt, SystemExit):  # happens on abort
             log_trace(f"Keyboard Interrupt received {time.time() - self.abort_time}")
             pass
         except Exception as e:
