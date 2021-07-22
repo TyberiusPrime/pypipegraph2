@@ -104,6 +104,7 @@ class PyPipeGraph:
         self.running = False
         self.prevent_absolute_paths = prevent_absolute_paths
         self._debug_allow_ctrl_c = False  # see examples/abort_when_stalled.py
+        self.next_job_number = 0
 
     def run(
         self,
@@ -567,6 +568,8 @@ class PyPipeGraph:
             self.outputs_to_job_ids[
                 output
             ] = job.job_id  # todo: seperate this into two dicts?
+        # we use job numbers during run
+        # to keep output files unique etc.
         if job.job_id in self.jobs and self.jobs[job.job_id] is not job:
             if self.run_mode.is_strict():
                 raise ValueError(
@@ -574,15 +577,10 @@ class PyPipeGraph:
                     f"new job: {job} id: {id(job)}",
                     f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
                 )
-            # else:
-            # print(
-            # "Added new job in place of old?" f"new job: {job} id: {id(job)}",
-            # f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
-            # )
+        job.job_number = self.next_job_number
+        self.next_job_number += 1
         self.jobs[job.job_id] = job
         self.job_dag.add_node(job.job_id)
-        if not hasattr(job, "job_number"):  # don't reassign
-            job.job_number = len(self.jobs) - 1
 
     def add_edge(self, upstream_job, downstream_job):
         """Declare a dependency between jobs

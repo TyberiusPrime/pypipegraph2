@@ -54,6 +54,7 @@ class Runner:
                 job_graph.job_inputs
             )  #  job_graph.job_inputs.copy()
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
+            self.next_job_number = self.job_graph.next_job_number 
             self.core_lock = CoreLock(job_graph.cores)
             self.job_states = (
                 {}
@@ -88,9 +89,13 @@ class Runner:
             for job_id, job in self.jobs.items():
                 log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
                 job_numbers.add(job.job_number)
-            assert len(job_numbers) == len(
+            if len(job_numbers) != len(
                 self.jobs
-            )  # paranoid checking that job_numbers are unique
+                ):  # paranoid checking that job_numbers are unique
+                print(job_numbers)
+                for job in self.jobs.values():
+                    print(job, job.job_number)
+                raise ValueError(f"job numbers not unique? {len(job_numbers)=}, {len(self.jobs)=}")
 
             log_job_trace(
                 "dag "
@@ -173,7 +178,8 @@ class Runner:
 
     def _add_cleanup(self, dag, job):
         cleanup_job = job.cleanup_job_class(job)
-        cleanup_job.job_number = len(self.jobs)
+        cleanup_job.job_number = self.next_job_number
+        self.next_job_number += 1
         self.jobs[cleanup_job.job_id] = cleanup_job
         dag.add_node(cleanup_job.job_id)
         log_trace(f"creating cleanup {cleanup_job.job_id}")
@@ -392,7 +398,7 @@ class Runner:
                         self._handle_event(ev)
 
             if self.aborted: # it might have gotten set by an 'abort' following a stop in the meantim!
-                log_info(f"No of threads when aborting {len(self.threads)}")
+                # log_job_tarce(f"No of threads when aborting {len(self.threads)}")
                 for t in self.threads: 
                     log_job_trace(
                         f"Asking thread {t.ident} to terminate at next Python call {time.time() - self.abort_time}"
@@ -404,8 +410,6 @@ class Runner:
 
         finally:
             # log_job_trace("Joining threads")
-            self.core_lock.terminate()
-
             for t in self.threads:
                 self.jobs_to_run_que.put(ExitNow)
             for t in self.threads:
@@ -584,11 +588,11 @@ class Runner:
                         ef.write(f"JobId: {job_id}\n")
                         ef.write(f"Class: {job.__class__.__name__}\n")
                         if stacks is not None:
-                        ef.write(
-                            stacks._format_rich_traceback_fallback(
-                                include_locals=True, include_formating=False
+                            ef.write(
+                                stacks._format_rich_traceback_fallback(
+                                    include_locals=True, include_formating=False
+                                )
                             )
-                        )
                         else:
                             ef.write(str(job_state.error))
                             ef.write("no stack available")

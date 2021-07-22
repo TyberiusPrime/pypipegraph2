@@ -36,15 +36,6 @@ class CoreLock:
     def using(self, cores):
         return _CoreLockContextManager(self, cores)
 
-    def terminate(self):
-        log_info("Terminating core lock")
-        self.terminated = True
-        self.condition.acquire() # wake them all up.
-        self.condition.notify_all()
-        self.condition.release()
-        log_info("Terminating core lock2")
-
-
     def _acquire(self, count):
         # logger.info(f" {_thread.get_ident()} - acquire({count}) called")
         if count > self.max_cores:
