@@ -40,6 +40,7 @@ class ConsoleInteractive:
         self.thread = threading.Thread(target=self.loop)
         self._set_terminal_raw()
         self.stopped = False
+        self.leave_thread = False
         self.thread.start()
         print("Type 'help<enter>' to receive a list of valid commands")
         self._cmd = ""
@@ -49,6 +50,7 @@ class ConsoleInteractive:
     def stop(self):
         self.stopped = True
         if hasattr(self, 'thread'):
+            self.leave_thread = True
             self._end_terminal_raw()
             log_job_trace("Terminating interactive thread")
             self.thread.join()
@@ -69,7 +71,7 @@ class ConsoleInteractive:
         log_info("Entering interactive loop")
         while True:
             try:
-                if self.stopped:
+                if self.leave_thread:
                     break
                 try:
                     input = bool(select.select([sys.stdin], [], [], 1)[0])
@@ -105,13 +107,13 @@ class ConsoleInteractive:
                             else:
                                 self._cmd_default()
                         except Exception as e:
-                            log_error(e)
+                            log_error(f"An error occured retreiving job status {e}")
                             self.cmd = ""
                             continue
 
             except KeyboardInterrupt:
                 break
-        log_job_trace("Leaving interactive loop")
+        # log_job_trace("Leaving interactive loop")
 
     def report_status(self, jobs_done, jobs_failed, jobs_total):
         self.last_report_status_args = jobs_done, jobs_failed, jobs_total

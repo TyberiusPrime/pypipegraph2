@@ -1,4 +1,5 @@
-# check if we can abort long running & stalled jobs
+# check if we can stop whilst stalling
+# only one job should finish.
 import pypipegraph2 as ppg
 import time
 from pathlib import Path
@@ -15,11 +16,11 @@ p.mkdir(exist_ok=True, parents=True)
 os.chdir(p)
 
 time_before_abort = 1
-timeout = 60
+timeout = 1
 jobcount = 5
 ppg.new(log_level=logging.INFO, cores=5)
 #tell the ppg to accept the SIGINT we're actually sending
-ppg.global_pipegraph._debug_allow_ctrl_c = 'abort'
+ppg.global_pipegraph._debug_allow_ctrl_c = 'stop'
 
 
 def all_cores(ii):
@@ -29,9 +30,9 @@ def all_cores(ii):
         parent = proc.parent()
         if ii == 0: # only the first guy kills us
             time.sleep(time_before_abort)
-            for tt in range(timeout):
-                subprocess.check_call(["kill", "--signal", "SIGINT", str(parent.pid)])
-                time.sleep(1)
+            subprocess.check_call(["kill", "--signal", "SIGINT", str(parent.pid)])
+
+        time.sleep(timeout)
 
     return ppg.FileGeneratingJob(
         f"all_cores{ii}",
@@ -49,5 +50,5 @@ try:
 except KeyboardInterrupt:
     print("Received expected Keyboard interrupt")
     stop = time.time()
-    print(f"Abort took {stop-start-time_before_abort:.2f} seconds.\n If jobs were completed, you'd have observed something closer to {timeout}")
+    print(f"stop took {stop-start-time_before_abort:.2f} seconds.\n We expected {timeout}.\nNot multiples.")
 
