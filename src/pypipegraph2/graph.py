@@ -483,6 +483,7 @@ class PyPipeGraph:
                     )  # for testing the abort facility.
                 elif self._debug_allow_ctrl_c == "stop":
                     log_info("CTRL-C from debug - calling interactive stop")
+                    self.runner.interactive._cmd_default()
                     self.runner.interactive._cmd_stop(
                         None
                     )  # for testing the abort facility.

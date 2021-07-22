@@ -488,7 +488,7 @@ class Runner:
         decide on downstreams"""
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
-        msg = f"Done in {job_state.run_time:.2f}s [bold]{job_id}[/bold]"
+        msg = f"Done in {job_state.run_time:.2f}s {job_id}"
         if job.run_time >= 1:
             if job.job_kind in (
                 JobKind.Temp,
@@ -633,6 +633,7 @@ class Runner:
                 if job_id is ExitNow:
                     break
                 job = self.jobs[job_id]
+                job.waiting = True
                 job_state = self.job_states[job_id]
                 try:
                     job.start_time = (
@@ -668,6 +669,7 @@ class Runner:
                             #self._push_event("JobFailed", (job_id, exceptions.JobError(exceptions.JobCanceled(), None)))
                             continue # -> while not stopped -> break
                         job.start_time = time.time()  # the *actual* start time
+                        job.waiting = False
                         log_trace(f"Go {job_id}")
                         log_trace(f"\tExecuting {job_id}")
 

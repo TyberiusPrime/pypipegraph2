@@ -24,6 +24,8 @@ ppg.global_pipegraph._debug_allow_ctrl_c = 'stop'
 
 
 def all_cores(ii):
+    if ii == 3:
+        return ppg.MultiFileGeneratingJob(['A','B','C'], lambda ofs: [of.write_text(of.name) for of in ofs], resources=ppg.Resources.AllCores)
     def inner(of, ii=ii):
         of.write_text(str(time.time()))
         proc = psutil.Process()
