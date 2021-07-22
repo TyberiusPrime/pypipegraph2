@@ -364,7 +364,7 @@ class Runner:
                 log_trace(f"<-done - todo: {todo}")
 
             if not self.aborted:
-                while self.jobs_in_flight:
+                while self.jobs_in_flight and not self.aborted:
                     try:
                         ev = self.events.get(0.1)
                     except queue.Empty:  # pragma: no cover
@@ -382,7 +382,7 @@ class Runner:
                         # log_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
                         self._handle_event(ev)
 
-            else:
+            if self.aborted: # it might have gotten set by an 'abort' following a stop in the meantim!
                 for t in self.threads:
                     log_trace(
                         f"Asking thread to terminate at next Python call {time.time() - self.abort_time}"
@@ -488,7 +488,7 @@ class Runner:
         decide on downstreams"""
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
-        msg = f"Done in {job_state.run_time:.2}s [bold]{job_id}[/bold]"
+        msg = f"Done in {job_state.run_time:.2f}s [bold]{job_id}[/bold]"
         if job.run_time >= 1:
             if job.job_kind in (
                 JobKind.Temp,
