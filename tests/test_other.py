@@ -410,15 +410,15 @@ class TestCleanup:
         ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
         lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
         assert ec == [
-            1,
-            2,
-            3,
-            3,
+            1+1,
+            2+1,
+            3+1, # latest
+            3+1,
         ]
         assert lc == [
             1,
             2,
-            3,
+            3, # latest exluded by *.log
             3,
         ]
 
