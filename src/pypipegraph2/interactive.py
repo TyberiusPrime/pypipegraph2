@@ -41,7 +41,7 @@ class ConsoleInteractive:
         self.thread = threading.Thread(target=self.loop)
         self._set_terminal_raw()
         self.stopped = False
-        self.exit_now = False
+        self.leave_thread = False
         self.thread.start()
         print("Type 'help<enter>' to receive a list of valid commands")
         self._cmd = ""
@@ -51,8 +51,8 @@ class ConsoleInteractive:
     def stop(self):
         """Called from the runner"""
         self.stopped = True
-        self.exit_now = True
         if hasattr(self, "thread"):
+            self.leave_thread = True
             async_raise(self.thread.ident, KeyboardInterrupt)
             self._end_terminal_raw()
             log_job_trace("Terminating interactive thread")
@@ -74,7 +74,7 @@ class ConsoleInteractive:
         log_info("Entering interactive loop")
         while True:
             try:
-                if self.exit_now: # can still send other commands, even if stopping
+                if self.leave_thread:
                     break
                 try:
                     input = bool(select.select([sys.stdin], [], [], 1)[0])
@@ -121,7 +121,7 @@ class ConsoleInteractive:
 
             except KeyboardInterrupt:
                 break
-        log_job_trace("Leaving interactive loop")
+        # log_job_trace("Leaving interactive loop")
 
     def report_status(self, jobs_done, jobs_failed, jobs_total):
         self.last_report_status_args = jobs_done, jobs_failed, jobs_total
@@ -154,23 +154,26 @@ class ConsoleInteractive:
         t = time.time()
         to_sort = []
         for job_id in self.runner.jobs_in_flight:
-            rt = t - self.runner.jobs[job_id].start_time
-            to_sort.append((rt, job_id))
+            try:
+                rt = t - self.runner.jobs[job_id].start_time
+                to_sort.append((rt, job_id))
+            except KeyError:
+                pass
         to_sort.sort()
-        print("Status\tJob_Number\tRuntime\tJob id")
-        for ii, (rt, job_id) in enumerate(to_sort):
-            job_no = self.runner.jobs[job_id].job_number
-            if not hasattr(self.runner.jobs[job_id], "aquired_cores"):
-                rt = '-'
+        print(' | '.join(("Job_no", 'Runtime', "Job_id")))
+        print(' | '.join(("------", '-------', "------")))
+            job = self.runner.jobs[job_id]
+            job_no = job.job_number
+            if job.waiting:
+                rt = 'waiting'
             else:
-                rt = f"{rt:.2f}s"
-
-            multi_count = job_id.count(":::")
-            if multi_count >= 1:
-                print_job_id = job_id[: job_id.find(":::") + 3] + "+" + str(multi_count)
+                rt = f"{rt:>6.2f}s"
+            dotdotcount = job_id.count(":::")
+            if dotdotcount:
+                display_job_id = job_id[:job_id.find(":::")+3] + '+' + str(dotdotcount-1)
             else:
-                print_job_id = job_id
-            print(f"{job_no}\t{rt}s\tt{print_job_id}")
+                display_job_id = job_id
+            print(f"{job_no:>6} | {rt} | {display_job_id}")
         print("")
 
     def _cmd_abort(self, _args):
@@ -183,7 +186,15 @@ class ConsoleInteractive:
         """Exit after current jobs finished"""
         if not self.stopped:
             log_info("Run stopped by command")
-            print(f"Having to wait for jobs: {self.runner.jobs_in_flight}")
+            waiting_for = []
+            for job_id in self.runner.jobs_in_flight:
+                try:
+                    if not getattr(self.runner.jobs[job_id], 'waiting', False):
+                        waiting_for.append(job_id)
+                except KeyError:
+                    pass
+
+            log_info(f"Having to wait for jobs: {sorted(waiting_for)}")
             self.runner.stop()
             self.stopped = True
 
@@ -194,11 +205,12 @@ class ConsoleInteractive:
 
     def _cmd_stop_and_again(self, _args):
         "Stop after current jobs, then restart the current python program"
-        if not self.stopped:
-            log_info("Stop_and_again command issued")
-            self.runner.stop()
-            self.stopped = True
-            self.runner.job_graph.restart_afterwards()
+        #log_info("Stop_and_again command issued")
+        #self.runner.stop()
+        #self.stopped = True
+        #self.runner.job_graph.restart_afterwards()
+        self._cmd_stop(_args)
+        self._cmd_again(_args)
 
     def _cmd_kill(self, args):
         try:

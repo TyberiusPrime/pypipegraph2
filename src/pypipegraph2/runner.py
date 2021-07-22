@@ -373,7 +373,7 @@ class Runner:
                 log_trace(f"<-done - todo: {todo}")
 
             if not self.aborted:
-                while self.jobs_in_flight:
+                while self.jobs_in_flight and not self.aborted:
                     try:
                         ev = self.events.get(0.1)
                     except queue.Empty:  # pragma: no cover
@@ -391,7 +391,7 @@ class Runner:
                         # log_trace(f"<-handle {ev[0]} {escape_logging(ev[1][0])}")
                         self._handle_event(ev)
 
-            else: # aborted
+            if self.aborted: # it might have gotten set by an 'abort' following a stop in the meantim!
                 log_info(f"No of threads when aborting {len(self.threads)}")
                 for t in self.threads: 
                     log_job_trace(
@@ -402,20 +402,15 @@ class Runner:
                     except ValueError:
                         pass
 
-                # import psutil
-                # parent_id = psutil.Process(os.getpid())
-                # for child in parent.children(recursive=True):
-                    # log_info(f"Killing child process {child}")
-                    # child.kill()
         finally:
-            log_info(f"Joining threads {len(self.threads)}")
+            # log_job_trace("Joining threads")
             self.core_lock.terminate()
 
             for t in self.threads:
                 self.jobs_to_run_que.put(ExitNow)
             for t in self.threads:
                 t.join()
-            log_info("joined threads")
+            # log_job_trace("Joined threads")
             # now capture straglers
             # todo: replace this with something guranteed to work.
             while True:
@@ -508,7 +503,7 @@ class Runner:
         decide on downstreams"""
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
-        msg = f"Done in {job_state.run_time:.2f}s [bold]{job_id}[/bold] no: {job.job_number}"
+        msg = f"Done in {job_state.run_time:.2f}s {job_id}"
         if job.run_time >= 1:
             if job.job_kind in (
                 JobKind.Temp,
@@ -569,47 +564,55 @@ class Runner:
         else:
             log = log_job_trace
         if not self._job_failed_last_time(job_id):
-            if hasattr(job_state.error.args[1], "stacks"):
-                stacks = job_state.error.args[1]
-            else:
-                stacks = None
-            if self.job_graph.error_dir is not None:
-                error_file = (
-                    self.job_graph.error_dir
-                    / self.job_graph.time_str
-                    / (str(job.job_number) + "_exception.txt")
-                )
-                with open(error_file, "w") as ef:
-                    ef.write(f"JobId: {job_id}\n")
-                    ef.write(f"Class: {job.__class__.__name__}\n")
-                    if stacks is not None:
+            try:
+                if isinstance(job_state.error.args[0], exceptions.JobCanceled):
+                    if self.aborted or self.stopped:
+                        return
+                    else:
+                        raise NotImplementedError("JobCanceled outside of stopped/aborted state?!")
+                if hasattr(job_state.error.args[1], "stacks"):
+                    stacks = job_state.error.args[1]
+                else:
+                    stacks = None
+                if self.job_graph.error_dir is not None:
+                    error_file = (
+                        self.job_graph.error_dir
+                        / self.job_graph.time_str
+                        / (str(job.job_number) + "_exception.txt")
+                    )
+                    with open(error_file, "w") as ef:
+                        ef.write(f"JobId: {job_id}\n")
+                        ef.write(f"Class: {job.__class__.__name__}\n")
+                        if stacks is not None:
                         ef.write(
                             stacks._format_rich_traceback_fallback(
                                 include_locals=True, include_formating=False
                             )
                         )
-                    else:
-                        ef.write(str(job_state.error))
-                        ef.write("no stack available")
-                    if hasattr(job, "stdout"):
-                        ef.write("\n\n")
-                        ef.write("job stdout:\n")
-                        ef.write(str(job.stdout))
-                    if hasattr(job, "stderr"):
-                        ef.write("\n\n")
-                        ef.write("job stderr:\n")
-                        ef.write(str(job.stderr))
+                        else:
+                            ef.write(str(job_state.error))
+                            ef.write("no stack available")
+                        if hasattr(job, "stdout"):
+                            ef.write("\n\n")
+                            ef.write("job stdout:\n")
+                            ef.write(str(job.stdout))
+                        if hasattr(job, "stderr"):
+                            ef.write("\n\n")
+                            ef.write("job stderr:\n")
+                            ef.write(str(job.stderr))
 
-                log(
-                    f"Failed after {job_state.run_time:.2}s: [bold]{job_id}[/bold]. Exception (incl. locals, stdout and stderr) logged to {error_file}"
-                )
-            else:
-                log(f"Failed job: {job_id}")
-            if stacks is not None:
-                log(escape_logging(stacks._format_rich_traceback_fallback(False)))
-            else:
-                log(job_state.error)
-                log("no stack available")
+                    log(
+                        f"Failed after {job_state.run_time:.2}s: {job_id}. Exception (incl. locals, stdout and stderr) logged to {error_file}"
+                    )
+                else:
+                    log(f"Failed job: {job_id}")
+                if stacks is not None:
+                    log(escape_logging(stacks._format_rich_traceback_fallback(False)))
+                else:
+                    log(job_state.error)
+                    log("no stack available")
+            except Exception as e:
+                log_error(f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed.")
 
     def _push_event(self, event, args, indent=0):
         """Push an event to be handled by the control thread"""
@@ -642,14 +645,16 @@ class Runner:
         cwd = (
             os.getcwd()
         )  # so we can detect if the job cahnges the cwd (don't do that!)
+        job_id = None
         try:
             while not self.stopped:
                 job_id = self.jobs_to_run_que.get()
                 self.jobs_in_flight.append(job_id)
-                log_trace(f"Executing thread, got {job_id}")
+                # log_job_trace(f"Executing thread, got {job_id}")
                 if job_id is ExitNow:
                     break
                 job = self.jobs[job_id]
+                job.waiting = True
                 job_state = self.job_states[job_id]
                 try:
                     job.start_time = (
@@ -679,11 +684,13 @@ class Runner:
                     if c == 0:
                         log_error(f"Cores was 0! {job.job_id} {job.resources}")
                     with self.core_lock.using(c):
-                        if self.stopped or self.aborted: # we were asked to stop while waiting for the core lock
-                            raise KeyboardInterrupt("PPG run stopped")
-
-                        job.aquired_cores = True
+                        if self.stopped or self.aborted:
+                            # log_job_trace(f"aborted waiting {job_id} -> skip")
+                            self._push_event("JobSkipped", (job_id,))  # for accounting
+                            #self._push_event("JobFailed", (job_id, exceptions.JobError(exceptions.JobCanceled(), None)))
+                            continue # -> while not stopped -> break
                         job.start_time = time.time()  # the *actual* start time
+                        job.waiting = False
                         log_trace(f"Go {job_id}")
                         log_trace(f"\tExecuting {job_id}")
 
@@ -701,7 +708,7 @@ class Runner:
                                 raise exceptions.JobContractError(
                                     f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
                                 )
-                        log_job_trace(f"pushing success {job_id}")
+                        # log_job_trace(f"pushing success {job_id}")
                         self._push_event("JobSuccess", (job_id, outputs))
                 except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
                     log_trace(
@@ -733,6 +740,7 @@ class Runner:
                     self.jobs_in_flight.remove(job_id)
                     if c > 1:
                         self.jobs_all_cores_in_flight -= 1
+                    # log_trace(f"Leaving thread for {job_id}")
         except (KeyboardInterrupt, SystemExit): # happens on abort
             log_trace(f"Keyboard Interrupt received {time.time() - self.abort_time}")
             pass
@@ -740,6 +748,7 @@ class Runner:
             log_error(
                 f"Captured exception outside of loop - should not happen {type(e)} {str(e)}. Check error log"
             )
+        # log_job_trace(f"left thread {len(self.threads)} {job_id}")
 
 
 class JobCollector:

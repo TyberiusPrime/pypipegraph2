@@ -103,6 +103,7 @@ class PyPipeGraph:
         self.cache_folder = self.cache_dir  # todo: change all occurances?
         self.running = False
         self.prevent_absolute_paths = prevent_absolute_paths
+        self._debug_allow_ctrl_c = False  # see examples/abort_when_stalled.py
 
     def run(
         self,
@@ -505,7 +506,28 @@ class PyPipeGraph:
 
         def sigint(*args, **kwargs):
             if self.run_mode is (RunMode.CONSOLE):
-                log_info("CTRL-C has been disabled")
+                if self._debug_allow_ctrl_c == "abort":
+                    log_info("CTRL-C from debug - calling interactive abort")
+                    self.runner.interactive._cmd_abort(
+                        None
+                    )  # for testing the abort facility.
+                elif self._debug_allow_ctrl_c == "stop":
+                    log_info("CTRL-C from debug - calling interactive stop")
+                    self.runner.interactive._cmd_default()
+                    self.runner.interactive._cmd_stop(
+                        None
+                    )  # for testing the abort facility.
+                elif self._debug_allow_ctrl_c == "stop&abort":
+                    log_info("CTRL-C from debug - calling interactive stop")
+                    self.runner.interactive._cmd_stop(
+                        None
+                    )  # for testing the abort facility.
+                    self._debug_allow_ctrl_c = 'abort'
+
+
+                else:
+                    log_info("CTRL-C has been disabled. Type 'abort<CR>' to abort")
+                # TODO remove
             else:  # pragma: no cover - todo: interactive
                 log_info("CTRL-C received. Killing all running jobs.")
                 if hasattr(self, "runner"):

@@ -137,3 +137,6 @@ class TestcompatibilityLayerMore:
         assert hasattr(
             a.generating_function, "wrapped_function"
         )  # is a wrapped function
+
+    def test_rc_cores_available(self):
+        assert ppg1.util.global_pipegraph.rc.cores_available == ppg2.global_pipegraph.cores
