@@ -1,3 +1,6 @@
 syntax: glob
 *.pyc
 src/*.egg-info
+.coverage
+.pytest_cache/
+tests/ppg1_compatibility_layer/run/
