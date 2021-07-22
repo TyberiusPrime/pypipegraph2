@@ -652,6 +652,9 @@ class Runner:
                     if c == 0:
                         log_error(f"Cores was 0! {job.job_id} {job.resources}")
                     with self.core_lock.using(c):
+                        if self.stopped or self.aborted:
+                            log_info(f"aborted waiting {job_id}")
+                            continue # -> while not stopped
                         job.start_time = time.time()  # the *actual* start time
                         log_trace(f"Go {job_id}")
                         log_trace(f"\tExecuting {job_id}")
@@ -701,6 +704,7 @@ class Runner:
                     self.jobs_in_flight.remove(job_id)
                     if c > 1:
                         self.jobs_all_cores_in_flight -= 1
+                    log_trace(f"Leaving thread for {job_id}")
         except (KeyboardInterrupt, SystemExit):
             log_trace(f"Keyboard Interrupt received {time.time() - self.abort_time}")
             pass

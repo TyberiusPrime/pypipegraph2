@@ -24,15 +24,15 @@ from rich.console import Console
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
-#if "pytest" in sys.modules:  # pragma: no branch
-    #log_out = sys.stderr
-#else:  # pragma: no cover
-    #log_out = RichHandler(markup=True, console=console)
-#logger.add(
-    #sink=log_out,
-    #format="{elapsed} {message}",
-    #level=logging.INFO,
-#)
+# if "pytest" in sys.modules:  # pragma: no branch
+# log_out = sys.stderr
+# else:  # pragma: no cover
+# log_out = RichHandler(markup=True, console=console)
+# logger.add(
+# sink=log_out,
+# format="{elapsed} {message}",
+# level=logging.INFO,
+# )
 
 time_format = "%Y-%m-%d_%H-%M-%S"
 
@@ -103,6 +103,7 @@ class PyPipeGraph:
         self.cache_folder = self.cache_dir  # todo: change all occurances?
         self.running = False
         self.prevent_absolute_paths = prevent_absolute_paths
+        self._debug_allow_ctrl_c = False  # see examples/abort_when_stalled.py
 
     def run(
         self,
@@ -120,7 +121,7 @@ class PyPipeGraph:
                 None,
                 dump_graphml=dump_graphml,
             )
-        except JobsFailed as e: # shorten the traceback considerably!
+        except JobsFailed as e:  # shorten the traceback considerably!
             raise JobsFailed(e.args[0], exceptions=e.exceptions)
 
     def _run(
@@ -172,7 +173,9 @@ class PyPipeGraph:
                     level=self.log_level,
                 )
             if "pytest" in sys.modules:  # pragma: no branch
-                log_id = logger.add(sink=sys.stdout, level=self.log_level)  # pragma: no cover
+                log_id = logger.add(
+                    sink=sys.stdout, level=self.log_level
+                )  # pragma: no cover
             import threading
 
             log_info(
@@ -473,7 +476,19 @@ class PyPipeGraph:
 
         def sigint(*args, **kwargs):
             if self.run_mode is (RunMode.CONSOLE):
-                log_info("CTRL-C has been disabled")
+                if self._debug_allow_ctrl_c == "abort":
+                    log_info("CTRL-C from debug - calling interactive abort")
+                    self.runner.interactive._cmd_abort(
+                        None
+                    )  # for testing the abort facility.
+                elif self._debug_allow_ctrl_c == "stop":
+                    log_info("CTRL-C from debug - calling interactive stop")
+                    self.runner.interactive._cmd_stop(
+                        None
+                    )  # for testing the abort facility.
+                else:
+                    log_info("CTRL-C has been disabled. Type 'abort<CR>' to abort")
+                # TODO remove
             else:  # pragma: no cover - todo: interactive
                 log_info("CTRL-C received. Killing all running jobs.")
                 if hasattr(self, "runner"):
