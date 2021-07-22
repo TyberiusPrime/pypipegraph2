@@ -24,6 +24,7 @@ from rich.console import Console
 
 
 logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
+logger.level("INFO", color="", icon="")
 # if "pytest" in sys.modules:  # pragma: no branch
 # log_out = sys.stderr
 # else:  # pragma: no cover
@@ -160,7 +161,7 @@ class PyPipeGraph:
             self.log_dir.mkdir(exist_ok=True, parents=True)
             fn = Path(sys.argv[0]).name
             self.log_file = self.log_dir / f"{fn}-{self.time_str}.log"
-            logger.remove() #no default logging
+            logger.remove()  # no default logging
             logger.add(
                 open(self.log_file, "w"), level=min(self.log_level, logging.INFO)
             )
@@ -175,9 +176,11 @@ class PyPipeGraph:
                     ),
                     level=self.log_level,
                 )
-            #if "pytest" in sys.modules:  # pragma: no branch
+            # if "pytest" in sys.modules:  # pragma: no branch
             log_id = logger.add(
-                sink=sys.stdout, level=logging.INFO # don't spam stdout
+                sink=sys.stdout,
+                level=logging.INFO,  # don't spam stdout
+                format="\r  <blue>{time:HH:mm:ss.SSS}</blue> <bold>|</bold> <level>{message}</level>",
             )  # pragma: no cover
             import threading
 
@@ -523,8 +526,7 @@ class PyPipeGraph:
                     self.runner.interactive._cmd_stop(
                         None
                     )  # for testing the abort facility.
-                    self._debug_allow_ctrl_c = 'abort'
-
+                    self._debug_allow_ctrl_c = "abort"
 
                 else:
                     log_info("CTRL-C has been disabled. Type 'abort<CR>' to abort")

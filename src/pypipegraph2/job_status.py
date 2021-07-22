@@ -5,10 +5,12 @@ import time
 from .util import (
     log_error,
     log_info,
+    log_debug,
     log_job_trace,
     log_trace,
     log_warning,
     escape_logging,
+    shorten_job_id,
 )
 
 
@@ -443,7 +445,7 @@ class JobStatus:
         )
         if len(new_input) != len(old_input):  # we lost or gained an input -> invalidate
             log_info(
-                f"{self.job_id} No of inputs changed (now {len(new_input)}, was {len(old_input)}) -> invalidated Prev state: {self.validation_state}"
+                f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed ({len(old_input)}->{len(new_input)})"
             )
             invalidated = True
         else:  # same length.
@@ -454,8 +456,11 @@ class JobStatus:
                 for key, old_hash in old_input.items():
                     cmp_job = self.runner.jobs[self.runner.outputs_to_job_ids[key]]
                     if not cmp_job.compare_hashes(old_hash, new_input[key]):
-                        log_job_trace(
-                            f"{self.job_id} input {key} changed {escape_logging(old_hash)} {escape_logging(new_input[key])} {cmp_job}"
+                        log_info(
+                            "Invalidated {shorten_job_id(self.job_id)} - Hash change: {key}"
+                        )
+                        log_debug(
+                            "Invalidated {shorten_job_id(job_id)} - Hash change, {key} was {escape_logging(old_hash)} now {escape_logging(new_input[key])} {cmp_job}"
                         )
                         invalidated = True
                         break
@@ -472,7 +477,12 @@ class JobStatus:
                             self.runner.outputs_to_job_ids[old_key]
                         ]
                         if not cmp_job.compare_hashes(old_hash, new_input[old_key]):
-                            log_info(f"{self.job_id} input {old_key} changed")
+                            log_info(
+                                f"Invalidated: {shorten_job_id(self.job_id)} hash change: {old_key}"
+                            )
+                            log_debug(
+                                f"Invalidated: {shorten_job_id(self.job_id)} hash_change: {old_key} Was {escape_logging(old_hash)}, now {escape_logging(new_input[old_key])}"
+                            )
                             invalidated = True
                             break
                     else:
@@ -481,15 +491,21 @@ class JobStatus:
                         count = _dict_values_count_hashed(new_input, old_hash)
                         if count:
                             if count > 1:
-                                log_job_trace(
-                                    f"{self.job_id} {old_key} mapped to multiple possible replacement hashes. Invalidating to be better safe than sorry"
+                                # log_job_trace(
+                                # f"{self.job_id} {old_key} mapped to multiple possible replacement hashes. Invalidating to be better safe than sorry"
+                                # )
+                                log_info(
+                                    "Invalidated: {shorten_job_id(self.job_id)}. Old matched multiple new keys"
                                 )
                                 invalidated = True
                                 break
                             # else:
                             # pass # we found a match
                         else:  # no match found
-                            log_trace(f"{self.job_id} {old_key} - no match found")
+                            # log_trace(f"{self.job_id} {old_key} - no match found")
+                            log_info(
+                                "Invalidated: {shorten_job_id(self.job_id)}. Old matched no new keys"
+                            )
                             invalidated = True
                             break
                 log_job_trace(f"{self.job_id} invalidated: {invalidated}")

@@ -3,7 +3,7 @@ import io
 import time
 import os
 import signal
-from .util import log_info, log_error, log_warning, log_debug, log_job_trace
+from .util import log_info, log_error, log_warning, log_debug, log_job_trace, shorten_job_id
 import select
 import termios
 import tty
@@ -37,16 +37,17 @@ class ConsoleInteractive:
 
     def start(self, runner):
         self.runner = runner
-        self.last_report_status_args = (0, 0, 0)
+        self.last_report_status_args = (0, 0, len(runner.jobs))
         self.thread = threading.Thread(target=self.loop)
         self._set_terminal_raw()
         self.stopped = False
         self.leave_thread = False
         self.thread.start()
-        print("Type 'help<enter>' to receive a list of valid commands")
+        log_info("Type 'help<enter>' to receive a list of valid commands")
         self._cmd = ""
         self.status = rich.status.Status("", console=console)
         self.status.start()
+        self.report_status(*self.last_report_status_args)
 
     def stop(self):
         """Called from the runner"""
@@ -125,15 +126,16 @@ class ConsoleInteractive:
 
     def report_status(self, jobs_done, jobs_failed, jobs_total):
         self.last_report_status_args = jobs_done, jobs_failed, jobs_total
-        msg = f"[red]Progress[/red] {jobs_done} / {jobs_total}. In flight: {len(self.runner.jobs_in_flight)} "
+        msg = f"[dim]Progress[/dim] {jobs_done} / {jobs_total}."  # In flight: {len(self.runner.jobs_in_flight)} "
         if self.cmd:
-            msg += f"Cmd: {self.cmd}"
+            msg += f" Cmd: {self.cmd}"
         else:
             if self.stopped:
-                msg += "Exiting..."
+                msg += " Exiting..."
             else:
-                msg += "Type help<enter> for commands"
-        self.status.update(status=msg)
+                # msg += "Type help<enter> for commands"
+                pass
+        self.status.update(status=msg + "\r\n")
 
     def _cmd_help(self, _args):
         print("Help for interactive mode")
@@ -160,20 +162,16 @@ class ConsoleInteractive:
             except KeyError:
                 pass
         to_sort.sort()
-        print(' | '.join(("Job_no", 'Runtime', "Job_id")))
-        print(' | '.join(("------", '-------', "------")))
+        print(" | ".join(("Job_no", "Runtime", "Job_id")))
+        print(" | ".join(("------", "-------", "------")))
         for rt, job_id in to_sort:
             job = self.runner.jobs[job_id]
             job_no = job.job_number
             if job.waiting:
-                rt = 'waiting'
+                rt = "waiting"
             else:
                 rt = f"{rt:>6.2f}s"
-            dotdotcount = job_id.count(":::")
-            if dotdotcount:
-                display_job_id = job_id[:job_id.find(":::")+3] + '+' + str(dotdotcount-1)
-            else:
-                display_job_id = job_id
+            display_job_id = shorten_job_id(job_id)
             print(f"{job_no:>6} | {rt} | {display_job_id}")
         print("")
 
@@ -190,7 +188,7 @@ class ConsoleInteractive:
             waiting_for = []
             for job_id in self.runner.jobs_in_flight:
                 try:
-                    if not getattr(self.runner.jobs[job_id], 'waiting', False):
+                    if not getattr(self.runner.jobs[job_id], "waiting", False):
                         waiting_for.append(job_id)
                 except KeyError:
                     pass
@@ -206,10 +204,10 @@ class ConsoleInteractive:
 
     def _cmd_stop_and_again(self, _args):
         "Stop after current jobs, then restart the current python program"
-        #log_info("Stop_and_again command issued")
-        #self.runner.stop()
-        #self.stopped = True
-        #self.runner.job_graph.restart_afterwards()
+        # log_info("Stop_and_again command issued")
+        # self.runner.stop()
+        # self.stopped = True
+        # self.runner.job_graph.restart_afterwards()
         self._cmd_stop(_args)
         self._cmd_again(_args)
 

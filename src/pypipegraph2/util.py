@@ -145,3 +145,11 @@ def log_job_trace(msg):
 def log_trace(msg):
     if do_jobtrace_log:  # pragma: no cover
         logger.opt(depth=1).trace(msg)
+
+
+def shorten_job_id(job_id):
+    dotdotcount = job_id.count(":::")
+    if dotdotcount:
+        return job_id[: job_id.find(":::") + 3] + "+" + str(dotdotcount - 1)
+    else:
+        return job_id
