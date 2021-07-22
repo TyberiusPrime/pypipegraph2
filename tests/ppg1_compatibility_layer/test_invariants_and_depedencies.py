@@ -399,6 +399,7 @@ class TestInvariant:
         assert read("out/sentinel") == "2"  # job does not get rerun...
         assert read(of) == "shu"  # job does not get rerun...
 
+    @pytest.mark.skip # we no longer do that, opting to calculate our own improved hash instead
     def test_file_invariant_with_md5sum(self, ppg1_compatibility_test):
         of = "out/a"
 
