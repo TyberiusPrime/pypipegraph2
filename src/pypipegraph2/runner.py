@@ -664,6 +664,9 @@ class Runner:
                     job.start_time = (
                         time.time()
                     )  # assign it just in case anything fails before acquiring the lock
+                    job.stop_time = float('nan')
+                    job.run_time = float('nan')
+
                     c = job.resources.to_number(self.core_lock.max_cores)
                     log_trace(
                         f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {len(self.jobs_in_flight)}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
@@ -690,7 +693,7 @@ class Runner:
                     with self.core_lock.using(c):
                         if self.stopped or self.aborted:
                             # log_job_trace(f"aborted waiting {job_id} -> skip")
-                            self._push_event("JobSkipped", (job_id,))  # for accounting
+                            event = ("JobSkipped", (job_id,))  # for accounting
                             #self._push_event("JobFailed", (job_id, exceptions.JobError(exceptions.JobCanceled(), None)))
                             continue # -> while not stopped -> break
                         job.start_time = time.time()  # the *actual* start time
@@ -713,7 +716,7 @@ class Runner:
                                     f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
                                 )
                         # log_job_trace(f"pushing success {job_id}")
-                        self._push_event("JobSuccess", (job_id, outputs))
+                        event = ("JobSuccess", (job_id, outputs))
                 except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
                     log_trace(
                         "SystemExit in spawned process -> converting to hard exit"
@@ -735,7 +738,7 @@ class Runner:
                             e,
                             captured_tb,
                         )
-                    self._push_event("JobFailed", (job_id, e))
+                    event = ("JobFailed", (job_id, e))
                 finally:
                     job.stop_time = time.time()
                     job.run_time = job.stop_time - job.start_time
@@ -744,6 +747,7 @@ class Runner:
                     self.jobs_in_flight.remove(job_id)
                     if c > 1:
                         self.jobs_all_cores_in_flight -= 1
+                    self._push_event(*event)
                     # log_trace(f"Leaving thread for {job_id}")
         except (KeyboardInterrupt, SystemExit): # happens on abort
             log_trace(f"Keyboard Interrupt received {time.time() - self.abort_time}")
