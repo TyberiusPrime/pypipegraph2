@@ -447,6 +447,10 @@ class JobStatus:
             log_info(
                 f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed ({len(old_input)}->{len(new_input)})"
             )
+            log_debug(
+                f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed ({sorted(old_input.keys())}->{sorted(new_input.keys())})"
+            )
+
             invalidated = True
         else:  # same length.
             if set(old_input.keys()) == set(

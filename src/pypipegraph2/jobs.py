@@ -1275,12 +1275,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         """
 
         out = StringIO()
-        old_stdout = sys.stdout
-        try:
-            sys.stdout = out
-            dis.dis(code)
-        finally:
-            sys.stdout = old_stdout
+        dis.dis(code, file=out)
         discode = out.getvalue().split("\n")
         # now, eat of the line nos, if there are any
         res = []
