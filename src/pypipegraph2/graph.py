@@ -19,6 +19,7 @@ from .util import CPUs, console
 from .enums import RunMode
 from .exceptions import JobsFailed, _RunAgain
 from .util import log_info, log_error, log_warning, log_debug, log_trace
+from . import util
 from rich.logging import RichHandler
 from rich.console import Console
 
@@ -163,7 +164,7 @@ class PyPipeGraph:
             self.log_file = self.log_dir / f"{fn}-{self.time_str}.log"
             logger.remove()  # no default logging
             logger.add(
-                open(self.log_file, "w"), level=min(self.log_level, logging.INFO)
+                open(self.log_file, "w"), level=min(self.log_level, logging.DEBUG)
             )
             if False:
                 logger.add(
@@ -179,8 +180,14 @@ class PyPipeGraph:
             # if "pytest" in sys.modules:  # pragma: no branch
             log_id = logger.add(
                 sink=sys.stdout,
-                level=logging.INFO,  # don't spam stdout
-                format="\r  <blue>{time:HH:mm:ss.SSS}</blue> <bold>|</bold> <level>{message}</level>",
+                level=logging.INFO
+                if not util.do_jobtrace_log
+                else 6,  # don't spam stdout
+                format=(
+                    "\r  <blue>{elapsed}s</blue> <bold>|</bold> <level>{message}</level>"
+                    if not util.do_jobtrace_log
+                    else "<blue>{elapsed}s</blue> | <level>{level}</level> | <bold>|</bold>{file}:{line} <level>{message}</level>"
+                ),
             )  # pragma: no cover
             import threading
 
