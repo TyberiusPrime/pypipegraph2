@@ -181,6 +181,10 @@ class ConsoleInteractive:
         self.runner.abort()
         self.stopped = True
 
+    def _cmd_die(self, _args):
+        log_error("Sic semper running processes") 
+        sys.exit(1)
+
     def _cmd_stop(self, _args):
         """Exit after current jobs finished"""
         if not self.stopped:
