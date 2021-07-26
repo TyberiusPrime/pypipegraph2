@@ -3,7 +3,14 @@ import io
 import time
 import os
 import signal
-from .util import log_info, log_error, log_warning, log_debug, log_job_trace, shorten_job_id
+from .util import (
+    log_info,
+    log_error,
+    log_warning,
+    log_debug,
+    log_job_trace,
+    shorten_job_id,
+)
 import select
 import termios
 import tty
@@ -11,6 +18,11 @@ import threading
 from .util import console
 import rich.status
 from .parallel import async_raise
+from collections import namedtuple
+
+StatusReport = namedtuple(
+    "StatusReport", ["running", "waiting", "done", "total", "failed"]
+)
 
 
 class ConsoleInteractive:
@@ -37,7 +49,7 @@ class ConsoleInteractive:
 
     def start(self, runner):
         self.runner = runner
-        self.last_report_status_args = (0, 0, len(runner.jobs))
+        self.last_report_status_args = StatusReport(0, 0, 0, len(runner.jobs), 0)
         self.thread = threading.Thread(target=self.loop)
         self._set_terminal_raw()
         self.stopped = False
@@ -47,7 +59,7 @@ class ConsoleInteractive:
         self._cmd = ""
         self.status = rich.status.Status("", console=console)
         self.status.start()
-        self.report_status(*self.last_report_status_args)
+        self.report_status(self.last_report_status_args)
 
     def stop(self):
         """Called from the runner"""
@@ -69,7 +81,7 @@ class ConsoleInteractive:
     @cmd.setter
     def cmd(self, value):
         self._cmd = value
-        self.report_status(*self.last_report_status_args)
+        self.report_status(self.last_report_status_args)
 
     def loop(self):
         log_info("Entering interactive loop")
@@ -112,7 +124,7 @@ class ConsoleInteractive:
                                     print("No such command")
                             else:
                                 self._cmd_default()
-                            self.report_status(*self.last_report_status_args)
+                            self.report_status(self.last_report_status_args)
                         except Exception as e:
                             log_error(
                                 f"An exception occured during command: {e} {type(e)}"
@@ -124,9 +136,10 @@ class ConsoleInteractive:
                 break
         # log_job_trace("Leaving interactive loop")
 
-    def report_status(self, jobs_done, jobs_failed, jobs_total):
-        self.last_report_status_args = jobs_done, jobs_failed, jobs_total
-        msg = f"[dim]Progress[/dim] {jobs_done} / {jobs_total}."  # In flight: {len(self.runner.jobs_in_flight)} "
+    def report_status(self, report):
+        self.last_report_status_args = report
+        # msg = f"[dim]Running/Waiting Done/Total[/dim] {report.running} / {report.waiting} {report.done} / {report.total}."  # In flight: {len(self.runner.jobs_in_flight)} "
+        msg = f"[dim]T:[/dim]{report.total} D:{report.done} R:{report.running} W:{report.waiting} F:{report.failed}"
         if self.cmd:
             msg += f" Cmd: {self.cmd}"
         else:

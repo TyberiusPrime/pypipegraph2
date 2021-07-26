@@ -19,7 +19,7 @@ from threading import Thread
 from . import ppg_traceback
 import threading
 from rich.console import Console
-from .interactive import ConsoleInteractive
+from .interactive import ConsoleInteractive, StatusReport
 from .util import log_info, log_error, log_warning, log_debug, log_trace, log_job_trace
 import copy
 from .job_status import JobStatus
@@ -56,6 +56,7 @@ class Runner:
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
             self.next_job_number = self.job_graph.next_job_number
             self.core_lock = CoreLock(job_graph.cores)
+            self.fail_counter = 0
             self.job_states = (
                 {}
             )  # get's partially filled by modify_dag, and then later in this function
@@ -344,7 +345,7 @@ class Runner:
         self.jobs_done = 0
         try:
             self._interactive_start()
-            self._interactive_report()
+            #self._interactive_report()
             while todo:
                 try:
                     ev = self.events.get(timeout=self.event_timeout)
@@ -457,7 +458,22 @@ class Runner:
             if (
                 t - self.last_status_time >= 0.5
             ):  # don't update more than every half second.
-                self.interactive.report_status(self.jobs_done, 0, len(self.dag))
+                waiting = len(
+                    [
+                        x
+                        for x in self.jobs_in_flight
+                        if getattr(self.jobs[x], 'waiting', False)
+                    ]
+                )
+                self.interactive.report_status(
+                    StatusReport(
+                        len(self.jobs_in_flight) - waiting,
+                        waiting,
+                        self.jobs_done,
+                        len(self.dag),
+                        self.fail_counter
+                    )
+                )
                 self.last_status_time = t
 
     def abort(self):
@@ -488,6 +504,7 @@ class Runner:
             # self._handle_job_skipped(*event[1])
             todo -= 1
         elif event[0] == "JobFailed":
+            self.fail_counter += 1
             self._handle_job_failed(*event[1])
             todo -= 1
         elif event[0] == "JobUpstreamFailed":
@@ -660,12 +677,13 @@ class Runner:
                 job = self.jobs[job_id]
                 job.waiting = True
                 job_state = self.job_states[job_id]
+                self._interactive_report()
                 try:
                     job.start_time = (
                         time.time()
                     )  # assign it just in case anything fails before acquiring the lock
-                    job.stop_time = float('nan')
-                    job.run_time = float('nan')
+                    job.stop_time = float("nan")
+                    job.run_time = float("nan")
 
                     c = job.resources.to_number(self.core_lock.max_cores)
                     log_trace(
@@ -698,6 +716,7 @@ class Runner:
                             continue  # -> while not stopped -> break
                         job.start_time = time.time()  # the *actual* start time
                         job.waiting = False
+                        self._interactive_report()
                         log_trace(f"Go {job_id}")
                         log_trace(f"\tExecuting {job_id}")
 
