@@ -291,7 +291,7 @@ class PyPipeGraph:
     def _link_latest(self, dir, pattern, latest_name, target_is_directory):
         link_name = dir / latest_name
         if link_name.exists() or link_name.is_symlink():
-            print("unlinking", link_name)
+            # print("unlinking", link_name)
             link_name.unlink()
         else:
             print("not found", link_name)
