@@ -602,6 +602,10 @@ class Runner:
                     with open(error_file, "w") as ef:
                         ef.write(f"JobId: {job_id}\n")
                         ef.write(f"Class: {job.__class__.__name__}\n")
+                        ef.write("Input jobs:\n")
+                        for parent_id in sorted(self.dag.predecessors(job_id)):
+                            ef.write(f"\t{parent_id} ({self.jobs[parent_id].__class__.__name__})\n")
+                        ef.write("\n\n")
                         if stacks is not None:
                             ef.write(
                                 stacks._format_rich_traceback_fallback(
@@ -678,6 +682,7 @@ class Runner:
                 job.waiting = True
                 job_state = self.job_states[job_id]
                 self._interactive_report()
+                event = None
                 try:
                     job.start_time = (
                         time.time()
@@ -766,7 +771,8 @@ class Runner:
                     self.jobs_in_flight.remove(job_id)
                     if c > 1:
                         self.jobs_all_cores_in_flight -= 1
-                    self._push_event(*event)
+                    if event is not None:
+                        self._push_event(*event)
                     # log_trace(f"Leaving thread for {job_id}")
         except (KeyboardInterrupt, SystemExit):  # happens on abort
             log_trace(f"Keyboard Interrupt received {time.time() - self.abort_time}")
