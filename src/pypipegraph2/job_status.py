@@ -306,6 +306,8 @@ class JobStatus:
                     self.job_id,
                     self.updated_output,
                 )
+            for downstream_id in self.downstreams():
+                ds = self.runner.job_states[downstream_id]
                 if not ds.state.is_terminal():
                     try:
                         ds.update_should_run()
@@ -403,8 +405,7 @@ class JobStatus:
                 self.updated_input[name] = hash  # update any way.
             else:
                 log_trace(f"\t\t\tNot an input {name}")
-        if self.validation_state != ValidationState.Invalidated:
-            self.update_invalidation()
+        # invalidation will be considered by the caller
 
     def update_invalidation(self):
         if self.job.job_kind == JobKind.Cleanup:
@@ -457,6 +458,7 @@ class JobStatus:
             else:
                 changed = sorted(old.difference(new))
                 mchanged = "lost:\n"
+                mchanged += "\n".join(["\t" + x for x in sorted(changed)])
             mchanged += "\n".join(["\t" + x for x in sorted(changed)])
             log_debug(
                 f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed: \n old:\n{mold}\n new:\n{mnew}\n{mchanged}"

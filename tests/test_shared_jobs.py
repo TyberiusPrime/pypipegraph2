@@ -610,31 +610,39 @@ class TestSharedJob:
         job = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit, remove_unused=True)
         job.depends_on(ppg.ParameterInvariant("b", "b"))
         job.depends_on(ppg.ParameterInvariant("c", "c"))
-        ppg.run() # job does not run
+        ppg.run()  # job does not run
         assert len(list(Path("out/done").glob("*"))) == 3
         job.depends_on(ppg.ParameterInvariant("d", "d"))
         ppg.run()
         assert len(list(Path("out/done").glob("*"))) == 1
 
-
     def test_local_log_usage(self):
         def load():
             import json
-            fn = ppg.global_pipegraph.history_dir / ppg.SharedMultiFileGeneratingJob.log_filename
+
+            fn = (
+                ppg.global_pipegraph.history_dir
+                / ppg.SharedMultiFileGeneratingJob.log_filename
+            )
             return json.loads(fn.read_text())
 
         def doit(output_files, prefix):
             count = str(counter("doit"))
             for f in output_files:
                 f.write_text(f.name + count)
+
         job = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit, remove_unused=False)
         ppg.run()
         known = load()
-        assert (Path('out/by_input' ) / known[str(job.output_dir_prefix)] / 'a').read_text() == 'a0'
-        job.depends_on_params('shu')
+        assert (
+            Path("out/by_input") / known[str(job.output_dir_prefix)] / "a"
+        ).read_text() == "a0"
+        job.depends_on_params("shu")
         ppg.run()
         known2 = load()
-        assert (Path('out/by_input' ) / known2[str(job.output_dir_prefix)] / 'a').read_text() == 'a1'
+        assert (
+            Path("out/by_input") / known2[str(job.output_dir_prefix)] / "a"
+        ).read_text() == "a1"
         assert known != known2
 
     def test_more_files(self):
@@ -643,37 +651,94 @@ class TestSharedJob:
             for f in output_files:
                 f.write_text(f.name + count)
 
-        a = ppg.SharedMultiFileGeneratingJob('out', ['a'], doit)
+        a = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit)
         ppg.run()
-        assert a['a'].read_text() == 'a0'
-        assert Path('doit').read_text() == '1'
+        assert a["a"].read_text() == "a0"
+        assert Path("doit").read_text() == "1"
         ppg.run()
-        assert a['a'].read_text() == 'a0'
-        assert Path('doit').read_text() == '1'
+        assert a["a"].read_text() == "a0"
+        assert Path("doit").read_text() == "1"
         ppg.new()
-        a = ppg.SharedMultiFileGeneratingJob('out', ['a','b'], doit)
+        a = ppg.SharedMultiFileGeneratingJob("out", ["a", "b"], doit)
         ppg.run()
-        assert Path('doit').read_text() == '2'
-        assert a['a'].read_text() == 'a1'
-        assert a['b'].read_text() == 'b1'
+        assert Path("doit").read_text() == "2"
+        assert a["a"].read_text() == "a1"
+        assert a["b"].read_text() == "b1"
         ppg.run()
-        assert Path('doit').read_text() == '2'
-        assert a['a'].read_text() == 'a1'
-        assert a['b'].read_text() == 'b1'
+        assert Path("doit").read_text() == "2"
+        assert a["a"].read_text() == "a1"
+        assert a["b"].read_text() == "b1"
 
         ppg.new()
-        a = ppg.SharedMultiFileGeneratingJob('out', ['b'], doit)
+        a = ppg.SharedMultiFileGeneratingJob("out", ["b"], doit)
         ppg.run()
-        assert Path('doit').read_text() == '3'
-        assert a['b'].read_text() == 'b2'
-
+        assert Path("doit").read_text() == "3"
+        assert a["b"].read_text() == "b2"
 
     def test_same_output_dir_multple_jobs(self):
         def doit(output_files, prefix):
             count = str(counter("doit"))
             for f in output_files:
                 f.write_text(f.name + count)
-        a = ppg.SharedMultiFileGeneratingJob('out', ['a'], doit)
-        with pytest.raises(ppg.JobOutputConflict):
-            b = ppg.SharedMultiFileGeneratingJob('out', ['b'], doit)
 
+        a = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit)
+        with pytest.raises(ppg.JobOutputConflict):
+            b = ppg.SharedMultiFileGeneratingJob("out", ["b"], doit)
+
+    def test_issue_20210726(self):
+        def dummy_mfg(files, prefix):
+            Path(prefix).mkdir(exist_ok=True, parents=True)
+            for f in files:
+                f.write_text("hello")
+
+        ppg.new(cores=24)
+
+
+        job_0 = ppg.SharedMultiFileGeneratingJob(
+            "0", ["df_transcripts.msgpack"], dummy_mfg, depend_on_function=False
+        )
+        job_1 = ppg.SharedMultiFileGeneratingJob(
+            "1", ["genes.gtf"], dummy_mfg, depend_on_function=False
+        )
+        job_2 = ppg.SharedMultiFileGeneratingJob(
+            "2", ["url.txt"], dummy_mfg, depend_on_function=False
+        )
+        job_3 = ppg.FunctionInvariant("3", lambda: 55)
+        job_4 = ppg.ParameterInvariant("4", 55)
+        job_5 = ppg.FunctionInvariant("5", lambda: 55)
+        job_6 = ppg.ParameterInvariant("6", 55)
+        job_7 = ppg.SharedMultiFileGeneratingJob(
+            "7", ["df_genes.msgpack"], dummy_mfg, depend_on_function=False
+        )
+        job_8 = ppg.FunctionInvariant("8", lambda: 55)
+        Path("9").write_text("A")
+        job_9 = ppg.FileInvariant("9")
+        job_10 = ppg.ParameterInvariant("10", 55)
+        job_11 = ppg.FunctionInvariant("11", lambda: 55)
+        job_12 = ppg.FunctionInvariant("12", lambda: 55)
+        job_13 = ppg.ParameterInvariant("13", 55)
+        job_14 = ppg.FunctionInvariant("14", lambda: 55)
+        job_0.depends_on(job_1)
+        job_1.depends_on(job_2)
+        job_2.depends_on(job_3)
+        job_2.depends_on(job_4)
+        job_1.depends_on(job_5)
+        job_1.depends_on(job_6)
+        job_0.depends_on(job_7)
+        job_7.depends_on(job_1)
+        job_1.depends_on(job_2)
+        job_2.depends_on(job_3)
+        job_2.depends_on(job_4)
+        job_1.depends_on(job_5)
+        job_1.depends_on(job_6)
+        job_7.depends_on(job_8)
+        job_7.depends_on(job_9)
+        job_7.depends_on(job_10)
+        job_7.depends_on(job_11)
+        job_0.depends_on(job_9)
+        job_0.depends_on(job_12)
+        job_0.depends_on(job_13)
+        job_0.depends_on(job_14)
+        out = ppg.FileGeneratingJob('outX', lambda of: of.write_text("SHU")).depends_on(job_0)
+        for i in range(20): # this is not 100% deterministic, doesn't show up every time, so we do it repeatedly
+            ppg.run()
