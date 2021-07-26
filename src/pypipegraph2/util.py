@@ -150,6 +150,6 @@ def log_trace(msg):
 def shorten_job_id(job_id):
     dotdotcount = job_id.count(":::")
     if dotdotcount:
-        return job_id[: job_id.find(":::") + 3] + "+" + str(dotdotcount - 1)
+        return job_id[: job_id.find(":::") + 3] + "+" + str(dotdotcount)
     else:
         return job_id
