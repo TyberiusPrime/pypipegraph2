@@ -289,7 +289,7 @@ def job_trace_log():
             out = f"<blue>{out}</blue>"
         return out
 
-    logger.remove()
+    # logger.remove()
     # handler_id = logger.add(sys.stderr, format=fmt, level=6)
     ppg2.util.do_jobtrace_log = True
     yield
