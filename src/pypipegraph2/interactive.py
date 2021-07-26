@@ -175,8 +175,8 @@ class ConsoleInteractive:
             except KeyError:
                 pass
         to_sort.sort()
-        print(" | ".join(("Job_no", "Runtime", "Job_id")))
-        print(" | ".join(("------", "-------", "------")))
+        print(" | ".join(("Job_no", "Runtime", "Cores", "Job_id")))
+        print(" | ".join(("------", "-------", "-----", "------")))
         for rt, job_id in to_sort:
             job = self.runner.jobs[job_id]
             job_no = job.job_number
@@ -185,7 +185,8 @@ class ConsoleInteractive:
             else:
                 rt = f"{rt:>6.2f}s"
             display_job_id = shorten_job_id(job_id)
-            print(f"{job_no:>6} | {rt} | {display_job_id}")
+            cores = job.actual_cores_needed if job.actual_cores_needed != -1 else '?'
+            print(f"{job_no:>6} | {rt} | {cores} | {display_job_id}")
         print("")
 
     def _cmd_abort(self, _args):
@@ -195,7 +196,7 @@ class ConsoleInteractive:
         self.stopped = True
 
     def _cmd_die(self, _args):
-        log_error("Sic semper running processes") 
+        log_error("Sic semper running processes")
         sys.exit(1)
 
     def _cmd_stop(self, _args):
