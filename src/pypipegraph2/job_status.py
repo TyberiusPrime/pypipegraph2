@@ -447,8 +447,19 @@ class JobStatus:
             log_info(
                 f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed ({len(old_input)}->{len(new_input)})"
             )
+            new = set(new_input.keys())
+            old = set(old_input.keys())
+            mnew = "\n".join(["\t" + x for x in sorted(new)])
+            mold = "\n".join(["\t" + x for x in sorted(old)])
+            if len(new_input) > len(old_input):
+                changed = sorted(new.difference(old))
+                mchanged = "gained:\n"
+            else:
+                changed = sorted(old.difference(new))
+                mchanged = "lost:\n"
+            mchanged += "\n".join(["\t" + x for x in sorted(changed)])
             log_debug(
-                f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed ({sorted(old_input.keys())}->{sorted(new_input.keys())})"
+                f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed: \n old:\n{mold}\n new:\n{mnew}\n{mchanged}"
             )
 
             invalidated = True
@@ -461,10 +472,10 @@ class JobStatus:
                     cmp_job = self.runner.jobs[self.runner.outputs_to_job_ids[key]]
                     if not cmp_job.compare_hashes(old_hash, new_input[key]):
                         log_info(
-                            "Invalidated {shorten_job_id(self.job_id)} - Hash change: {key}"
+                            f"Invalidated {shorten_job_id(self.job_id)} - Hash change: {key}"
                         )
                         log_debug(
-                            "Invalidated {shorten_job_id(job_id)} - Hash change, {key} was {escape_logging(old_hash)} now {escape_logging(new_input[key])} {cmp_job}"
+                            f"Invalidated {shorten_job_id(self.job_id)} - Hash change, {key} was {escape_logging(old_hash)} now {escape_logging(new_input[key])} {cmp_job}"
                         )
                         invalidated = True
                         break
@@ -499,7 +510,7 @@ class JobStatus:
                                 # f"{self.job_id} {old_key} mapped to multiple possible replacement hashes. Invalidating to be better safe than sorry"
                                 # )
                                 log_info(
-                                    "Invalidated: {shorten_job_id(self.job_id)}. Old matched multiple new keys"
+                                    f"Invalidated: {shorten_job_id(self.job_id)}. Old matched multiple new keys"
                                 )
                                 invalidated = True
                                 break
@@ -508,7 +519,7 @@ class JobStatus:
                         else:  # no match found
                             # log_trace(f"{self.job_id} {old_key} - no match found")
                             log_info(
-                                "Invalidated: {shorten_job_id(self.job_id)}. Old matched no new keys"
+                                f"Invalidated: {shorten_job_id(self.job_id)}. Old matched no new keys"
                             )
                             invalidated = True
                             break
