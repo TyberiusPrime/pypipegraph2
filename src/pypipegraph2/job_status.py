@@ -529,6 +529,14 @@ class JobStatus:
         return invalidated
 
     def dump_subgraph_for_debug(self):
+        """Take every job leading up to this job 
+        and write a mock dependency graph to 
+        subgraph_debug.py
+
+        Very handy for debugging, but ugly :).
+        """
+
+
         import pypipegraph2 as ppg
 
         nodes = []
@@ -566,12 +574,12 @@ class JobStatus:
                     f"job_{counter[0]} = ppg.FileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False)"
                 )
             elif isinstance(j, ppg.MultiTempFileGeneratingJob):
-                files = [counter[0] + '/' + x.name for x in j.files]
+                files = [counter[0] + "/" + x.name for x in j.files]
                 nodes.append(
                     f"job_{counter[0]} = ppg.MultiTempFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
                 )
             elif isinstance(j, ppg.MultiFileGeneratingJob):
-                files = [counter[0] + '/' + x.name for x in j.files]
+                files = [counter[0] + "/" + x.name for x in j.files]
                 nodes.append(
                     f"job_{counter[0]} = ppg.MultiFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
                 )
@@ -589,19 +597,16 @@ class JobStatus:
                 )
                 build_edges(parent)
 
-        print('1')
         descend(self.job_id)
-        print('2')
         build_edges(self.job_id)
-        print('3')
         with open("subgraph_debug.py", "w") as op:
             op.write(
-"""def dummy_mfg(files, prefix):
+                """def dummy_mfg(files, prefix):
     Path(prefix).mkdir(exist_ok=True, parents=True)
     for f in files:
         f.write_text("hello")
-""")
-
+"""
+            )
 
             op.write("\n".join(nodes) + "\n")
             op.write("\n".join(edges) + "\n")
