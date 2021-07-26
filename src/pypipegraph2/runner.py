@@ -619,10 +619,15 @@ class Runner:
                             ef.write("\n\n")
                             ef.write("job stdout:\n")
                             ef.write(str(job.stdout))
+                        else:
+                            ef.write("\n\nstdout: not available\n")
                         if hasattr(job, "stderr"):
                             ef.write("\n\n")
                             ef.write("job stderr:\n")
                             ef.write(str(job.stderr))
+                        else:
+                            ef.write("\n\nstderr: not available\n")
+                        ef.flush()
 
                     log(
                         f"Failed after {job_state.run_time:.2}s: {job_id}. Exception (incl. locals, stdout and stderr) logged to {error_file}"
@@ -634,6 +639,7 @@ class Runner:
                 else:
                     log(job_state.error)
                     log("no stack available")
+                 
             except Exception as e:
                 log_error(
                     f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed."
@@ -680,6 +686,7 @@ class Runner:
                     break
                 job = self.jobs[job_id]
                 job.waiting = True
+                job.actual_cores_needed = -1
                 job_state = self.job_states[job_id]
                 self._interactive_report()
                 event = None
@@ -691,6 +698,7 @@ class Runner:
                     job.run_time = float("nan")
 
                     c = job.resources.to_number(self.core_lock.max_cores)
+                    job.actual_cores_needed = c
                     log_trace(
                         f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {len(self.jobs_in_flight)}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
                     )
