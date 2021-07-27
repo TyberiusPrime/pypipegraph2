@@ -310,6 +310,7 @@ class Job:
     def is_conditional(self):
         return self.job_kind in (JobKind.Temp, JobKind.Loading)
 
+
     @property
     def exception(self):
         """Interrogate global pipegraph for this job's exception.
@@ -351,6 +352,15 @@ class Job:
         gg = global_pipegraph
         return [gg.jobs[job_id] for job_id in gg.job_dag.predecessors(self.job_id)]
 
+    @property
+    def depth(self):
+        if self.job_kind is JobKind.Cleanup:
+            return self.parent_job.depth + 1
+        upstreams = self.upstreams
+        if upstreams:
+            return 1 + max((upstream_job.depth for upstream_job in upstreams))
+        else:
+            return 1
 
 class MultiFileGeneratingJob(Job):
     job_kind = JobKind.Output

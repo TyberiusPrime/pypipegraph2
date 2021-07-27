@@ -93,8 +93,6 @@ class JobStatus:
             self.error += "\n" + msg  # multiple upstreams failed. Combine messages
 
     def update(self) -> bool:
-        if self.update_counter > 500:
-            raise ValueError()
         self.update_counter += 1
 
         if self.proc_state != ProcessingStatus.Waiting:
