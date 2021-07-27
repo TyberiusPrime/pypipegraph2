@@ -301,8 +301,8 @@ class PyPipeGraph:
         if link_name.exists() or link_name.is_symlink():
             # print("unlinking", link_name)
             link_name.unlink()
-        else:
-            print("not found", link_name)
+        #else:
+            #print("not found", link_name)
 
         files = sorted(dir.glob(pattern))
         if files:
