@@ -212,7 +212,7 @@ class PyPipeGraph:
             while True:
                 max_runs -= 1
                 if max_runs == 0:  # pragma: no cover
-                    raise ValueError("endless loop")
+                    raise ValueError("Maximum graph-generating-jobs recursion depth exceeded")
                 do_break = False
                 try:
                     self.runner = Runner(
@@ -235,7 +235,8 @@ class PyPipeGraph:
                     result = e.args[0]
                 self._update_history(result, history)
                 self._log_runtimes(result, start_time)
-                jobs_already_run.update(result.keys())
+                # leave out the cleanup jobs added virtually by the run
+                jobs_already_run.update((k for k in result.keys() if k in self.jobs))
                 for k, v in result.items():
                     if (
                         not k in final_result
@@ -590,6 +591,7 @@ class PyPipeGraph:
         self.next_job_number += 1
         self.jobs[job.job_id] = job
         self.job_dag.add_node(job.job_id)
+        # assert len(self.jobs) == len(self.job_dag) - we verify this when running
 
     def add_edge(self, upstream_job, downstream_job):
         """Declare a dependency between jobs

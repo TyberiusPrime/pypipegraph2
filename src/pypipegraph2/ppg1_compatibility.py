@@ -305,6 +305,7 @@ def _ignore_code_changes(job):
         util.global_pipegraph.job_dag.remove_node(job.func_invariant.job_id)
         for k in job.func_invariant.outputs:
             util.global_pipegraph.job_inputs[job.job_id].remove(k)
+        del util.global_pipegraph.jobs[job.func_invariant.job_id]
         del job.func_invariant
     if hasattr(job, "lfg"):
         _ignore_code_changes(job.lfg)

@@ -140,3 +140,11 @@ class TestcompatibilityLayerMore:
 
     def test_rc_cores_available(self):
         assert ppg1.util.global_pipegraph.rc.cores_available == ppg2.global_pipegraph.cores
+
+    def test_ignore_code_changes_changes_both_dag_and_jobs(self):
+        a = ppg1.FileGeneratingJob('a', lambda of: of.write_text('a'))
+        assert len(ppg2.global_pipegraph.jobs) == 2 # the fg, and teh FI
+        assert len(ppg2.global_pipegraph.job_dag) == 2 # the fg, and teh FI
+        a.ignore_code_changes()
+        assert len(ppg2.global_pipegraph.jobs) == 1 # the fg, and teh FI
+        assert len(ppg2.global_pipegraph.job_dag) == 1 # the fg, and teh FI

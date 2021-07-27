@@ -72,8 +72,9 @@ class Runner:
                 raise exceptions.NotADag(
                     f"Not a directed *acyclic* graph. See {error_fn}. Cycles between {cycles}"
                 )
+            assert len(self.jobs) == len(job_graph.job_dag)
 
-            self.dag = self.modify_dag(
+            self.dag, prune_counter = self.modify_dag(
                 job_graph,
                 focus_on_these_jobs,
                 jobs_already_run_previously,
@@ -88,9 +89,11 @@ class Runner:
 
             job_numbers = set()
             for job_id, job in self.jobs.items():
-                log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
+                # log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
                 job_numbers.add(job.job_number)
             assert len(job_numbers) == len(self.jobs)
+            if len(self.jobs) - prune_counter != len(self.dag):
+                raise NotImplementedError(f"Mismatch between len(self.jobs) {len(self.jobs)} - prune_counter {prune_counter} and len(self.dag) {len(self.dag)}")
 
             log_job_trace(
                 "dag "
@@ -166,34 +169,36 @@ class Runner:
                 if self.jobs[job_id]._pruned:
                     _recurse_pruning(job_id, job_id)
         for job_id in pruned:
+            log_job_trace(f"pruned {job_id}")
             try:
                 dag.remove_node(job_id)
             except networkx.exception.NetworkXError:  # happens with cleanup nodes that we  omitted
                 pass
+            # del self.jobs[job_id]
+        return len(pruned)
 
     def _add_cleanup(self, dag, job):
-        cleanup_job = job.cleanup_job_class(job)
-        cleanup_job.job_number = self.next_job_number
-        self.next_job_number += 1
-        self.jobs[cleanup_job.job_id] = cleanup_job
-        dag.add_node(cleanup_job.job_id)
-        log_trace(f"creating cleanup {cleanup_job.job_id}")
-        for o in cleanup_job.outputs:
-            log_trace(f"Storing cleanup oututs_to_job_ids {o} = {cleanup_job.job_id}")
-            self.outputs_to_job_ids[o] = cleanup_job.job_id
         downstreams = [
             x
             for x in dag.neighbors(job.job_id)
             if self.jobs[x].job_kind is not JobKind.Cleanup
         ]  # depending on other cleanups makes littlesense
-        log_trace(f"{job.job_id} cleanup adding")
         if not downstreams:
             # if the job has no downstreams
             # it won't run.
-            log_trace(f"{job.job_id} had no downstreams - not adding a cleanup")
-            # downstreams = [
-            # job.job_id
-            # ]  # nobody below you? your cleanup will run right after you
+            log_debug(f"{job.job_id} had no downstreams - not adding a cleanup")
+            return
+
+        cleanup_job = job.cleanup_job_class(job)
+        cleanup_job.job_number = self.next_job_number
+        self.next_job_number += 1
+        self.jobs[cleanup_job.job_id] = cleanup_job
+        dag.add_node(cleanup_job.job_id)
+        log_debug(f"creating cleanup {cleanup_job.job_id}")
+        for o in cleanup_job.outputs:
+            log_trace(f"Storing cleanup oututs_to_job_ids {o} = {cleanup_job.job_id}")
+            self.outputs_to_job_ids[o] = cleanup_job.job_id
+        log_trace(f"{job.job_id} cleanup adding")
         for downstream_job_id in downstreams:
             log_trace(f"add downstream edge: {downstream_job_id}, {cleanup_job.job_id}")
 
@@ -231,8 +236,10 @@ class Runner:
             ]._state = (
                 JobState.Skipped
             )  # no need to do the downstream calls - this is just an ignored job
+            return 0
         elif job.cleanup_job_class:
             cleanup_job = self._add_cleanup(dag, job)
+            return 1
 
     def modify_dag(  # noqa: C901
         self,
@@ -266,7 +273,9 @@ class Runner:
                 named_key_ids=True,
             )
 
-        self._apply_pruning(dag, focus_on_these_jobs, jobs_already_run_previously)
+        prune_counter = self._apply_pruning(
+            dag, focus_on_these_jobs, jobs_already_run_previously
+        )
 
         known_job_ids = list(networkx.algorithms.dag.topological_sort(dag))
         for job_id in reversed(known_job_ids):  # todo: do we need reversed
@@ -293,7 +302,7 @@ class Runner:
                 named_key_ids=True,
             )
 
-        return dag
+        return dag, prune_counter
 
     def run(self, run_id, last_job_states, print_failures):  # noqa:C901
         """Actually run the current DAG"""
@@ -345,7 +354,7 @@ class Runner:
         self.jobs_done = 0
         try:
             self._interactive_start()
-            #self._interactive_report()
+            # self._interactive_report()
             while todo:
                 try:
                     ev = self.events.get(timeout=self.event_timeout)
@@ -357,6 +366,9 @@ class Runner:
                 except queue.Empty:
                     # long time, no event.
                     if not self.jobs_in_flight:
+                        log_error(
+                            "Coding error lead to que empty with no jobs in flight?"
+                        )
                         # ok, a coding error has lead to us not finishing
                         # the todo graph.
                         for job_id in self.job_states:
@@ -429,7 +441,7 @@ class Runner:
             self._interactive_stop()
 
         if len(global_pipegraph.jobs) != job_count and not self.aborted:
-            log_trace(
+            log_info(
                 f"created new jobs. _RunAgain issued {len(global_pipegraph.jobs)} != {job_count}"
             )
             for job_id in global_pipegraph.jobs:
@@ -462,7 +474,7 @@ class Runner:
                     [
                         x
                         for x in self.jobs_in_flight
-                        if getattr(self.jobs[x], 'waiting', False)
+                        if getattr(self.jobs[x], "waiting", False)
                     ]
                 )
                 self.interactive.report_status(
@@ -471,7 +483,7 @@ class Runner:
                         waiting,
                         self.jobs_done,
                         len(self.dag),
-                        self.fail_counter
+                        self.fail_counter,
                     )
                 )
                 self.last_status_time = t
@@ -604,7 +616,9 @@ class Runner:
                         ef.write(f"Class: {job.__class__.__name__}\n")
                         ef.write("Input jobs:\n")
                         for parent_id in sorted(self.dag.predecessors(job_id)):
-                            ef.write(f"\t{parent_id} ({self.jobs[parent_id].__class__.__name__})\n")
+                            ef.write(
+                                f"\t{parent_id} ({self.jobs[parent_id].__class__.__name__})\n"
+                            )
                         ef.write("\n\n")
                         if stacks is not None:
                             ef.write(
@@ -639,7 +653,7 @@ class Runner:
                 else:
                     log(job_state.error)
                     log("no stack available")
-                 
+
             except Exception as e:
                 log_error(
                     f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed."
