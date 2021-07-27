@@ -424,6 +424,124 @@ class JobStatus:
     def upstreams(self):
         yield from self.runner.dag.predecessors(self.job_id)
 
+    def dump_subgraph_for_debug(self):
+        """Take every job leading up to this job
+        and write a mock dependency graph to
+        subgraph_debug.py
+
+        Very handy for debugging, but ugly :).
+
+        Note that you can just throw out Jobs later,
+        the edges of non-existant jobs will be ignored.
+        """
+
+        import pypipegraph2 as ppg
+
+        nodes = []
+        seen = set()
+        edges = []
+        counter = [0]
+        node_to_counters = {}
+
+        def descend(node):
+            if node in seen:
+                return
+            seen.add(node)
+            j = self.runner.jobs[node]
+            if isinstance(j, ppg.FileInvariant):
+                nodes.append(f"Path('{counter[0]}').write_text('A')")
+                nodes.append(f"job_{counter[0]} = ppg.FileInvariant('{counter[0]}')")
+            elif isinstance(j, ppg.ParameterInvariant):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.ParameterInvariant('{counter[0]}', 55)"
+                )
+            elif isinstance(j, ppg.FunctionInvariant):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.FunctionInvariant('{counter[0]}', lambda: 55)"
+                )
+            elif isinstance(j, ppg.SharedMultiFileGeneratingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.SharedMultiFileGeneratingJob('{counter[0]}', {[x.name for x in j.files]!r}, dummy_smfg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.TempFileGeneratingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.TempFileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.FileGeneratingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.FileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.MultiTempFileGeneratingJob):
+                files = [counter[0] + "/" + x.name for x in j.files]
+                nodes.append(
+                    f"job_{counter[0]} = ppg.MultiTempFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.MultiFileGeneratingJob):
+                files = [str(counter[0]) + "/" + x.name for x in j.files]
+                nodes.append(
+                    f"job_{counter[0]} = ppg.MultiFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.DataLoadingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.DataLoadingJob('{counter[0]}', lambda: None, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.AttributeLoadingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.AttributeLoadingJob('{counter[0]}', DummyObject(), 'attr_{counter[0]}', lambda: None, depend_on_function=False)"
+                )
+            else:
+                raise ValueError(j)
+            node_to_counters[node] = counter[0]
+            counter[0] += 1
+            for parent in self.runner.dag.predecessors(node):
+                descend(parent)
+
+        def build_edges(node):
+            for parent in self.runner.dag.predecessors(node):
+                edges.append(
+                    f"edges.append(('{node_to_counters[node]}', '{node_to_counters[parent]}'))"
+                )
+                build_edges(parent)
+
+        descend(self.job_id)
+        edges.append("edges = []")
+        build_edges(self.job_id)
+        edges.extend(
+            [
+                "for (a,b) in edges:",
+                "    if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:",
+                "        ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])",
+            ]
+        )
+        with open("subgraph_debug.py", "w") as op:
+            lines = """
+class DummyObject:
+    pass
+
+def dummy_smfg(files, prefix):
+    Path(prefix).mkdir(exist_ok=True, parents=True)
+    for f in files:
+        f.write_text("hello")
+
+
+def dummy_mfg(files):
+    for f in files:
+        f.parent.mkdir(exist_ok=True, parents=True)
+        f.write_text("hello")
+
+def dummy_fg(of):
+    of.parent.mkdir(exist_ok=True, parents=True)
+    of.write_text("fg")
+
+""".split(
+                "\n"
+            )
+            lines += nodes
+            lines += edges
+            lines += ["", "ppg.run()", "ppg.run"]
+
+            op.write("\n".join("        " + l for l in lines))
+
 
 def _dict_values_count_hashed(a_dict, count_this):
     """Specialised 'how many times does this hash occur in this dict. For renamed inputs"""
