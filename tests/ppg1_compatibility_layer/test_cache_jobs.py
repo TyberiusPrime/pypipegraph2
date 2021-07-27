@@ -135,15 +135,13 @@ class TestCachedAttributeJob:
         job.ignore_code_changes()
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run_pipegraph()
-        assert read(of) == ", ".join(str(x) for x in range(0, 200)) # ppg2 change
+        assert read(of) == ", ".join(str(x) for x in range(0, 200))  # ppg2 change
 
         ppg1_compatibility_test.new_pipegraph()
         job = ppg.CachedAttributeLoadingJob("out/mycalc", o, "a", calc2)
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run_pipegraph()
-        assert read(of) == ", ".join(
-            str(x) for x in range(0, 200)
-        )  
+        assert read(of) == ", ".join(str(x) for x in range(0, 200))
 
     def test_throws_on_non_function_func(self):
         o = Dummy()
@@ -247,12 +245,13 @@ class TestCachedAttributeJob:
         # assert jobB.was_invalidated
         print(ppg.util.global_pipegraph.last_run_result.keys())
         assert (
-            ppg.util.global_pipegraph.last_run_result[jobB.job_id].state
-            == ppg2.enums.JobState.Success
+            ppg.util.global_pipegraph.last_run_result[jobB.job_id].outcome
+            == ppg2.enums.JobOutcome.Success
         )
+        print("job_id", job.job_id)
         assert (
-            ppg.util.global_pipegraph.last_run_result[job.job_id].state
-            == ppg2.enums.JobState.Skipped
+            ppg.util.global_pipegraph.last_run_result[job.job_id].outcome
+            == ppg2.enums.JobOutcome.Skipped
         )
         # assert job.was_invalidated
 

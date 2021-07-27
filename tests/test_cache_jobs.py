@@ -258,7 +258,7 @@ class TestCachedAttributeJob:
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 200))
 
-    def test_invalidation_ignored_does_not_redo_output(self, job_trace_log):
+    def test_invalidation_ignored_does_not_redo_output(self):
         # actually, this test has evolved away from it's original behaviour.
         # adding/remoning a function dependency will always trigger!
         o = Dummy()

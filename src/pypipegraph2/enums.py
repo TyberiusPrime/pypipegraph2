@@ -1,28 +1,30 @@
 from enum import Enum, auto
 
 
-class JobState(Enum):
+class ProcessingStatus(Enum):
     Waiting = auto()
     ReadyToRun = auto()
+    Schedulded = auto()
+    Done = auto()
+
+    def is_terminal(self):
+        return self is ProcessingStatus.Done
+
+
+class JobOutcome(Enum):
+    NotYet = auto()
     Success = auto()
     Skipped = auto()
     Failed = auto()
     UpstreamFailed = auto()
 
-    def is_terminal(self):
-        return self in (
-            JobState.Success,
-            JobState.Skipped,
-            JobState.Failed,
-            JobState.UpstreamFailed,
-        )
 
 class ShouldRun(Enum):
     Maybe = auto()
     Yes = auto()
     No = auto()
 
-    def is_decided(self):
+    def is_terminal(self):
         return self in (ShouldRun.Yes, ShouldRun.No)
 
 
@@ -31,6 +33,9 @@ class ValidationState(Enum):
     Validated = auto()
     Invalidated = auto()
     UpstreamFailed = auto()
+
+    def is_terminal(self):
+        return self != ValidationState.Unknown
 
 
 class JobKind(Enum):

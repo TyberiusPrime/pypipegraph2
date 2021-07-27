@@ -76,7 +76,7 @@ def _mark_function_wrapped(outer, inner, desc="callback"):
         raise TypeError(f"{desc} function must be callable")
     outer.wrapped_function = inner
     return outer
-
+x = 'hello'
 
 def _safe_str(x):  # pragma: no cover
     try:
@@ -748,6 +748,7 @@ class MultiFileGeneratingJob(Job):
     def output_needed(self, runner):
         for fn in self.files:
             if not fn.exists():
+                log_job_trace(f"Output file {fn} did not exist")
                 return True
             # other wise we have no history, and the skipping would
             # break the graph execution

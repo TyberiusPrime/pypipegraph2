@@ -139,7 +139,7 @@ def log_debug(msg):
 
 def log_job_trace(msg):
     if do_jobtrace_log:
-        logger.opt(depth=1).log("JobTrace", msg)
+        logger.opt(depth=1).log("JT", msg)
 
 
 def log_trace(msg):

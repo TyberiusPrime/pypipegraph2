@@ -3,7 +3,7 @@ import time
 from loguru import logger
 import pytest
 import pypipegraph2 as ppg
-from pypipegraph2.runner import JobState
+from pypipegraph2.runner import JobOutcome
 from .shared import counter, write, read
 
 
@@ -39,7 +39,7 @@ class TestPypipegraph2:
         assert Path("A").read_text() == "AAA"
         assert Path("B").read_text() == "BBBAAA"
 
-    def test_very_simple_chain_rerun(self, job_trace_log):
+    def test_very_simple_chain_rerun(self):
         assert not Path("A").exists()
         assert not Path("B").exists()
         counter = 0
@@ -52,9 +52,11 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "BBB0"
         ppg.run()
         assert Path("B").read_text() == "BBB0"
+        assert Path("A").read_text() == "0"
         Path("A").unlink()
         counter = 1
         ppg.run()
+        assert Path("A").read_text() == "1"
         assert Path("B").read_text() == "BBB1"
 
     def test_isolation(self, trace_log):
@@ -187,9 +189,9 @@ class TestPypipegraph2:
         assert Path("C").read_text() == "C"
         last = ppg.global_pipegraph.last_run_result
         print(last.keys())
-        assert last["A"].state == JobState.Failed
-        assert last["B"].state == JobState.UpstreamFailed
-        assert last["C"].state == JobState.Success
+        assert last["A"].outcome == JobOutcome.Failed
+        assert last["B"].outcome == JobOutcome.UpstreamFailed
+        assert last["C"].outcome == JobOutcome.Success
         assert "ValueError" in str(last["A"].error)
 
     def test_multi_file_generating_job(self):
@@ -274,8 +276,8 @@ class TestPypipegraph2:
         assert Path("B").exists()
         assert Path("B").read_text() == "B1A1"
 
-    def test_tempfile_chained_invalidate_leaf(self, trace_log):
-        ppg.new(cores=1)
+    def test_tempfile_chained_invalidate_leaf(self):
+        ppg.new(cores=1, log_level=6)
         jobA = ppg.TempFileGeneratingJob(
             "TA", lambda of: of.write_text("A" + counter("a")), depend_on_function=False
         )
@@ -291,19 +293,19 @@ class TestPypipegraph2:
         )
         jobC.depends_on(jobB)
         jobB.depends_on(jobA)
-        logger.error("First run")
+        ppg.util.log_error("First run")
         ppg.run()
         assert not Path("TA").exists()
         assert not Path("TB").exists()
         assert Path("C").read_text() == "C0B0A0"
-        logger.error("Second No op run.")
+        ppg.util.log_error("Second No op run.")
         ppg.run()
         assert Path("C").read_text() == "C0B0A0"
         assert not Path("TA").exists()
         assert not Path("TB").exists()
 
         jobC.depends_on(ppg.FunctionInvariant(lambda: 53, "lambda_52"))
-        logger.error("Third run - rerun because of FI")
+        ppg.util.log_error("Third run - rerun because of FI")
         ppg.run()
         assert Path("C").read_text() == "C1B1A1"
         assert not Path("TA").exists()
@@ -688,9 +690,9 @@ class TestPypipegraph2:
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
         last = ppg.global_pipegraph.last_run_result
-        assert last["A"].state == JobState.Success
-        assert last["B"].state == JobState.Failed
-        assert last["C"].state == JobState.UpstreamFailed
+        assert last["A"].outcome == JobOutcome.Success
+        assert last["B"].outcome == JobOutcome.Failed
+        assert last["C"].outcome == JobOutcome.UpstreamFailed
         assert isinstance(last["B"].error.args[0], ppg.JobContractError)
 
     def test_file_gen_when_file_existed_outside_of_graph_depending_on_cached_data_load(
@@ -724,8 +726,7 @@ class TestPypipegraph2:
         assert Path("a").exists()
 
     def test_catching_catastrophic_execution_message_passing_failures(
-        self, job_trace_log
-    ):
+        self):
         import pickle
 
         class BadFileGeneratingJob(ppg.FileGeneratingJob):
@@ -739,7 +740,7 @@ class TestPypipegraph2:
                         return True
                     # other wise we have no history, and the skipping will
                     # break the graph execution
-                    # if str(fn) not in runner.job_states[self.job_id].historical_output:
+                    # if str(fn) not in runner.job_outcome[self.job_id].historical_output:
                     #    return True
                 return False
 
@@ -771,7 +772,7 @@ class TestPypipegraph2:
             # now this does not get rewritten
             # because of the BadFileGeneratingJob
             assert type(cache_job) == BadFileGeneratingJob
-            # with the new execution engine (JobState based)
+            # with the new execution engine (JobOutcome based)
             # this is no longer an issue
             # at worst, you'll get a pickle failed error if the job dies
             with pytest.raises(ppg.JobsFailed):
@@ -804,7 +805,7 @@ class TestPypipegraph2:
         info = ppg.run()
         assert fi.did_hash_last_run
         # and for good measure, check that B wasn't run
-        assert info["B"].state is JobState.Skipped
+        assert info["B"].outcome is JobOutcome.Skipped
         assert read("B") == "hello"
 
     def test_same_mtime_same_size_leads_to_false_negative(self):
@@ -1055,7 +1056,7 @@ class TestPypipegraph2:
         assert not hasattr(a, "a_")
         assert Path("A").exists()
 
-    def test_job_generating(self, job_trace_log):
+    def test_job_generating(self):
         def inner():  # don't keep it inside, or the FunctionInvariant will trigger each time.
             counter("a")
             b = ppg.FileGeneratingJob(
@@ -1761,7 +1762,7 @@ class TestPypipegraph2:
             ppg.run()
         assert read("a") == "A"
 
-    def test_failing_job_but_required_again_after_job_generating_job(self, job_trace_log):
+    def test_failing_job_but_required_again_after_job_generating_job(self):
         def fail(of):
             counter("a")
             raise ValueError()

@@ -1,4 +1,4 @@
-from .enums import JobState, ValidationState, ShouldRun, JobKind
+from .enums import ProcessingStatus, JobOutcome, ValidationState, ShouldRun, JobKind
 from . import exceptions
 import time
 
@@ -20,14 +20,12 @@ class JobStatus:
     def __init__(self, job_id, runner, historical_input, historical_output):
         self.job_id = job_id
         self.runner = runner
-        self._state = JobState.Waiting
-        self._validation_state = ValidationState.Unknown
-        # if not historical_input and not self.runner.job_inputs[job_id]:# todo: do I need this?!
-        # log_job_trace(
-        # f"{self.job_id} was a no input job without history -> validated"
-        # )
-        # self._validation_state = ValidationState.Validated
+
+        self.proc_state = ProcessingStatus.Waiting
+        self.outcome = JobOutcome.NotYet
+        self.validation_state = ValidationState.Unknown
         self.should_run = ShouldRun.Maybe
+
         self.historical_input = historical_input
         self.historical_output = historical_output
         self.updated_input = {}
@@ -35,403 +33,218 @@ class JobStatus:
 
         self.start_time = -1
         self.run_time = -1.0
-
         self.error = None
+        self.update_counter = 0
 
     def __del__(self):
-        self.runner = None  #  break the link
-
-    @property
-    def state(self):
-        return self._state
-
-    @state.setter
-    def state(self, value):
-        log_job_trace(f"{self.job_id} set state. Was {self._state}, becomes {value}")
-        if self._state.is_terminal():  # pragma: no cover
-            log_job_trace(f"{self.job_id} Can't undo or set again a terminal state")
-            raise ValueError(
-                f"Can't undo or set again a terminal state Was {self.state}, becomes {value}"
-            )
-        self._state = value
-        # if value.is_terminal(): # this is always true
-        self.job_became_terminal()
-        if value in (JobState.ReadyToRun, JobState.Skipped):
-            self.job_decided_wether_to_run()
-
-    def __str__(self):
-        return repr(self)
-
-    def __repr__(self):
-        if self.state is JobState.UpstreamFailed:  # pragma: no cover
-            return f"JobStatus({self.job_id} {self.state} - {self.error})"
-        return f"JobStatus({self.state})"
-
-    @property
-    def validation_state(self):
-        return self._validation_state
-
-    @validation_state.setter
-    def validation_state(self, value):
-        log_job_trace(
-            f"{self.job_id} set validation_state. Was {self._validation_state}, becomes {value}"
-        )
-        if self._validation_state != value:
-            if value == ValidationState.Invalidated and self.state == JobState.Waiting:
-                pass
-            elif self._validation_state != ValidationState.Unknown:
-                raise ValueError(  # pragma: no cover - defensive
-                    f"{self.job_id} Can't go from {self._validation_state} to {value} {self.state}"
-                )
-            self._validation_state = value
-            # self.update_should_run()
+        self.runner = None  #  break the link for gc
 
     @property
     def job(self):
         return self.runner.jobs[self.job_id]
 
-    def all_upstreams_terminal(self):
-        # todo: combine with ready_to_run?
-        for upstream_id in self.upstreams():
-            s = self.runner.job_states[upstream_id].state
-            if not s.is_terminal():
-                log_job_trace(f"{self.job_id} all_upstreams_terminal->False")
-                return False
-        log_job_trace(f"{self.job_id} all_upstreams_terminal->True")
-        return True
-
-    def all_upstreams_terminal_or_conditional(self):
-        for upstream_id in self.upstreams():
-            s = self.runner.job_states[upstream_id]
-            if not s.state.is_terminal():
-                if self.runner.jobs[upstream_id].is_conditional():
-                    if (
-                        s.should_run == ShouldRun.Yes
-                        or s.validation_state == ValidationState.Invalidated
-                    ):
-                        # this should be run first, but hasn't
-                        log_job_trace(
-                            f"{self.job_id} all_upstreams_terminal_or_conditional -->False, {upstream_id} was conditional, but shouldrun, and not yes"
-                        )
-                        return False
-                    else:
-                        if self.runner.job_states[
-                            upstream_id
-                        ].all_upstreams_terminal_or_conditional():
-                            # import history from that one.
-                            for name in self.runner.jobs[upstream_id].outputs:
-                                if name in self.runner.job_inputs[self.job_id]:
-                                    log_trace(
-                                        f"\t\t\tHad {name} - non-running conditional job - using historical input"
-                                    )
-                                    if name in self.historical_input:
-                                        self.updated_input[
-                                            name
-                                        ] = self.historical_input[name]
-                                    # else: do nothing. We'll come back as invalidated, since we're missing an input
-                                    # and then the upstream job will be run, and we'll be back here,
-                                    # and it will be  in a terminal state.
-                        else:
-                            return False  # I can't tell yet!
-
-                else:
-                    log_job_trace(
-                        f"{self.job_id} all_upstreams_terminal_or_conditional -->False, {upstream_id} was not terminal"
-                    )
-                    return False
-        log_job_trace(f"{self.job_id} all_upstreams_terminal_or_conditional->True")
-        return True
-
-    def downstreams(self):
-        yield from self.runner.dag.successors(self.job_id)
-
-    def upstreams(self):
-        yield from self.runner.dag.predecessors(self.job_id)
-
-    def update_should_run(self):
-        log_job_trace(f"{self.job_id} update_should_run")
-        if self.should_run in (ShouldRun.Yes, ShouldRun.No):  # it was decided.
-            log_job_trace(f"\t short circuit {self.should_run}")
-            result = self.should_run
-        else:
-            self.update_invalidation()
-            if self.validation_state == ValidationState.Invalidated:
-                log_job_trace(f"\t update_should_run-> yes case invalidated")
-                result = ShouldRun.Yes
-            else:
-                if not self.job.is_conditional():
-
-                    if self.job.output_needed(self.runner):
-                        log_job_trace(f"\t update_should_run-> yes case output_needed")
-                        result = ShouldRun.Yes
-                    else:
-                        if self.validation_state == ValidationState.Validated:
-                            log_job_trace(
-                                f"\t update_should_run-> no output_needed needed, validated"
-                            )
-                            result = ShouldRun.No
-                        else:
-                            if self.job.job_kind == JobKind.Cleanup:
-                                log_job_trace(f"\t -> cleanup_job")
-                                parent_id = self.job.parent_job.job_id
-                                parent_state = self.runner.job_states[parent_id].state
-                                if parent_state == JobState.Skipped:
-                                    log_job_trace(
-                                        f"\t -> skip (was cleanup, parent skipped)"
-                                    )
-                                    result = ShouldRun.No
-                                elif parent_state == JobState.Success:
-                                    log_job_trace(
-                                        f"\t -> run (was cleanup, parent success)"
-                                    )
-                                    result = ShouldRun.Yes
-                                elif (
-                                    parent_state == JobState.Failed
-                                ):  # pragma: no cover
-                                    raise ValueError(  # pragma: no cover
-                                        "Why are we asking a job with failed upstream if it should run? (1)"
-                                    )
-                                    # todo: this is a judgment call. Is it the right one?
-                                    # log_job_trace(
-                                    #    f"\t -> run (was cleanup, parent failed)"
-                                    # )
-                                    # result = ShouldRun.Yes
-                                elif (
-                                    parent_state == JobState.UpstreamFailed
-                                ):  # pragma: no cover
-                                    raise ValueError(  # pragma: no cover
-                                        "Why are we asking a job with failed upstream if it should run? (1)"
-                                    )
-                                    # result = ShouldRun.No
-                                elif parent_state == JobState.Waiting:
-                                    result = ShouldRun.Maybe
-                                else:  # pragma: no cover
-                                    raise ValueError(
-                                        f"Should not happen {parent_state}"
-                                    )
-
-                            else:
-                                if self.validation_state == ValidationState.Unknown:
-                                    result = ShouldRun.Maybe
-                                else:  # pragma: no cover
-                                    raise ValueError(
-                                        f"I did not expect this case {self.validation_state}"
-                                    )
-
-                else:  # a conditional job...
-                    log_job_trace(
-                        "\t was conditional"
-                    )  # todo: maybe not recurse back to the job we came from?
-                    if self.should_run in (ShouldRun.Yes, ShouldRun.No):
-                        log_job_trace(f"\t{self.job_id} - was already decided")
-                    ds_count = 0
-                    ds_no_count = 0
-                    for downstream_id in self.downstreams():
-                        if (
-                            self.runner.jobs[downstream_id].job_kind == JobKind.Cleanup
-                        ):  # those don't count
-                            continue
-                        log_job_trace(f"\t downstream: {downstream_id}")
-                        ds_count += 1
-                        self.runner.job_states[downstream_id].update_should_run()
-                        ds_should_run = self.runner.job_states[downstream_id].should_run
-                        if ds_should_run == ShouldRun.Yes:
-                            log_job_trace(
-                                f"{self.job_id} update_should_run-> yes case Downstream needs me: {downstream_id}"
-                            )
-                            result = ShouldRun.Yes
-                            break
-                        elif ds_should_run == ShouldRun.No:
-                            # if they are all no, I may have my answer
-                            ds_no_count += 1
-                        # else maybe...
-                    else:  # no break
-                        if ds_count == ds_no_count:  # no downstream needs me
-                            self.update_invalidation()
-                            if self.validation_state == ValidationState.Validated:
-                                log_job_trace(
-                                    f"\t {self.job_id} -> no ds_count ==ds_no_count & validated"
-                                )
-                                result = ShouldRun.No
-                            elif (
-                                self.validation_state == ValidationState.Invalidated
-                            ):  # pragma: no cover
-                                raise ValueError("Did not expect this case")
-                                # log_job_trace(
-                                # f"\t {self.job_id} -> yes ds_count ==ds_no_count & invalidated"
-                                # )
-                                # result = ShouldRun.Yes
-                            else:
-                                log_job_trace(
-                                    f"\t {self.job_id} -> maybe ds_count ==ds_no_count & unknown validation"
-                                )
-                                result = ShouldRun.Maybe
-                        else:
-                            log_job_trace(
-                                f"\t {self.job_id} -> maybe ds_count != ds_no_count"
-                            )
-                            result = ShouldRun.Maybe
-        log_job_trace(
-            f"{self.job_id} == update_should_run. Was {self.should_run} becomes {result}"
-        )
-        if self.should_run != result:
-            self.should_run = result
-            self.job_decided_wether_to_run()
-            log_job_trace(f"{self.job_id} run_now in update_should_run")
-        if self.should_run.is_decided() and self.state == JobState.Waiting:
-            self.run_now_if_ready()
-
-    def run_now_if_ready(self):
-        log_job_trace(f"{self.job_id} run_now_if_ready")
-        if self.all_upstreams_terminal():
-            if self.should_run == ShouldRun.Yes:
-                log_job_trace(f"\t -> run")
-                self.run()
-            else:
-                log_job_trace(f"\t -> skip")
-                self.skip()
-        else:
-            log_job_trace(f"\t -> not ready")
-
-    def job_became_terminal(self):
-        # where is the runner lebowsky, where is the runner?
-        """This job is done."""
-        log_job_trace(f"{self.job_id} job_became_terminal {self.job_id}")
-        if self.state in (JobState.Success, JobState.Skipped):
-            for downstream_id in self.downstreams():
-                ds = self.runner.job_states[downstream_id]
-                ds.update_from_upstream_output(  # todo:  Can I actually skip the comparison work here? Don't think so,
-                    # it might have been skipped because it's present,
-                    # but the later job might still be based on old history
-                    self.job_id,
-                    self.updated_output,
-                )
-            for downstream_id in self.downstreams():
-                ds = self.runner.job_states[downstream_id]
-                if not ds.state.is_terminal():
-                    try:
-                        ds.update_should_run()
-                    except Exception as e:
-                        self.runner._push_event(
-                            "JobFailed",
-                            (
-                                ds.job_id,
-                                exceptions.JobEvaluationFailed(
-                                    "Update should run had an exception", e
-                                ),
-                            ),
-                        )  # which will in turn upstream fail all downstreams
-
-                # log_job_trace("run_now in update_should_run")
-                # ds.run_now_if_ready()
-
-            pass
-        elif self.state == JobState.Failed:
-            for downstream_job_id in self.downstreams():
-                self.runner.job_states[downstream_job_id].upstream_failed(
-                    f"Upstream {self.job_id} failed"
-                )
-            # upstream_failed all downstreams (reason: This job)
-            pass
-        elif self.state == JobState.UpstreamFailed:
-            for downstream_job_id in self.downstreams():
-                self.runner.job_states[downstream_job_id].upstream_failed(self.error)
-            pass
-        else:
-            raise NotImplementedError("Should not be reached")
-
-    def job_decided_wether_to_run(self):
-        log_job_trace(
-            f"{self.job_id} job_decided_wether_to_run {self.job_id}, {self.should_run}"
-        )
-        # we have been invalidated, or our output is needed.
-        # our should_be_run is set.
-        # so all we need to do is to call update should_be_run, right?
-        for upstream_id in self.upstreams():
-            if self.runner.jobs[upstream_id].is_conditional():
-                self.runner.job_states[upstream_id].update_should_run()
-        pass
-
-    def failed(self, error):
-        log_job_trace(f"{self.job_id} failed {error}")
-        self.error = error
-        self.state = JobState.Failed
-        # -> job_became_terminal
-
-    def upstream_failed(self, msg):
-        log_job_trace(f"{self.job_id} upstream failed {msg}")
-        if self.state != JobState.UpstreamFailed:
-            self.error = msg
-            self.validation_state = ValidationState.UpstreamFailed
-            self.state = JobState.UpstreamFailed
-            self.runner._push_event(
-                "JobUpstreamFailed", (self.job_id,)
-            )  # for accounting
-        else:
-            self.error += "\n" + msg  # multiple upstreams failed. Combine messages
-        # -> job_became_terminal
+    def skipped(self):
+        log_job_trace(f"{self.job_id} skipped")
+        if self.proc_state != ProcessingStatus.Schedulded:
+            raise NotImplementedError(f"skipped but state was {self.proc_state}")
+        self.proc_state = ProcessingStatus.Done
+        self.outcome = JobOutcome.Skipped
+        self.updated_output = self.historical_output.copy()
+        self._update_downstreams()
 
     def succeeded(self, output):
+        if self.proc_state != ProcessingStatus.Schedulded:
+            raise NotImplementedError(f"succeded but state was {self.proc_state}")
         log_job_trace(f"{self.job_id} succeeded")
         self.updated_output = output
         self.run_time = time.time() - self.start_time
-        self.state = JobState.Success
+        self.proc_state = ProcessingStatus.Done
+        self.outcome = JobOutcome.Success
+        self._update_downstreams()
 
-    def skipped(self):
-        log_job_trace(f"{self.job_id} skipped")
-        self.updated_output = self.historical_output.copy()
-        self.state = JobState.Skipped
+    def failed(self, error, pre_fail=False):
+        if self.proc_state != ProcessingStatus.Schedulded:
+            if not pre_fail:
+                raise NotImplementedError(
+                    f"failed but state was {self.proc_state} {self.job_id}"
+                )
+        log_job_trace(f"{self.job_id} failed {error}")
+        self.error = error
+        self.proc_state = ProcessingStatus.Done
+        self.outcome = JobOutcome.Failed
+        self._update_downstreams_with_upstream_failure(
+            f"Upstream failed: {self.job_id}"
+        )
+        # -> job_became_terminal
 
-    def skip(self):
-        log_job_trace(f"{self.job_id} skip called")
-        if self.state != JobState.Waiting:  # pragma: no cover
-            raise ValueError("Run/skip called twice")
-        # log_job_trace(f"{job_id} skipped")
-        self.runner._push_event("JobSkipped", (self.job_id,))  # for accounting
-        self.skipped()
+    def upstream_failed(self, msg):
+        log_job_trace(f"{self.job_id}'s upstream failed {msg}")
+        if self.outcome != JobOutcome.UpstreamFailed:
+            if self.proc_state is not ProcessingStatus.Waiting:
+                raise NotImplementedError(
+                    "Upstream failed on a job that had already been decided is a bug"
+                )
+            self.error = msg
+            self.validation_state = ValidationState.UpstreamFailed
+            self.proc_state = ProcessingStatus.Done
+            self.outcome = JobOutcome.UpstreamFailed
+            self.runner._push_event("JobUpstreamFailed", (self.job_id,))
+        else:
+            self.error += "\n" + msg  # multiple upstreams failed. Combine messages
 
-    def run(self):
-        log_job_trace(f"{self.job_id} run called")
-        if self.state != JobState.Waiting:  # pragma: no cover
-            raise ValueError("Run/skip called twice")
-        self._state = JobState.ReadyToRun
-        self.runner.jobs_to_run_que.put(self.job_id)
+    def update(self) -> bool:
+        if self.update_counter > 500:
+            raise ValueError()
+        self.update_counter += 1
 
-    def update_from_upstream_output(self, upstream_job_id, upstream_output):
-        log_job_trace(f"{self.job_id} update_from_upstream_output")
-        for name, hash in upstream_output.items():
-            if name in self.runner.job_inputs[self.job_id]:
-                log_trace(f"\t\t\tHad {name}")
-                self.updated_input[name] = hash  # update any way.
-            else:
-                log_trace(f"\t\t\tNot an input {name}")
-        # invalidation will be considered by the caller
-
-    def update_invalidation(self):
-        if self.job.job_kind == JobKind.Cleanup:
+        if self.proc_state != ProcessingStatus.Waiting:
+            log_job_trace(f"update: {self.job_id} -> already decided")
             return False
-        if self.all_upstreams_terminal_or_conditional():
-            if self.validation_state == ValidationState.UpstreamFailed:
-                return False
-            if self.validation_state == ValidationState.Invalidated:
-                return False
-
-            invalidated = self._consider_invalidation()
+        if self.job.job_kind is JobKind.Cleanup:
+            log_job_trace(f"update: {self.job_id} -> cleanup")
+            self.should_run = self.runner.job_states[
+                self.job.parent_job.job_id
+            ].should_run
+        else:
             log_job_trace(
-                f"{self.job_id} - invalidation considered. Result: {invalidated}"
+                f"update: {self.job_id} -> pre update validation {self.validation_state}"
             )
+            self._update_validation()
+            log_job_trace(
+                f"update: {self.job_id} -> post update validation {self.validation_state}"
+            )
+            if self.job.is_conditional():
+                log_job_trace(f"update: {self.job_id} -> Conditional")
+                if self.validation_state == ValidationState.Invalidated:
+                    self.should_run = ShouldRun.Yes
+                else:
+                    self.should_run = (
+                        self._examine_downstream_to_decide_whether_conditional_is_needed()
+                    )
+
+            else:
+                log_job_trace(f"update: {self.job_id} -> non-conditional")
+                if self.validation_state == ValidationState.Invalidated:
+                    self.should_run = ShouldRun.Yes
+                elif self.validation_state == ValidationState.Validated:
+                    # decide on whether the output is required
+                    try:
+                        output_needed = self.job.output_needed(self.runner)
+                        if output_needed:
+                            log_job_trace(f"update: {self.job_id} -> output needed")
+                            self.should_run = ShouldRun.Yes
+                        else:
+                            self.should_run = ShouldRun.No
+                    except Exception as e:
+                        self.outcome = JobOutcome.Failed
+                        # self.proc_state = ProcessingStatus.Done
+                        self.should_run = ShouldRun.Yes
+                        self.error = e
+
+                else:  # we nac't tell yet.
+                    self.should_run = ShouldRun.Maybe
+
+        log_job_trace(f"update: {self.job_id} -> should_run {self.should_run}")
+        if self.should_run.is_terminal() and self.all_upstreams_terminal():
+            log_job_trace(f"update: {self.job_id} -> schedulde now...")
+            self.proc_state = ProcessingStatus.ReadyToRun
+
+    def _update_should_run(self):
+        assert not self.proc_state is ProcessingStatus.ReadyToRun
+        if self.validation_state == ValidationState.Invalidated:
+            # ready to run means we now decide on run(->succes/failure) or ski# ready to run means we now decide on run(->succes/failure) or skipp
+            self.should_run = ShouldRun.Yes
+            return True
+        elif self.validation_state == ValidationState.Validated:
+            if self.job.is_conditional():
+                # ok, so no intrinsic reason to run this
+                # what about the downstreams
+                self.should_run = (
+                    self._examine_downstream_to_decide_whether_conditional_is_needed()
+                )
+                return self.should_run.is_terminal()
+            else:  # a non conditional job, that is validated
+                # question it's output
+                if self.job.output_needed(self.runner):
+                    self.should_run = ShouldRun.Yes
+                else:
+                    self.should_run = ShouldRun.No
+                return True
+        return False
+
+    def _examine_downstream_to_decide_whether_conditional_is_needed(self):
+        ds_count = 0
+        ds_no_count = 0
+        for downstream_id in self.downstreams():
+            if (
+                self.runner.jobs[downstream_id].job_kind == JobKind.Cleanup
+            ):  # those don't count
+                continue
+
+            log_job_trace(f"\t downstream: {downstream_id}")
+            ds_count += 1
+            # self.runner.job_states[downstream_id].update_should_run()
+            ds_should_run = self.runner.job_states[downstream_id].should_run
+            if ds_should_run == ShouldRun.Yes:
+                log_job_trace(
+                    f"{self.job_id} update_should_run-> yes case Downstream needs me: {downstream_id}"
+                )
+                result = ShouldRun.Yes
+                break
+            elif ds_should_run == ShouldRun.No:
+                # if they are all no, I may have my answer
+                ds_no_count += 1
+            # else maybe...
+        else:  # no break
+            if ds_count == ds_no_count:  # no downstream needs me
+                if self.validation_state == ValidationState.Validated:
+                    log_job_trace(
+                        f"\t {self.job_id} -> no ds_count ==ds_no_count & validated"
+                    )
+                    result = ShouldRun.No
+                elif (
+                    self.validation_state == ValidationState.Invalidated
+                ):  # pragma: no cover
+                    assert self.validation_state != ValidationState.Invalidated
+                    # log_job_trace(
+                    # f"\t {self.job_id} -> yes ds_count ==ds_no_count & invalidated"
+                    # )
+                    # result = ShouldRun.Yes
+                else:
+                    log_job_trace(
+                        f"\t {self.job_id} -> maybe ds_count ==ds_no_count & unknown validation"
+                    )
+                    result = ShouldRun.Maybe
+            else:
+                log_job_trace(
+                    f"\t {self.job_id} -> maybe ds_count {ds_count} != ds_no_count {ds_no_count}"
+                )
+                result = ShouldRun.Maybe
+                # we need to check this again eventually
+                for ds_id in self.downstreams():
+                    self.runner.jobs_that_need_propagation.append(ds_id)
+                # self.runner.jobs_that_need_propagation.append(self.job_id)
+        return result
+
+    def _update_validation(self):
+        if self.job.job_kind == JobKind.Cleanup:  # cleanup jobs never invalidate.
+            # self.validation_state = ValidationState.Validated
+            return False
+        if self.all_upstreams_terminal_or_conditional_or_decided():
+            # we can make a decision.
+            invalidated = self._consider_invalidation()
             if invalidated:
                 self.validation_state = ValidationState.Invalidated
             else:
-                # if self.all_upstreams_terminal():
-                if not self.job.output_needed(self.runner):
-                    log_job_trace(
-                        f"{self.job_id} - not invalidated, but "
-                        "all_upstreams_terminal_or_conditional -> validated "
-                        "and output not needed "
-                        "and was not a cleanup job"
-                    )
-                    self.validation_state = ValidationState.Validated
+                self.validation_state = ValidationState.Validated
+                # else:
+                # self.validation_state = ValidationState.Invalidated
+                # log_job_trace(
+                # f"{self.job_id} - not invalidated, but "
+                # "all_upstreams_terminal_or_conditional_or_decided -> validated "
+                # "and output not needed "
+                # "and was not a cleanup job"
+                # )
             return True
         else:
             return False
@@ -441,9 +254,9 @@ class JobStatus:
         old_input = self.historical_input
         new_input = self.updated_input
         invalidated = False
-        log_job_trace(
-            f"new input {escape_logging(new_input.keys())} old_input {escape_logging(old_input.keys())}"
-        )
+        # log_job_trace(
+        # f"new input {escape_logging(new_input.keys())} old_input {escape_logging(old_input.keys())}"
+        # )
         if len(new_input) != len(old_input):  # we lost or gained an input -> invalidate
             log_info(
                 f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed ({len(old_input)}->{len(new_input)})"
@@ -469,7 +282,7 @@ class JobStatus:
             if set(old_input.keys()) == set(
                 new_input.keys()
             ):  # nothing possibly renamed
-                log_trace(f"{self.job_id} Same set of input keys")
+                log_job_trace(f"{self.job_id} Same set of input keys")
                 for key, old_hash in old_input.items():
                     cmp_job = self.runner.jobs[self.runner.outputs_to_job_ids[key]]
                     if not cmp_job.compare_hashes(old_hash, new_input[key]):
@@ -525,95 +338,95 @@ class JobStatus:
                             )
                             invalidated = True
                             break
-                log_job_trace(f"{self.job_id} invalidated: {invalidated}")
+        log_job_trace(f"{self.job_id} invalidated: {invalidated}")
         return invalidated
 
-    def dump_subgraph_for_debug(self):
-        """Take every job leading up to this job 
-        and write a mock dependency graph to 
-        subgraph_debug.py
+    def all_upstreams_terminal_or_conditional_or_decided(self):
+        for upstream_id in self.upstreams():
+            s = self.runner.job_states[upstream_id]
+            if not s.proc_state.is_terminal():
+                if self.runner.jobs[upstream_id].is_conditional():
+                    if (
+                        s.should_run == ShouldRun.Yes
+                        or s.validation_state == ValidationState.Invalidated
+                    ):
+                        # this should be run first, but hasn't
+                        log_job_trace(
+                            f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was conditional, but shouldrun, and not yes"
+                        )
+                        return False
+                    else:
+                        if self.runner.job_states[
+                            upstream_id
+                        ].all_upstreams_terminal_or_conditional_or_decided():
+                            # import history from that one.
+                            for name in self.runner.jobs[upstream_id].outputs:
+                                if name in self.runner.job_inputs[self.job_id]:
+                                    log_trace(
+                                        f"\t\t\tHad {name} - non-running conditional job - using historical input"
+                                    )
+                                    if name in self.historical_input:
+                                        self.updated_input[
+                                            name
+                                        ] = self.historical_input[name]
+                                    # else: do nothing. We'll come back as invalidated, since we're missing an input
+                                    # and then the upstream job will be run, and we'll be back here,
+                                    # and it will be  in a terminal state.
+                        else:
+                            return False  # I can't tell yet!
+                elif (
+                    s.should_run == ShouldRun.No
+                    and s.proc_state is ProcessingStatus.Waiting
+                ):
+                    pass
+                else:
+                    log_job_trace(
+                        f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was not terminal {s.proc_state}"
+                    )
+                    return False
+        log_job_trace(
+            f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided->True"
+        )
+        return True
 
-        Very handy for debugging, but ugly :).
-        """
+    def _update_downstreams(self):
+        for ds_id in self.downstreams():
+            self.runner.jobs_that_need_propagation.append(ds_id)
+            for name, hash in self.updated_output.items():
+                if name in self.runner.job_inputs[ds_id]:
+                    log_trace(f"\t\t\t{ds_id} had {name}")
+                    self.runner.job_states[ds_id].updated_input[
+                        name
+                    ] = hash  # update any way.
+                else:
+                    log_trace(f"\t\t\tNot an input for {ds_id} {name}")
 
+    def _update_downstreams_with_upstream_failure(self, msg):
+        for ds_id in self.downstreams():
+            ds_state = self.runner.job_states[ds_id]
+            ds_state.upstream_failed(msg)
+            ds_state._update_downstreams_with_upstream_failure(msg)
 
-        import pypipegraph2 as ppg
+    def all_upstreams_terminal(self):
+        for upstream_id in self.upstreams():
+            s = self.runner.job_states[upstream_id].proc_state
+            if not s.is_terminal():
+                log_job_trace(
+                    f"{self.job_id} all_upstreams_terminal->False (because {upstream_id})"
+                )
+                return False
+        log_job_trace(f"{self.job_id} all_upstreams_terminal->True")
+        return True
 
-        nodes = []
-        seen = set()
-        edges = []
-        counter = [0]
-        node_to_counters = {}
+    def downstreams(self):
+        yield from self.runner.dag.successors(self.job_id)
 
-        def descend(node):
-            if node in seen:
-                return
-            seen.add(node)
-            j = self.runner.jobs[node]
-            if isinstance(j, ppg.FileInvariant):
-                nodes.append(f"Path('{counter[0]}').write_text('A')")
-                nodes.append(f"job_{counter[0]} = ppg.FileInvariant('{counter[0]}')")
-            elif isinstance(j, ppg.ParameterInvariant):
-                nodes.append(
-                    f"job_{counter[0]} = ppg.ParameterInvariant('{counter[0]}', 55)"
-                )
-            elif isinstance(j, ppg.FunctionInvariant):
-                nodes.append(
-                    f"job_{counter[0]} = ppg.FunctionInvariant('{counter[0]}', lambda: 55)"
-                )
-            elif isinstance(j, ppg.SharedMultiFileGeneratingJob):
-                nodes.append(
-                    f"job_{counter[0]} = ppg.SharedMultiFileGeneratingJob('{counter[0]}', {[x.name for x in j.files]!r}, dummy_mfg, depend_on_function=False)"
-                )
-            elif isinstance(j, ppg.TempFileGeneratingJob):
-                nodes.append(
-                    f"job_{counter[0]} = ppg.TempFileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False)"
-                )
-            elif isinstance(j, ppg.FileGeneratingJob):
-                nodes.append(
-                    f"job_{counter[0]} = ppg.FileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False)"
-                )
-            elif isinstance(j, ppg.MultiTempFileGeneratingJob):
-                files = [counter[0] + "/" + x.name for x in j.files]
-                nodes.append(
-                    f"job_{counter[0]} = ppg.MultiTempFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
-                )
-            elif isinstance(j, ppg.MultiFileGeneratingJob):
-                files = [counter[0] + "/" + x.name for x in j.files]
-                nodes.append(
-                    f"job_{counter[0]} = ppg.MultiFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
-                )
-            else:
-                raise ValueError(j)
-            node_to_counters[node] = counter[0]
-            counter[0] += 1
-            for parent in self.runner.dag.predecessors(node):
-                descend(parent)
-
-        def build_edges(node):
-            for parent in self.runner.dag.predecessors(node):
-                edges.append(
-                    f"job_{node_to_counters[node]}.depends_on(job_{node_to_counters[parent]})"
-                )
-                build_edges(parent)
-
-        descend(self.job_id)
-        build_edges(self.job_id)
-        with open("subgraph_debug.py", "w") as op:
-            op.write(
-                """def dummy_mfg(files, prefix):
-    Path(prefix).mkdir(exist_ok=True, parents=True)
-    for f in files:
-        f.write_text("hello")
-"""
-            )
-
-            op.write("\n".join(nodes) + "\n")
-            op.write("\n".join(edges) + "\n")
+    def upstreams(self):
+        yield from self.runner.dag.predecessors(self.job_id)
 
 
 def _dict_values_count_hashed(a_dict, count_this):
-    """Specialised 'how many times does this hash occur in this dict for renamed inputs"""
+    """Specialised 'how many times does this hash occur in this dict. For renamed inputs"""
     counter = 0
     for value in a_dict.values():
         if value == count_this:

@@ -8,7 +8,8 @@ from .util import escape_logging
 from .enums import (
     JobKind,
     ValidationState,
-    JobState,
+    ProcessingStatus,
+    JobOutcome,
     RunMode,
     ShouldRun,
     Resources,
@@ -23,6 +24,7 @@ from .interactive import ConsoleInteractive, StatusReport
 from .util import log_info, log_error, log_warning, log_debug, log_trace, log_job_trace
 import copy
 from .job_status import JobStatus
+from collections import deque
 
 
 class ExitNow:
@@ -93,7 +95,9 @@ class Runner:
                 job_numbers.add(job.job_number)
             assert len(job_numbers) == len(self.jobs)
             if len(self.jobs) - prune_counter != len(self.dag):
-                raise NotImplementedError(f"Mismatch between len(self.jobs) {len(self.jobs)} - prune_counter {prune_counter} and len(self.dag) {len(self.dag)}")
+                raise NotImplementedError(
+                    f"Mismatch between len(self.jobs) {len(self.jobs)} - prune_counter {prune_counter} and len(self.dag) {len(self.dag)}"
+                )
 
             log_job_trace(
                 "dag "
@@ -126,6 +130,7 @@ class Runner:
             self.event_lock = threading.Lock()
             self.jobs_to_run_que = queue.SimpleQueue()
             self.threads = []
+            self.jobs_that_need_propagation = deque()
 
     def _apply_pruning(self, dag, focus_on_these_jobs, jobs_already_run_previously):
         def _recurse_pruning(job_id, reason):
@@ -222,6 +227,7 @@ class Runner:
         # might be the result of pruning...
         downstreams = list(dag.successors(job.job_id))
         if not downstreams:
+            log_job_trace(f"ommiting conditional job because of no output {job.job_id}")
             dag.remove_node(job.job_id)
             del self.jobs[job.job_id]
             # mark it as skipped
@@ -231,11 +237,9 @@ class Runner:
             self.job_states[job.job_id] = JobStatus(
                 job.job_id, self, historical_input, historical_output
             )
-            self.job_states[
-                job.job_id
-            ]._state = (
-                JobState.Skipped
-            )  # no need to do the downstream calls - this is just an ignored job
+            # no need to do the downstream calls - this is just an ignored job
+            self.job_states[job.job_id].proc_state = ProcessingStatus.Done
+            self.job_states[job.job_id].outcome = JobOutcome.Skipped
             return 0
         elif job.cleanup_job_class:
             cleanup_job = self._add_cleanup(dag, job)
@@ -329,23 +333,28 @@ class Runner:
         self.events = queue.Queue()
 
         todo = len(self.dag)
+        log_job_trace("here we go")
         for job_id in self.dag.nodes:  # those are without the pruned nodes
             no_inputs = not self.job_inputs[job_id]
             # output_needed = self.jobs[job_id].output_needed(self)
             failed_last_time = self._job_failed_last_time(job_id)
             if no_inputs:  # could be an initial job
-                log_job_trace(f"{job_id} failed_last_time: {failed_last_time}")
+                log_job_trace(
+                    f"{job_id} no inputs. failed_last_time: {failed_last_time}"
+                )
                 if failed_last_time:
                     log_job_trace(f"{job_id} Failing because of failure last time (1)")
-                    self.job_states[job_id].failed(self.job_states[job_id].error)
+                    self.job_states[job_id].failed(self.job_states[job_id].error, True)
                     todo -= 1  # no need to send a message for this
                 else:
-                    self.job_states[job_id].update_should_run()
+                    self.jobs_that_need_propagation.append(job_id)
             elif failed_last_time:
                 log_job_trace(f"{job_id} Failing because of failure last time (2)")
-                self.job_states[job_id].failed(self.job_states[job_id].error)
+                self.job_states[job_id].failed(self.job_states[job_id].error, True)
                 todo -= 1  # no need to send a message for this
-        log_job_trace("Finished initial pass")
+        log_job_trace(
+            f"Finished initial pass, jobs_that_need_propagation now filled {len(self.jobs_that_need_propagation)}"
+        )
 
         self.jobs_in_flight = []
         self.jobs_all_cores_in_flight = 0
@@ -356,6 +365,52 @@ class Runner:
             self._interactive_start()
             # self._interactive_report()
             while todo:
+                while self.jobs_that_need_propagation:
+                    log_job_trace(f"jtnp: {self.jobs_that_need_propagation}")
+                    check_job_id = self.jobs_that_need_propagation.popleft()
+                    check_state = self.job_states[check_job_id]
+                    should_run_before = check_state.should_run
+                    validation_before = check_state.validation_state
+                    check_state.update()
+                    log_job_trace(
+                        f"{check_job_id}: State: {check_state.proc_state} {check_state.should_run}"
+                    )
+                    if check_state.proc_state is ProcessingStatus.ReadyToRun:
+                        # this job has transitioned into ReadyToRun  .
+                        if check_state.should_run is ShouldRun.No:
+                            check_state.proc_state = ProcessingStatus.Schedulded
+                            self._push_event("JobSkipped", (check_job_id,))
+                        elif check_state.should_run is ShouldRun.Yes:
+                            check_state.proc_state = ProcessingStatus.Schedulded
+                            if (
+                                check_state.outcome is JobOutcome.Failed
+                            ):  # internal failuer
+                                self._push_event(
+                                    "JobFailed",
+                                    (
+                                        check_job_id,
+                                        exceptions.JobEvaluationFailed(
+                                            "output_needed raised an exception",
+                                            check_state.error,
+                                        ),
+                                    ),
+                                )  # which will in turn upstream fail all downstreams
+                            else:
+                                self.jobs_to_run_que.put(check_job_id)
+                    elif check_state.proc_state is ProcessingStatus.Schedulded:
+                        pass
+                    elif (check_state.validation_state != validation_before) or (
+                        check_state.should_run != should_run_before
+                    ):
+                        log_job_trace(
+                            f"validation changed. Tell upstreams {check_job_id}"
+                        )
+                        # we have just changed the validation state
+                        # and the upstreams might care about that to decide
+                        # whether they need to run
+                        for upstream_job_id in check_state.upstreams():
+                            self.jobs_that_need_propagation.append(upstream_job_id)
+
                 try:
                     ev = self.events.get(timeout=self.event_timeout)
                     if ev[0] == "AbortRun":
@@ -367,12 +422,14 @@ class Runner:
                     # long time, no event.
                     if not self.jobs_in_flight:
                         log_error(
-                            "Coding error lead to que empty with no jobs in flight?"
+                            f"Coding error lead to que empty with no jobs in flight? todo: {todo}"
                         )
                         # ok, a coding error has lead to us not finishing
                         # the todo graph.
                         for job_id in self.job_states:
-                            log_warning(f"{job_id}, {self.job_states[job_id].state}")
+                            log_warning(
+                                f"{job_id}, {self.job_states[job_id].proc_state}"
+                            )
                         raise exceptions.RunFailedInternally
                     continue
 
@@ -513,7 +570,7 @@ class Runner:
             self._handle_job_success(*event[1])
             todo -= 1
         elif event[0] == "JobSkipped":
-            # self._handle_job_skipped(*event[1])
+            self._handle_job_skipped(*event[1])
             todo -= 1
         elif event[0] == "JobFailed":
             self.fail_counter += 1
@@ -526,6 +583,9 @@ class Runner:
         else:  # pragma: no cover # defensive
             raise NotImplementedError(event[0])
         return todo
+
+    def _handle_job_skipped(self, job_id):
+        self.job_states[job_id].skipped()
 
     def _handle_job_success(self, job_id, job_outputs):
         """A job was done correctly. Record it's outputs,
@@ -570,16 +630,6 @@ class Runner:
                 self.output_hashes[name] = hash
             job_state.succeeded(job_outputs)
 
-    def _job_failed_last_time(self, job_id):
-        """Did this job fail last time?"""
-        res = (
-            self.last_job_states
-            and job_id in self.last_job_states
-            and self.last_job_states[job_id].state == JobState.Failed
-        )
-        log_trace(f"_job_failed_last_time: {job_id}: {res}")
-        return res
-
     def _handle_job_failed(self, job_id, error):
         """A job did not succeed (wrong output, no output, exception...0, - log the error, fail all downstreams"""
         log_job_trace(f"{job_id} failed")
@@ -594,6 +644,7 @@ class Runner:
             log = log_job_trace
         if not self._job_failed_last_time(job_id):
             try:
+                # mock failure in case of abort/stop
                 if isinstance(job_state.error.args[0], exceptions.JobCanceled):
                     if self.aborted or self.stopped:
                         return
@@ -601,6 +652,7 @@ class Runner:
                         raise NotImplementedError(
                             "JobCanceled outside of stopped/aborted state?!"
                         )
+                # log error to file. Todo: move to job_state
                 if hasattr(job_state.error.args[1], "stacks"):
                     stacks = job_state.error.args[1]
                 else:
@@ -658,6 +710,18 @@ class Runner:
                 log_error(
                     f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed."
                 )
+        else:
+            raise ValueError("Did not expect this")
+
+    def _job_failed_last_time(self, job_id) -> bool:
+        """Did this job fail last time?"""
+        res = (
+            self.last_job_states
+            and job_id in self.last_job_states
+            and self.last_job_states[job_id].outcome == JobOutcome.Failed
+        )
+        log_trace(f"_job_failed_last_time: {job_id}: {res}")
+        return res
 
     def _push_event(self, event, args, indent=0):
         """Push an event to be handled by the control thread"""

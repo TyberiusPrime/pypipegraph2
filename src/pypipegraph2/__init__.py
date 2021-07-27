@@ -120,7 +120,7 @@ def change_global_pipegraph(value):
 def run(
     print_failures=True,
     raise_on_job_error=True,
-    event_timeout=5,
+    event_timeout=1,
     dump_graphml=None,
 ):
     if global_pipegraph is None:

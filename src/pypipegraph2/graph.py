@@ -14,7 +14,7 @@ from pathlib import Path
 from loguru import logger
 
 from . import exceptions
-from .runner import Runner, JobState
+from .runner import Runner, JobOutcome
 from .util import CPUs, console
 from .enums import RunMode
 from .exceptions import JobsFailed, _RunAgain
@@ -24,8 +24,8 @@ from rich.logging import RichHandler
 from rich.console import Console
 
 
-logger.level("JobTrace", no=6, color="<yellow>", icon="🐍")
-logger.level("INFO", color="", icon="")
+logger.level("JT", no=6, color="<yellow>", icon="🐍")
+logger.level("INFO", color="")
 # if "pytest" in sys.modules:  # pragma: no branch
 # log_out = sys.stderr
 # else:  # pragma: no cover
@@ -114,7 +114,7 @@ class PyPipeGraph:
         raise_on_job_error=True,
         event_timeout=5,
         dump_graphml=False,
-    ) -> Dict[str, JobState]:
+    ) -> Dict[str, JobOutcome]:
         """Run the complete pypipegraph"""
         try:
             return self._run(
@@ -134,7 +134,7 @@ class PyPipeGraph:
         event_timeout=5,
         focus_on_these_jobs=None,
         dump_graphml=False,
-    ) -> Dict[str, JobState]:
+    ) -> Dict[str, JobOutcome]:
         """Run the jobgraph - possibly focusing on a subset of jobs (ie. ignoring
         anything that's not necessary to calculate them - activated by calling a Job
         """
@@ -186,7 +186,7 @@ class PyPipeGraph:
                 format=(
                     "\r  <blue>{elapsed}s</blue> <bold>|</bold> <level>{message}</level>"
                     if not util.do_jobtrace_log
-                    else "<blue>{elapsed}s</blue> | <level>{level}</level> | <bold>|</bold>{file}:{line} <level>{message}</level>"
+                    else "<blue>{elapsed}s</blue> | <level>{level.icon}</level> <bold>|</bold>{file:8.8}:{line:4} <level>{message}</level>"
                 ),
             )  # pragma: no cover
             import threading
@@ -240,7 +240,7 @@ class PyPipeGraph:
                 for k, v in result.items():
                     if (
                         not k in final_result
-                        or final_result[k].state != JobState.Failed
+                        or final_result[k].outcome != JobOutcome.Failed
                     ):
                         final_result[k] = v
                 # final_result.update(result)
@@ -249,7 +249,7 @@ class PyPipeGraph:
                 # final_result.update(result)
             del result
             for job_id, job_state in final_result.items():
-                if job_state.state == JobState.Failed:
+                if job_state.outcome == JobOutcome.Failed:
                     self.do_raise.append(job_state.error)
             self.last_run_result = final_result
             if raise_on_job_error and self.do_raise and not self._restart_afterwards:
@@ -366,7 +366,7 @@ class PyPipeGraph:
             if not rt_file.exists():
                 lines.append("jobid\trun_start_time\truntime_s")
             for job_id, job_result in job_results.items():  # pragma: no branch
-                if job_result.state is JobState.Success:
+                if job_result.outcome is JobOutcome.Success:
                     if job_result.run_time >= 1:
                         lines.append(
                             f"{job_id}\t{int(run_start_time)}\t{job_result.run_time:.2f}"

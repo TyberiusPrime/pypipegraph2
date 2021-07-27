@@ -685,60 +685,45 @@ class TestSharedJob:
         with pytest.raises(ppg.JobOutputConflict):
             b = ppg.SharedMultiFileGeneratingJob("out", ["b"], doit)
 
-    def test_issue_20210726(self):
-        def dummy_mfg(files, prefix):
+    def test_issue_20210726(self, job_trace_log):
+        """This uncovered a depth first vs breadth first invalidation proagation bug.
+        Created with Job_Status.dump_subgraph_for_debug and then heavily pruned
+        """
+
+        class DummyObject:
+            pass
+
+        def dummy_smfg(files, prefix):
             Path(prefix).mkdir(exist_ok=True, parents=True)
             for f in files:
                 f.write_text("hello")
 
-        ppg.new(cores=24)
+        def dummy_mfg(files):
+            for f in files:
+                f.parent.mkdir(exist_ok=True, parents=True)
+                f.write_text("hello")
+
+        def dummy_fg(of):
+            of.parent.mkdir(exist_ok=True, parents=True)
+            of.write_text("fg")
+
+        job_0 = ppg.FileGeneratingJob("J0", dummy_fg, depend_on_function=False)
+        job_2 = ppg.DataLoadingJob("J2", lambda: None, depend_on_function=False)
+        job_3 = ppg.DataLoadingJob("J3", lambda: None, depend_on_function=False)
+        job_76 = ppg.FileGeneratingJob("J76", dummy_fg, depend_on_function=False)
 
 
-        job_0 = ppg.SharedMultiFileGeneratingJob(
-            "0", ["df_transcripts.msgpack"], dummy_mfg, depend_on_function=False
-        )
-        job_1 = ppg.SharedMultiFileGeneratingJob(
-            "1", ["genes.gtf"], dummy_mfg, depend_on_function=False
-        )
-        job_2 = ppg.SharedMultiFileGeneratingJob(
-            "2", ["url.txt"], dummy_mfg, depend_on_function=False
-        )
-        job_3 = ppg.FunctionInvariant("3", lambda: 55)
-        job_4 = ppg.ParameterInvariant("4", 55)
-        job_5 = ppg.FunctionInvariant("5", lambda: 55)
-        job_6 = ppg.ParameterInvariant("6", 55)
-        job_7 = ppg.SharedMultiFileGeneratingJob(
-            "7", ["df_genes.msgpack"], dummy_mfg, depend_on_function=False
-        )
-        job_8 = ppg.FunctionInvariant("8", lambda: 55)
-        Path("9").write_text("A")
-        job_9 = ppg.FileInvariant("9")
-        job_10 = ppg.ParameterInvariant("10", 55)
-        job_11 = ppg.FunctionInvariant("11", lambda: 55)
-        job_12 = ppg.FunctionInvariant("12", lambda: 55)
-        job_13 = ppg.ParameterInvariant("13", 55)
-        job_14 = ppg.FunctionInvariant("14", lambda: 55)
-        job_0.depends_on(job_1)
-        job_1.depends_on(job_2)
-        job_2.depends_on(job_3)
-        job_2.depends_on(job_4)
-        job_1.depends_on(job_5)
-        job_1.depends_on(job_6)
-        job_0.depends_on(job_7)
-        job_7.depends_on(job_1)
-        job_1.depends_on(job_2)
-        job_2.depends_on(job_3)
-        job_2.depends_on(job_4)
-        job_1.depends_on(job_5)
-        job_1.depends_on(job_6)
-        job_7.depends_on(job_8)
-        job_7.depends_on(job_9)
-        job_7.depends_on(job_10)
-        job_7.depends_on(job_11)
-        job_0.depends_on(job_9)
-        job_0.depends_on(job_12)
-        job_0.depends_on(job_13)
-        job_0.depends_on(job_14)
-        out = ppg.FileGeneratingJob('outX', lambda of: of.write_text("SHU")).depends_on(job_0)
-        for i in range(20): # this is not 100% deterministic, doesn't show up every time, so we do it repeatedly
-            ppg.run()
+        edges = []
+        edges.append(("J0", "J2"))
+        edges.append(("J2", "J3"))
+        edges.append(("J2", "J76"))
+        edges.append(("J76", "J3"))
+
+        for (a, b) in edges:
+            if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
+                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+            else:
+                print("unused edge", a,b)
+
+        ppg.run()
+        ppg.run(event_timeout=1)
