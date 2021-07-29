@@ -528,7 +528,7 @@ class TestCachedDataLoadingJob:
         with pytest.raises(TypeError):
             ppg.CachedDataLoadingJob("123", lambda: 5, 123)
 
-    def test_cant_unpickle(self):
+    def test_cant_unpickle(self, job_trace_log):
         import pickle
 
         o = Dummy()

@@ -247,7 +247,7 @@ class TestPypipegraph2:
         )  # c get's rewritten, it depended on all of A
         assert Path("D").read_text() == "D0"
 
-    def test_tempfile(self):
+    def test_tempfile(self, job_trace_log):
         jobA = ppg.TempFileGeneratingJob(
             "TA",
             lambda of: of.write_text("A" + counter("a")),
