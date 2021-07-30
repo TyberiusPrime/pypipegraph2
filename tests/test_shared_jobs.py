@@ -18,7 +18,7 @@ def get_known(job):
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestSharedJob:
-    def test_simple(self):
+    def test_simple(self, job_trace_log):
         def doit(output_files, output_prefix):
             for of in output_files:
                 assert not "no_input" in str(of)
@@ -91,15 +91,14 @@ class TestSharedJob:
         assert read("doit") == "3"
         ppg.run()
         assert read("doit") == "3"
-        # we had history, we didn't go there..
 
+        #no build, have history -> no cleanup
         assert len(list(job.output_dir.glob("*"))) == 3  # three different outputs
         assert len(list(job.input_dir.glob("*"))) == 3  # three different outputs
         ppg.global_pipegraph.get_history_filename().unlink()
-
         ppg.run()
-        assert len(list(job.output_dir.glob("*"))) == 1  # three different outputs
-        assert len(list(job.input_dir.glob("*"))) == 1  # three different outputs
+        assert len(list(job.output_dir.glob("*"))) == 1  # loosing history is reason for cleanup
+        assert len(list(job.input_dir.glob("*"))) == 1  # loosing history is reason for cleanup
 
     def test_multi_file_gen_job_lookup_colission(self):
         with pytest.raises(ValueError):

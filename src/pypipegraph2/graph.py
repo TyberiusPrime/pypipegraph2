@@ -212,8 +212,11 @@ class PyPipeGraph:
             while True:
                 max_runs -= 1
                 if max_runs == 0:  # pragma: no cover
-                    raise ValueError("Maximum graph-generating-jobs recursion depth exceeded")
+                    raise ValueError(
+                        "Maximum graph-generating-jobs recursion depth exceeded"
+                    )
                 do_break = False
+                job_count = len(self.job_dag)
                 try:
                     self.runner = Runner(
                         self,
@@ -222,10 +225,9 @@ class PyPipeGraph:
                         focus_on_these_jobs,
                         jobs_already_run,
                         dump_graphml,
+                        self.run_id,
                     )
-                    result = self.runner.run(
-                        self.run_id, result, print_failures=print_failures
-                    )
+                    result = self.runner.run(result, print_failures=print_failures)
                     aborted = self.runner.aborted
                     del self.runner
                     self.run_id += 1
@@ -235,6 +237,7 @@ class PyPipeGraph:
                     result = e.args[0]
                 self._update_history(result, history)
                 self._log_runtimes(result, start_time)
+                # assert len(result) == job_count # does not account for cleanup jobs...
                 # leave out the cleanup jobs added virtually by the run
                 jobs_already_run.update((k for k in result.keys() if k in self.jobs))
                 for k, v in result.items():
@@ -301,8 +304,8 @@ class PyPipeGraph:
         if link_name.exists() or link_name.is_symlink():
             # print("unlinking", link_name)
             link_name.unlink()
-        #else:
-            #print("not found", link_name)
+        # else:
+        # print("not found", link_name)
 
         files = sorted(dir.glob(pattern))
         if files:

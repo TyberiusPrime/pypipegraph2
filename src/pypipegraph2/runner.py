@@ -26,6 +26,8 @@ import copy
 from .job_status import JobStatus
 from collections import deque
 
+ljt = log_job_trace
+
 
 class ExitNow:
     """Token for leave-this-thread-now-signal"""
@@ -44,6 +46,7 @@ class Runner:
         focus_on_these_jobs,
         jobs_already_run_previously,
         dump_graphml,
+        run_id,
     ):
         from . import _with_changed_global_pipegraph
 
@@ -62,6 +65,10 @@ class Runner:
             self.job_states = (
                 {}
             )  # get's partially filled by modify_dag, and then later in this function
+            self.run_id = (
+                run_id  # to allow jobgenerating jobs to run just once per graph.run()
+            )
+
             # flat_before = networkx.readwrite.json_graph.node_link_data(
             # job_graph.job_dag
             # )
@@ -76,7 +83,9 @@ class Runner:
                 )
             assert len(self.jobs) == len(job_graph.job_dag)
 
-            self.dag, prune_counter = self.modify_dag(
+            log_job_trace(f"Focus on these jobs: {focus_on_these_jobs}")
+            log_job_trace(f"jobs_already_run_previously: {jobs_already_run_previously}")
+            self.dag, self.pruned = self.modify_dag(
                 job_graph,
                 focus_on_these_jobs,
                 jobs_already_run_previously,
@@ -94,7 +103,7 @@ class Runner:
                 # log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
                 job_numbers.add(job.job_number)
             assert len(job_numbers) == len(self.jobs)
-            if len(self.jobs) - prune_counter != len(self.dag):
+            if len(self.jobs) - len(self.pruned) != len(self.dag):
                 raise NotImplementedError(
                     f"Mismatch between len(self.jobs) {len(self.jobs)} - prune_counter {prune_counter} and len(self.dag) {len(self.dag)}"
                 )
@@ -118,7 +127,9 @@ class Runner:
                     f"Not a directed *acyclic* graph after modification. See {error_fn}. Cycles between {cycles}"
                 )
 
-            for job_id in self.jobs:
+            for job_id in networkx.algorithms.dag.topological_sort(
+                self.dag
+            ):  # must be topological so we can do upstreams whilst building
                 historical_input, historical_output = history.get(
                     job_id, ({}, {})
                 )  # todo: support renaming jobs.
@@ -127,6 +138,7 @@ class Runner:
                     f"Loaded history for {job_id} in: {len(s.historical_input)}, out: {len(s.historical_output)}"
                 )
                 self.job_states[job_id] = s
+                s.initialize()  # so that output_needed can access the history
             self.event_lock = threading.Lock()
             self.jobs_to_run_que = queue.SimpleQueue()
             self.threads = []
@@ -153,6 +165,7 @@ class Runner:
 
         if jobs_already_run_previously:
             new_jobs = set(dag.nodes).difference(jobs_already_run_previously)
+            ljt(f"new jobs {new_jobs}")
         else:
             new_jobs = set()
 
@@ -180,7 +193,7 @@ class Runner:
             except networkx.exception.NetworkXError:  # happens with cleanup nodes that we  omitted
                 pass
             # del self.jobs[job_id]
-        return len(pruned)
+        return pruned
 
     def _add_cleanup(self, dag, job):
         downstreams = [
@@ -277,7 +290,7 @@ class Runner:
                 named_key_ids=True,
             )
 
-        prune_counter = self._apply_pruning(
+        pruned = self._apply_pruning(
             dag, focus_on_these_jobs, jobs_already_run_previously
         )
 
@@ -306,9 +319,9 @@ class Runner:
                 named_key_ids=True,
             )
 
-        return dag, prune_counter
+        return dag, pruned
 
-    def run(self, run_id, last_job_states, print_failures):  # noqa:C901
+    def run(self, last_job_states, print_failures):  # noqa:C901
         """Actually run the current DAG"""
         from . import global_pipegraph
 
@@ -325,9 +338,6 @@ class Runner:
         self.print_failures = print_failures
         self.output_hashes = {}
         self.new_history = {}  # what are the job outputs this time.
-        self.run_id = (
-            run_id  # to allow jobgenerating jobs to run just once per graph.run()
-        )
         self.last_job_states = last_job_states
 
         self.events = queue.Queue()
@@ -371,15 +381,24 @@ class Runner:
                     check_state = self.job_states[check_job_id]
                     should_run_before = check_state.should_run
                     validation_before = check_state.validation_state
-                    check_state.update()
+                    new = check_state.update()
+                    if new is None:
+                        raise ValueError("none return")
+                    log_job_trace(f"New for checking {new}")
+                    self.jobs_that_need_propagation.extend(new)
                     log_job_trace(
                         f"{check_job_id}: State: {check_state.proc_state} {check_state.should_run}"
                     )
                     if check_state.proc_state is ProcessingStatus.ReadyToRun:
                         # this job has transitioned into ReadyToRun  .
                         if check_state.should_run is ShouldRun.No:
-                            check_state.proc_state = ProcessingStatus.Schedulded
-                            self._push_event("JobSkipped", (check_job_id,))
+                            check_state.skipped()
+                            self._push_event(
+                                "JobSkipped", (check_job_id,)
+                            )  # for accounting
+                            # tell teh upstreams - we won't receive the other one.
+                            for upstream_job_id in check_state.upstreams:
+                                self.jobs_that_need_propagation.append(upstream_job_id)
                         elif check_state.should_run is ShouldRun.Yes:
                             check_state.proc_state = ProcessingStatus.Schedulded
                             if (
@@ -408,8 +427,14 @@ class Runner:
                         # we have just changed the validation state
                         # and the upstreams might care about that to decide
                         # whether they need to run
-                        for upstream_job_id in check_state.upstreams():
-                            self.jobs_that_need_propagation.append(upstream_job_id)
+                        for upstream_job_id in check_state.upstreams:
+                            if (
+                                self.jobs[upstream_job_id].is_conditional()
+                                and not self.job_states[
+                                    upstream_job_id
+                                ].should_run.is_decided()
+                            ):
+                                self.jobs_that_need_propagation.append(upstream_job_id)
 
                 try:
                     ev = self.events.get(timeout=self.event_timeout)
@@ -497,13 +522,19 @@ class Runner:
             log_info("interactive stop")
             self._interactive_stop()
 
+        for job_id in self.pruned:
+            ljt(f"Logging as pruned {job_id}")
+            assert not job_id in self.job_states
+            self.job_states[job_id] = JobStatus(job_id, self, None, None)
+            self.job_states[job_id].was_pruned()
+
         if len(global_pipegraph.jobs) != job_count and not self.aborted:
             log_info(
                 f"created new jobs. _RunAgain issued {len(global_pipegraph.jobs)} != {job_count}"
             )
             for job_id in global_pipegraph.jobs:
                 if job_id not in self.jobs:
-                    log_trace(f"new job {job_id}")
+                    log_job_trace(f"new job {job_id}")
             raise _RunAgain(self.job_states)
         log_trace("Left runner.run()")
 
@@ -570,7 +601,7 @@ class Runner:
             self._handle_job_success(*event[1])
             todo -= 1
         elif event[0] == "JobSkipped":
-            self._handle_job_skipped(*event[1])
+            # self._handle_job_skipped(*event[1])
             todo -= 1
         elif event[0] == "JobFailed":
             self.fail_counter += 1
@@ -584,8 +615,8 @@ class Runner:
             raise NotImplementedError(event[0])
         return todo
 
-    def _handle_job_skipped(self, job_id):
-        self.job_states[job_id].skipped()
+    # def _handle_job_skipped(self, job_id):
+    # self.job_states[job_id].skipped()
 
     def _handle_job_success(self, job_id, job_outputs):
         """A job was done correctly. Record it's outputs,

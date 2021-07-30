@@ -39,7 +39,7 @@ class TestPypipegraph2:
         assert Path("A").read_text() == "AAA"
         assert Path("B").read_text() == "BBBAAA"
 
-    def test_very_simple_chain_rerun(self):
+    def test_very_simple_chain_rerun(self, job_trace_log):
         assert not Path("A").exists()
         assert not Path("B").exists()
         counter = 0
@@ -1724,7 +1724,7 @@ class TestPypipegraph2:
         ppg.run()
         assert read("a") == "4"
 
-    def test_focus_on_these_jobs_and_generating(self):
+    def test_focus_on_these_jobs_and_generating(self, job_trace_log):
         """What happens when you focus() on a JobGeneratingJob?"""
 
         def inner():

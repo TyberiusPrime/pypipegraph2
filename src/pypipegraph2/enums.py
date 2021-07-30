@@ -2,31 +2,48 @@ from enum import Enum, auto
 
 
 class ProcessingStatus(Enum):
-    Waiting = auto()
-    ReadyToRun = auto()
-    Schedulded = auto()
-    Done = auto()
+    Waiting = auto() # not yet ready
+    ReadyToRun = auto() # short livened, turns into schedulded very soon
+    Schedulded = auto() # it's in the pipeline. Stand by for outcome.
+    Done = auto() # grilled and done.
 
     def is_terminal(self):
         return self is ProcessingStatus.Done
 
 
 class JobOutcome(Enum):
-    NotYet = auto()
+    NotYet = auto() # default
     Success = auto()
     Skipped = auto()
     Failed = auto()
     UpstreamFailed = auto()
+    Pruned = auto()
 
 
 class ShouldRun(Enum):
     Maybe = auto()
     Yes = auto()
+    YesAfterValidation = auto()
     No = auto()
+    IfInvalidated = auto()
+    IfDownstreamNeedsMe = auto()
+    IfParentJobRan = auto()
 
-    def is_terminal(self):
+    def is_decided(self):
         return self in (ShouldRun.Yes, ShouldRun.No)
 
+    def almost_decided(self):
+        return self in (ShouldRun.Yes, ShouldRun.No, ShouldRun.IfInvalidated)
+
+
+class Action(Enum):
+    Schedulde = auto()
+    GoYes = auto()
+    GoNo = auto()
+    ShouldNotHappen = auto()
+    TakeFromParent = auto()
+    RefreshValidationAndTryAgain = auto()
+    ConditionalValidated = auto()
 
 class ValidationState(Enum):
     Unknown = auto()
