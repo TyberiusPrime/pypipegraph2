@@ -2296,12 +2296,14 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
         else:
             self._raise_partial_result_exception()
-        assert all([x.exists() for x in fns])  # paranioa...
+        missing = [x for x in fns if not x.exists()]
+        if missing:
+            raise ValueError("missing output files - did somebody go and delete them?!", missing)
 
         # now log that we're the ones using this.
         # our key is a hash of our history path.
         abs_hd = str(global_pipegraph.get_history_filename().absolute())
-        usage_dir_hash = hashlib.sha512(abs_hd.encode("utf-8")).hexdigest()[:10]
+        usage_dir_hash = hashlib.sha512(abs_hd.encode("utf-8")).hexdigest()
         log_job_trace(f"usage_dir_hash {usage_dir_hash}")
         lookup_file = self.usage_dir / (usage_dir_hash + ".source")
         lookup_text = abs_hd
