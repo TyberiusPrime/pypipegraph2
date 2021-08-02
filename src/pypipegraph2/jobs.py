@@ -2315,7 +2315,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                     "But it is possible. "
                     "Rename your project dir / history file, I suppose?"
                 )
-        lookup_file.write_text(abs_hd)
+        else:
+            lookup_file.write_text(abs_hd)
+
         used_symlink = self.usage_dir / (usage_dir_hash + ".uses")
         target = (
             Path("..")
@@ -2330,7 +2332,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             used_symlink.symlink_to(target)
 
         # log_error(f"{used_symlink.resolve().absolute()} {symlink.resolve().absolute()}")
-        assert used_symlink.resolve().absolute() == symlink.resolve().absolute()
+        # that's paranoia, and slowish...
+        # assert used_symlink.resolve().absolute() == symlink.resolve().absolute()
         log_job_trace(f"output symlink {symlink}")
         # now let's apply the same logic we use in MultiFileGeneratingJobs.
         # same mtime, same size as the last time we saw this
