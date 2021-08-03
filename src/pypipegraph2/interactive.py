@@ -50,6 +50,7 @@ class ConsoleInteractive:
     def start(self, runner):
         self.runner = runner
         self.last_report_status_args = StatusReport(0, 0, 0, len(runner.jobs), 0)
+        self.breaker = os.pipe()
         self.thread = threading.Thread(target=self.loop)
         self._set_terminal_raw()
         self.stopped = False
@@ -63,16 +64,19 @@ class ConsoleInteractive:
 
     def stop(self):
         """Called from the runner"""
+        log_info("Leaving interactive mode")
         self.stopped = True
         if hasattr(self, "thread"):
             self.leave_thread = True
-            async_raise(self.thread.ident, KeyboardInterrupt)
+            #async_raise(self.thread.ident, KeyboardInterrupt)
+            os.write(self.breaker[1], b"x")
             self._end_terminal_raw()
             log_job_trace("Terminating interactive thread")
             self.thread.join()
             log_job_trace("Terminated interactive thread")
             self.status.stop()
         del self.runner
+        log_info("Left interactive mode")
 
     @property
     def cmd(self):
@@ -90,7 +94,7 @@ class ConsoleInteractive:
                 if self.leave_thread:
                     break
                 try:
-                    input = bool(select.select([sys.stdin], [], [], 1)[0])
+                    input = select.select([sys.stdin, self.breaker[0]], [], [], 1)[0]
                 except io.UnsupportedOperation as e:
                     if "redirected stdin is pseudofile" in str(
                         e
@@ -99,38 +103,41 @@ class ConsoleInteractive:
                     else:
                         raise
                 if input:
-                    value = sys.stdin.read(1)
-                    # log_info(f"received {repr(value)}")
-                    if value == "\x03":  # ctrl-c:
-                        self.cmd = ""
-                    elif value == "\x1a":  # ctrl-z
-                        os.kill(os.getpid(), signal.SIGTSTP)
-                    elif ord("0") <= ord(value) <= ord("z") or value == " ":
-                        self.cmd += value
-                    elif value == "\x7f":  # backspace
-                        self.cmd = self.cmd[:-1]
-                    elif value == "\n" or value == "\r":
-                        try:
-                            if self.cmd:
-                                command = self.cmd
-                                args = ""
-                                if " " in command:
-                                    command = command[: command.find(" ")]
-                                    args = self.cmd[len(command) + 1 :].strip()
-                                self.cmd = ""
-                                if hasattr(self, "_cmd_" + command):
-                                    getattr(self, "_cmd_" + command)(args)
-                                else:
-                                    print("No such command")
-                            else:
-                                self._cmd_default()
-                            self.report_status(self.last_report_status_args)
-                        except Exception as e:
-                            log_error(
-                                f"An exception occured during command: {e} {type(e)}"
-                            )
+                    if self.breaker[0] in input:
+                        break
+                    else:  # must have been stdin.
+                        value = sys.stdin.read(1)
+                        # log_info(f"received {repr(value)}")
+                        if value == "\x03":  # ctrl-c:
                             self.cmd = ""
-                            continue
+                        elif value == "\x1a":  # ctrl-z
+                            os.kill(os.getpid(), signal.SIGTSTP)
+                        elif ord("0") <= ord(value) <= ord("z") or value == " ":
+                            self.cmd += value
+                        elif value == "\x7f":  # backspace
+                            self.cmd = self.cmd[:-1]
+                        elif value == "\n" or value == "\r":
+                            try:
+                                if self.cmd:
+                                    command = self.cmd
+                                    args = ""
+                                    if " " in command:
+                                        command = command[: command.find(" ")]
+                                        args = self.cmd[len(command) + 1 :].strip()
+                                    self.cmd = ""
+                                    if hasattr(self, "_cmd_" + command):
+                                        getattr(self, "_cmd_" + command)(args)
+                                    else:
+                                        print("No such command")
+                                else:
+                                    self._cmd_default()
+                                self.report_status(self.last_report_status_args)
+                            except Exception as e:
+                                log_error(
+                                    f"An exception occured during command: {e} {type(e)}"
+                                )
+                                self.cmd = ""
+                                continue
 
             except KeyboardInterrupt:
                 break
@@ -185,7 +192,7 @@ class ConsoleInteractive:
             else:
                 rt = f"{rt:>6.2f}s"
             display_job_id = shorten_job_id(job_id)
-            cores = job.actual_cores_needed if job.actual_cores_needed != -1 else '?'
+            cores = job.actual_cores_needed if job.actual_cores_needed != -1 else "?"
             print(f"{job_no:>6} | {rt} | {cores} | {display_job_id}")
         print("")
 
