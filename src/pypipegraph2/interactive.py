@@ -94,7 +94,7 @@ class ConsoleInteractive:
                 if self.leave_thread:
                     break
                 try:
-                    input = select.select([sys.stdin, self.breaker[0]], [], [], 1)[0]
+                    input = select.select([sys.stdin, self.breaker[0]], [], [], 10)[0]
                 except io.UnsupportedOperation as e:
                     if "redirected stdin is pseudofile" in str(
                         e
