@@ -453,7 +453,7 @@ class Runner:
                         # the todo graph.
                         for job_id in self.job_states:
                             log_warning(
-                                f"{job_id}, {self.job_states[job_id].proc_state}"
+                                f"{job_id}, {self.job_states[job_id].proc_state} {self.jobs[job_id].depth}"
                             )
                         raise exceptions.RunFailedInternally
                     continue

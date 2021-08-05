@@ -193,7 +193,6 @@ class JobStatus:
             f"{self.job_id} update {self.update_counter} {self.should_run} {self.validation_state} {self.proc_state}"
         )
         if self.update_counter > len(self.runner.jobs) + 1: # seems like a reasonable upper bound
-            raise ValueError()
         self.update_counter += 1
 
         if self.proc_state != ProcessingStatus.Waiting:
