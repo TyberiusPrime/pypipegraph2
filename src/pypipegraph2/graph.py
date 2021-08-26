@@ -346,10 +346,10 @@ class PyPipeGraph:
         new_history.update(
             {
                 job_id: (
-                    job_results[job_id].updated_input,
-                    job_results[job_id].updated_output,
+                    jr.updated_input,
+                    jr.updated_output,
                 )
-                for job_id in job_results
+                for job_id, jr in job_results.items() if jr.outcome is not JobOutcome.Pruned
             }
         )
         done = False

@@ -1114,6 +1114,23 @@ class TestDataLoadingJob:
     def test_accept_path_as_job_id(self):
         ppg.DataLoadingJob(Path("shu"), lambda: 55)
 
+    def test_job_gen_does_not_clobber_history_of_input_jobs(self):
+        a = ppg.FileGeneratingJob('a', lambda of: counter('A') and of.write_text('a'))
+        b = ppg.JobGeneratingJob('b', lambda: counter('B') and ppg.FileGeneratingJob('c', lambda of: counter('C') and of.write_text('c'))
+)
+        b.depends_on(a)
+        ppg.run()
+        assert Path('a').read_text() == 'a'
+        assert Path('A').read_text() == '1'
+        assert Path('B').read_text() == '1'
+        assert Path('C').read_text() == '1'
+        ppg.run()
+        assert Path('a').read_text() == 'a'
+        assert Path('A').read_text() == '1'
+        assert Path('B').read_text() == '2'
+        assert Path('C').read_text() == '1'
+
+
 
 @pytest.mark.usefixtures("create_out_dir")
 @pytest.mark.usefixtures("ppg2_per_test")

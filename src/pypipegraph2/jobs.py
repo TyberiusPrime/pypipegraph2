@@ -479,7 +479,7 @@ class MultiFileGeneratingJob(Job):
             if fn.exists():
                 # if we were invalidated, we run-  mabye
                 log_job_trace(
-                    f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}"
+                        f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}, in history: {str(fn) in historical_output}"
                 )
                 if all_present:  # so far...
                     if (
