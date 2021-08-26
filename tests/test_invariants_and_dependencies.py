@@ -1,4 +1,5 @@
 import os
+import gzip
 from pathlib import Path
 from loguru import logger
 import stat
@@ -567,7 +568,7 @@ class TestInvariant:
         import pickle
 
         Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True)
-        with open(ppg.global_pipegraph.get_history_filename(), "wb") as op:
+        with gzip.GzipFile(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             op.write(b"This breaks")
         with pytest.raises(ppg.JobsFailed):
@@ -595,7 +596,7 @@ class TestInvariant:
         write("out/b", "a")
 
         Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True)
-        with open(ppg.global_pipegraph.get_history_filename(), "wb") as op:
+        with gzip.GzipFile(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(Undepickable(), op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(c.job_id, op, pickle.HIGHEST_PROTOCOL)
@@ -615,7 +616,7 @@ class TestInvariant:
         write("out/b", "a")
 
         Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True)
-        with open(ppg.global_pipegraph.get_history_filename(), "wb") as op:
+        with gzip.GzipFile(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             op.write(b"key breaks already")
             op.write(b"This breaks")
         with pytest.raises(ppg.JobsFailed):

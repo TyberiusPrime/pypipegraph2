@@ -1,4 +1,5 @@
 from typing import Optional, Union, Dict
+import gzip
 import logging
 import shutil
 import collections
@@ -382,7 +383,7 @@ class PyPipeGraph:
         # we by default share the history file
         # if it's the same history dir, it's the same project
         # and you'd retrigger the calculations too often otherwise
-        return self.history_dir / ".ppg_history"  # don't end on .py
+        return self.history_dir / "ppg_history.gz"  # don't end on .py
 
     def _load_history(self):
         log_trace("_load_history")
@@ -392,7 +393,7 @@ class PyPipeGraph:
         if fn.exists():
             log_trace("Historical existed")
             try:
-                with open(fn, "rb") as op:
+                with gzip.GzipFile(fn, "rb") as op:
                     try:
                         counter = 0
                         while True:
@@ -455,7 +456,7 @@ class PyPipeGraph:
             fn.rename(fn.with_suffix(fn.suffix + ".backup"))
         raise_keyboard_interrupt = False
         raise_run_failed_internally = False
-        with open(fn, "wb") as op:
+        with gzip.GzipFile(fn, "wb") as op:
             # robust history saving.
             # for KeyboardInterrupt, write again
             # for other exceptions: skip job

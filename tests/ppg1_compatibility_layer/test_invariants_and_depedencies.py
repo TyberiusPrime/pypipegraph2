@@ -30,6 +30,7 @@ import subprocess
 import shutil
 import pytest
 import pypipegraph as ppg
+import gzip
 from .shared import write, assertRaises, read, append, Dummy
 import sys
 
@@ -664,7 +665,7 @@ class TestInvariant:
         ppg.util.global_pipegraph.get_history_filename().parent.mkdir(
             exist_ok=True, parents=True
         )
-        with open(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
+        with gzip.GzipFile(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             op.write(b"This breaks")
         with pytest.raises(ppg.PyPipeGraphError):
@@ -696,7 +697,7 @@ class TestInvariant:
         ppg.util.global_pipegraph.get_history_filename().parent.mkdir(
             exist_ok=True, parents=True
         )
-        with open(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
+        with gzip.GzipFile(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(Undepickable(), op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(c.job_id, op, pickle.HIGHEST_PROTOCOL)
@@ -720,7 +721,7 @@ class TestInvariant:
         ppg.util.global_pipegraph.get_history_filename().parent.mkdir(
             exist_ok=True, parents=True
         )
-        with open(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
+        with gzip.GzipFile(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
             op.write(b"key breaks already")
             op.write(b"This breaks")
         with pytest.raises(ppg.PyPipeGraphError):
