@@ -38,11 +38,22 @@ PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
 
 
 def _normalize_path(path):
+    from . import global_pipegraph
+
+    # this little bit of memoization here saves quite a bit of runtime.
+    if global_pipegraph is not None:
+        res = global_pipegraph._path_cache.get(path, None)
+        if res is not None:
+            return res
+    org_path = path
     path = Path(path)
     if path.is_absolute():
-        return path.resolve()
+        res = path.resolve()
     else:
-        return path.resolve().relative_to(Path(".").absolute())
+        res = path.resolve().relative_to(Path(".").absolute())
+    if global_pipegraph is not None:
+        global_pipegraph._path_cache[org_path] = res
+    return res
 
 
 def _dedup_job(cls, job_id):
@@ -313,7 +324,6 @@ class Job:
     def is_conditional(self):
         return self.job_kind in (JobKind.Temp, JobKind.Loading)
 
-
     @property
     def exception(self):
         """Interrogate global pipegraph for this job's exception.
@@ -364,6 +374,7 @@ class Job:
             return 1 + max((upstream_job.depth for upstream_job in upstreams))
         else:
             return 1
+
 
 class MultiFileGeneratingJob(Job):
     job_kind = JobKind.Output
@@ -479,7 +490,7 @@ class MultiFileGeneratingJob(Job):
             if fn.exists():
                 # if we were invalidated, we run-  mabye
                 log_job_trace(
-                        f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}, in history: {str(fn) in historical_output}"
+                    f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}, in history: {str(fn) in historical_output}"
                 )
                 if all_present:  # so far...
                     if (
@@ -2308,7 +2319,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             self._raise_partial_result_exception()
         missing = [x for x in fns if not x.exists()]
         if missing:
-            raise ValueError("missing output files - did somebody go and delete them?!", missing)
+            raise ValueError(
+                "missing output files - did somebody go and delete them?!", missing
+            )
 
         # now log that we're the ones using this.
         # our key is a hash of our history path.

@@ -108,6 +108,7 @@ class PyPipeGraph:
         self.prevent_absolute_paths = prevent_absolute_paths
         self._debug_allow_ctrl_c = False  # see examples/abort_when_stalled.py
         self.next_job_number = 0
+        self._path_cache = {}
 
     def run(
         self,

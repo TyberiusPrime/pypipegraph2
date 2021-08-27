@@ -376,7 +376,7 @@ class Runner:
             # self._interactive_report()
             while todo:
                 while self.jobs_that_need_propagation:
-                    log_job_trace(f"jtnp: {self.jobs_that_need_propagation}")
+                    log_job_trace(f"jtnp: {len(self.jobs_that_need_propagation)}")
                     check_job_id = self.jobs_that_need_propagation.popleft()
                     check_state = self.job_states[check_job_id]
                     should_run_before = check_state.should_run
