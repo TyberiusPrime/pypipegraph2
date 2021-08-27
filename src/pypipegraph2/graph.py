@@ -66,6 +66,7 @@ class PyPipeGraph:
         allow_short_filenames=False,
         log_retention=None,
         prevent_absolute_paths=True,
+        report_done_filter=1
     ):
 
         if cores is ALL_CORES:
@@ -109,6 +110,7 @@ class PyPipeGraph:
         self._debug_allow_ctrl_c = False  # see examples/abort_when_stalled.py
         self.next_job_number = 0
         self._path_cache = {}
+        self.report_done_filter = report_done_filter
 
     def run(
         self,

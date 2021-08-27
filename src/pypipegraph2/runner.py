@@ -624,7 +624,7 @@ class Runner:
         job = self.jobs[job_id]
         job_state = self.job_states[job_id]
         msg = f"Done in {job_state.run_time:.2f}s {job_id}"
-        if job.run_time >= 1:
+        if job.run_time >= self.job_graph.report_done_filter:
             if job.job_kind in (
                 JobKind.Temp,
                 JobKind.Output,
