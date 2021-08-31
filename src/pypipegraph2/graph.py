@@ -344,6 +344,7 @@ class PyPipeGraph:
         """Merge history from previous and this run"""
         # we must keep the history of jobs unseen in this run.
         # to to allow partial runs
+        org_history = history.copy()
         new_history = (
             history  # .copy() don't copy. we reuse this in the subsequent runs
         )
@@ -359,7 +360,10 @@ class PyPipeGraph:
         done = False
         while not done:
             try:
-                self._save_history(new_history)
+                if new_history != org_history:
+                    self._save_history(new_history)
+                else:
+                    log_info("Skipped saving history - unchanged")
                 done = True
             except KeyboardInterrupt as e:
                 self.do_raise.append(e)

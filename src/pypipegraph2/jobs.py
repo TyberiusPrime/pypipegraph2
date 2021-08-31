@@ -516,6 +516,7 @@ class MultiFileGeneratingJob(Job):
                             raise ValueError(
                                 historical_output, stat.st_mtime, stat.st_size
                             )
+                # at least one file was missing
                 log_trace(f"unlinking {fn}")
                 fn.unlink()
                 all_present = False
@@ -863,12 +864,13 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
     def output_needed(
         self, runner
     ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
+        raise ValueError("unreachable")
         for downstream_id in runner.dag.neighbors(self.job_id):
             job = runner.jobs[downstream_id]
             if job.output_needed(runner):
-                log_trace(f"Tempfile said output needed because of {job.job_id}")
+                log_job_trace(f"Tempfile {self.job_id} said output needed because of {job.job_id}")
                 return True
-        log_trace("Tempfile said no output needed")
+        log_job_trace("Tempfile {self.job_id} said no output needed")
         return False
 
 

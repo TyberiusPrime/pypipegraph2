@@ -158,6 +158,7 @@ class ConsoleInteractive:
         self.status.update(status=msg + "\r\n")
 
     def _cmd_help(self, _args):
+        """print help"""
         print("Help for interactive mode")
         print("You have the following commands available")
         print("\t- <enter> - Show currently running jobs")
@@ -173,6 +174,7 @@ class ConsoleInteractive:
         # print("\t- restart - After the currently running jobs have ended, restart the current python script")
 
     def _cmd_default(self):
+        """print the currently running jobs (mapped to enter)"""
         t = time.time()
         to_sort = []
         for job_id in self.runner.jobs_in_flight:
@@ -203,7 +205,9 @@ class ConsoleInteractive:
         self.stopped = True
 
     def _cmd_die(self, _args):
+        """kill the current process without saving history"""
         log_error("Sic semper running processes")
+        os.kill(os.getpid(), signal.SIGTERM)
         sys.exit(1)
 
     def _cmd_stop(self, _args):
@@ -237,6 +241,7 @@ class ConsoleInteractive:
         self._cmd_again(_args)
 
     def _cmd_kill(self, args):
+        """kill a running job (by id)"""
         try:
             job_no = int(args)
         except ValueError:
