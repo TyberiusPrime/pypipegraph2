@@ -17,6 +17,7 @@ from pathlib import Path
 from io import StringIO
 from collections import namedtuple
 from threading import Lock
+from deepdiff.deephash import DeepHash
 
 from . import hashers, exceptions, ppg_traceback
 from .enums import JobKind, Resources, ValidationState
@@ -1594,23 +1595,8 @@ class ParameterInvariant(_InvariantMixin, Job):
             raise TypeError(
                 "ParamaterInvariants do not store Functions. Use FunctionInvariant for that"
             )
-        try:
-            hash(obj)
-            return obj
-        except TypeError:
-            pass
-
-        if isinstance(obj, dict):
-            frz = tuple(sorted([(k, ParameterInvariant.freeze(obj[k])) for k in obj]))
-            return frz
-        elif isinstance(obj, (list, tuple)):
-            return tuple([ParameterInvariant.freeze(x) for x in obj])
-
-        elif isinstance(obj, set):
-            return frozenset(obj)
-        else:
-            msg = "Unsupported type: %r - needs __hash__ support" % type(obj).__name__
-            raise TypeError(msg)
+        return DeepHash(obj,
+                hasher=hashers.hash_str)[obj]
 
     def extract_strict_hash(self, a_hash) -> bytes:
         return str(ParameterInvariant.freeze(a_hash)).encode("utf-8")
