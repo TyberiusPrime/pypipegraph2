@@ -66,6 +66,7 @@ class PyPipeGraph:
         allow_short_filenames=False,
         log_retention=None,
         prevent_absolute_paths=True,
+        report_done_filter=1
     ):
 
         if cores is ALL_CORES:
@@ -108,6 +109,8 @@ class PyPipeGraph:
         self.prevent_absolute_paths = prevent_absolute_paths
         self._debug_allow_ctrl_c = False  # see examples/abort_when_stalled.py
         self.next_job_number = 0
+        self._path_cache = {}
+        self.report_done_filter = report_done_filter
 
     def run(
         self,
@@ -341,6 +344,7 @@ class PyPipeGraph:
         """Merge history from previous and this run"""
         # we must keep the history of jobs unseen in this run.
         # to to allow partial runs
+        org_history = history.copy()
         new_history = (
             history  # .copy() don't copy. we reuse this in the subsequent runs
         )
@@ -356,7 +360,10 @@ class PyPipeGraph:
         done = False
         while not done:
             try:
-                self._save_history(new_history)
+                if new_history != org_history:
+                    self._save_history(new_history)
+                else:
+                    log_info("Skipped saving history - unchanged")
                 done = True
             except KeyboardInterrupt as e:
                 self.do_raise.append(e)

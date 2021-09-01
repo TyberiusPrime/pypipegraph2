@@ -172,7 +172,7 @@ class TestInvariant:
         a = ppg.FileGeneratingJob("out/A", lambda: write("a"))
         b = a.depends_on_params(23)
         assert b[0].job_id == "PIout/A"
-        assert b[0].parameters == 23
+        assert b[0].parameters == "f5dc163826b60f56c93be8f49df011c6"
         assert ppg.util.global_pipegraph.has_edge(b[0], a)
 
     def test_parameter_invariant_twice_different_values(self):
@@ -400,7 +400,7 @@ class TestInvariant:
         assert read("out/sentinel") == "2"  # job does not get rerun...
         assert read(of) == "shu"  # job does not get rerun...
 
-    @pytest.mark.skip # we no longer do that, opting to calculate our own improved hash instead
+    @pytest.mark.skip  # we no longer do that, opting to calculate our own improved hash instead
     def test_file_invariant_with_md5sum(self, ppg1_compatibility_test):
         of = "out/a"
 
@@ -665,7 +665,9 @@ class TestInvariant:
         ppg.util.global_pipegraph.get_history_filename().parent.mkdir(
             exist_ok=True, parents=True
         )
-        with gzip.GzipFile(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
+        with gzip.GzipFile(
+            ppg.util.global_pipegraph.get_history_filename(), "wb"
+        ) as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             op.write(b"This breaks")
         with pytest.raises(ppg.PyPipeGraphError):
@@ -697,7 +699,9 @@ class TestInvariant:
         ppg.util.global_pipegraph.get_history_filename().parent.mkdir(
             exist_ok=True, parents=True
         )
-        with gzip.GzipFile(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
+        with gzip.GzipFile(
+            ppg.util.global_pipegraph.get_history_filename(), "wb"
+        ) as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(Undepickable(), op, pickle.HIGHEST_PROTOCOL)
             pickle.dump(c.job_id, op, pickle.HIGHEST_PROTOCOL)
@@ -708,7 +712,10 @@ class TestInvariant:
             ppg.run_pipegraph()
         assert read("out/b") == "b"  # job was run
         assert a.job_id in ppg.util.global_pipegraph.invariant_loading_issues
-        assert ppg.util.global_pipegraph._load_history()["PIc"] == ({}, {"PIc": "23"})
+        assert ppg.util.global_pipegraph._load_history()["PIc"] == (
+            {},
+            {"PIc": "f5dc163826b60f56c93be8f49df011c6"},
+        )
 
     def test_invariant_loading_issues_on_key(self):
         a = ppg.DataLoadingJob("a", lambda: 5)
@@ -721,7 +728,9 @@ class TestInvariant:
         ppg.util.global_pipegraph.get_history_filename().parent.mkdir(
             exist_ok=True, parents=True
         )
-        with gzip.GzipFile(ppg.util.global_pipegraph.get_history_filename(), "wb") as op:
+        with gzip.GzipFile(
+            ppg.util.global_pipegraph.get_history_filename(), "wb"
+        ) as op:
             op.write(b"key breaks already")
             op.write(b"This breaks")
         with pytest.raises(ppg.PyPipeGraphError):

@@ -40,3 +40,6 @@ def hash_bytes(input: bytes):
     hasher = xxh3_128()
     hasher.update(input)
     return hasher.hexdigest()
+
+def hash_str(input: str):
+    return hash_bytes(input.encode('utf-8'))

@@ -938,6 +938,7 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "b"
         assert Path("b").read_text() == "2"
 
+    @pytest.mark.skip # no longer relevant onnce we switched to deephash
     def test_parameter_invariant_needs_hash(self, create_out_dir):
         class NoHash:
             def __hash__(self):

@@ -17,6 +17,7 @@ from pathlib import Path
 from io import StringIO
 from collections import namedtuple
 from threading import Lock
+from deepdiff.deephash import DeepHash
 
 from . import hashers, exceptions, ppg_traceback
 from .enums import JobKind, Resources, ValidationState
@@ -38,11 +39,22 @@ PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
 
 
 def _normalize_path(path):
+    from . import global_pipegraph
+
+    # this little bit of memoization here saves quite a bit of runtime.
+    if global_pipegraph is not None:
+        res = global_pipegraph._path_cache.get(path, None)
+        if res is not None:
+            return res
+    org_path = path
     path = Path(path)
     if path.is_absolute():
-        return path.resolve()
+        res = path.resolve()
     else:
-        return path.resolve().relative_to(Path(".").absolute())
+        res = path.resolve().relative_to(Path(".").absolute())
+    if global_pipegraph is not None:
+        global_pipegraph._path_cache[org_path] = res
+    return res
 
 
 def _dedup_job(cls, job_id):
@@ -313,7 +325,6 @@ class Job:
     def is_conditional(self):
         return self.job_kind in (JobKind.Temp, JobKind.Loading)
 
-
     @property
     def exception(self):
         """Interrogate global pipegraph for this job's exception.
@@ -364,6 +375,7 @@ class Job:
             return 1 + max((upstream_job.depth for upstream_job in upstreams))
         else:
             return 1
+
 
 class MultiFileGeneratingJob(Job):
     job_kind = JobKind.Output
@@ -479,7 +491,7 @@ class MultiFileGeneratingJob(Job):
             if fn.exists():
                 # if we were invalidated, we run-  mabye
                 log_job_trace(
-                        f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}, in history: {str(fn) in historical_output}"
+                    f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}, in history: {str(fn) in historical_output}"
                 )
                 if all_present:  # so far...
                     if (
@@ -505,6 +517,7 @@ class MultiFileGeneratingJob(Job):
                             raise ValueError(
                                 historical_output, stat.st_mtime, stat.st_size
                             )
+                # at least one file was missing
                 log_trace(f"unlinking {fn}")
                 fn.unlink()
                 all_present = False
@@ -852,12 +865,13 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
     def output_needed(
         self, runner
     ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
+        raise ValueError("unreachable")
         for downstream_id in runner.dag.neighbors(self.job_id):
             job = runner.jobs[downstream_id]
             if job.output_needed(runner):
-                log_trace(f"Tempfile said output needed because of {job.job_id}")
+                log_job_trace(f"Tempfile {self.job_id} said output needed because of {job.job_id}")
                 return True
-        log_trace("Tempfile said no output needed")
+        log_job_trace("Tempfile {self.job_id} said no output needed")
         return False
 
 
@@ -1581,23 +1595,8 @@ class ParameterInvariant(_InvariantMixin, Job):
             raise TypeError(
                 "ParamaterInvariants do not store Functions. Use FunctionInvariant for that"
             )
-        try:
-            hash(obj)
-            return obj
-        except TypeError:
-            pass
-
-        if isinstance(obj, dict):
-            frz = tuple(sorted([(k, ParameterInvariant.freeze(obj[k])) for k in obj]))
-            return frz
-        elif isinstance(obj, (list, tuple)):
-            return tuple([ParameterInvariant.freeze(x) for x in obj])
-
-        elif isinstance(obj, set):
-            return frozenset(obj)
-        else:
-            msg = "Unsupported type: %r - needs __hash__ support" % type(obj).__name__
-            raise TypeError(msg)
+        return DeepHash(obj,
+                hasher=hashers.hash_str)[obj]
 
     def extract_strict_hash(self, a_hash) -> bytes:
         return str(ParameterInvariant.freeze(a_hash)).encode("utf-8")
@@ -2308,7 +2307,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             self._raise_partial_result_exception()
         missing = [x for x in fns if not x.exists()]
         if missing:
-            raise ValueError("missing output files - did somebody go and delete them?!", missing)
+            raise ValueError(
+                "missing output files - did somebody go and delete them?!", missing
+            )
 
         # now log that we're the ones using this.
         # our key is a hash of our history path.

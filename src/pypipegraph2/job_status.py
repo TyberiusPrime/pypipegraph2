@@ -110,6 +110,7 @@ class JobStatus:
             if self.runner.jobs[upstream_id].is_conditional():
                 upstream_state = self.runner.job_states[upstream_id]
                 upstream_state.should_run = ShouldRun.Yes
+                log_job_trace(f"Propagated Should_run = yes to {upstream_id} from {self.job_id}")
                 upstream_state.progate_should_run_yes_to_upstream_conditionals()
 
     def __del__(self):
@@ -147,7 +148,7 @@ class JobStatus:
             raise NotImplementedError(f"succeded but state was {self.proc_state}")
         ljt(f"{self.job_id} succeeded")
         self.updated_output = output
-        self.run_time = time.time() - self.start_time
+        #self.run_time = time.time() - self.start_time
         self.proc_state = ProcessingStatus.Done
         self.outcome = JobOutcome.Success
         self._update_downstreams()
