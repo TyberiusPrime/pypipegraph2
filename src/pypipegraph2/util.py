@@ -2,6 +2,7 @@ import os
 import sys
 from loguru import logger
 from rich.console import Console
+from . import ppg_traceback
 
 console_args = {}
 if "pytest" in sys.modules:
@@ -165,7 +166,7 @@ def pretty_log_errors(func):
             func(*args, **kwargs)
         except Exception as e:
             exception_type, exception_value, tb = sys.exc_info()
-            captured_tb = ppg2.ppg_traceback.Trace(exception_type, exception_value, tb)
+            captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
             logger.error(
                 captured_tb._format_rich_traceback_fallback(
                     include_locals=True, include_formating=True
