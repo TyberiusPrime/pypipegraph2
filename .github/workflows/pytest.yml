@@ -25,6 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           # pip does not read our setup.cfg...
           python -c "import configparser; c = configparser.ConfigParser(); c.read('setup.cfg'); print(c['options.extras_require']['testing'])" | xargs pip install
+          pip install -e .
 
       - name: test with pytest
         run: pytest
