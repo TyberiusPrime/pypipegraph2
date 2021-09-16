@@ -153,3 +153,24 @@ def shorten_job_id(job_id):
         return job_id[: job_id.find(":::") + 3] + "+" + str(dotdotcount)
     else:
         return job_id
+
+
+def pretty_log_errors(func):
+    """capture exceptions (on a function outside of ppg)
+    and format it with our fancy local logging exception logger
+    """
+
+    def inner(*args, **kwargs):
+        try:
+            func(*args, **kwargs)
+        except Exception as e:
+            exception_type, exception_value, tb = sys.exc_info()
+            captured_tb = ppg2.ppg_traceback.Trace(exception_type, exception_value, tb)
+            logger.error(
+                captured_tb._format_rich_traceback_fallback(
+                    include_locals=True, include_formating=True
+                )
+            )
+            raise
+
+    return inner

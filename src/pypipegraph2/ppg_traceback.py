@@ -155,6 +155,7 @@ class Trace:
                         v = v[:1000] + "…"
                     v = textwrap.indent(v, "\t   " + " " * len_longest_key).lstrip()
                     out.append(f"\t{key.rjust(len_longest_key, ' ')} = {v}")
+                out.append("")
 
         else:
 
