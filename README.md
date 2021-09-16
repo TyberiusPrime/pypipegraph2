@@ -109,7 +109,7 @@ python version, and fall back to source code if you have changed it.
 
 Differences to pypipegraph
 
-	- graps can now be run multiple times
+	- graphs can now be run multiple times
 	- calling a job will run the graph cut down to this job and it's prerequisites.
 	  Some jobs - like PlotJobs will return something useful from the call.
 
