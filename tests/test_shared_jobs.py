@@ -181,11 +181,10 @@ class TestSharedJob:
         ).depends_on(c)
         import subprocess
 
-        subprocess.check_call(["fd", "-L"])
+        # subprocess.check_call(["fd", "-L"])
         import time
 
-        # aeou
-        ppg.util.log_error("last befor bookm")
+        ppg.util.log_error("last before bookm")
         ppg.run()
 
         assert read(job.find_file("a")) == "a0"
