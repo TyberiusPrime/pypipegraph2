@@ -869,7 +869,9 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
         for downstream_id in runner.dag.neighbors(self.job_id):
             job = runner.jobs[downstream_id]
             if job.output_needed(runner):
-                log_job_trace(f"Tempfile {self.job_id} said output needed because of {job.job_id}")
+                log_job_trace(
+                    f"Tempfile {self.job_id} said output needed because of {job.job_id}"
+                )
                 return True
         log_job_trace("Tempfile {self.job_id} said no output needed")
         return False
@@ -1595,8 +1597,7 @@ class ParameterInvariant(_InvariantMixin, Job):
             raise TypeError(
                 "ParamaterInvariants do not store Functions. Use FunctionInvariant for that"
             )
-        return DeepHash(obj,
-                hasher=hashers.hash_str)[obj]
+        return DeepHash(obj, hasher=hashers.hash_str)[obj]
 
     def extract_strict_hash(self, a_hash) -> bytes:
         return str(ParameterInvariant.freeze(a_hash)).encode("utf-8")
@@ -1627,8 +1628,7 @@ def _hash_object(obj):
         my_hash = obj.hexdigest
         obj = obj.value
     else:
-        return DeepHash(obj,
-                hasher=hashers.hash_str)[obj]
+        my_hash = DeepHash(obj, hasher=hashers.hash_str)[obj]
         # raise ValueError(f"Could not derive a hash for {type(obj)}")
     return obj, my_hash
 
