@@ -1627,7 +1627,9 @@ def _hash_object(obj):
         my_hash = obj.hexdigest
         obj = obj.value
     else:
-        raise ValueError(f"Could not derive a hash for {type(obj)}")
+        return DeepHash(obj,
+                hasher=hashers.hash_str)[obj]
+        # raise ValueError(f"Could not derive a hash for {type(obj)}")
     return obj, my_hash
 
 
