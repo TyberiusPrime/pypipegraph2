@@ -1656,12 +1656,14 @@ class DataLoadingJob(Job):
             job_id = str(_normalize_path(job_id))
         return _dedup_job(cls, job_id)
 
-    def __init__(self, job_id, load_function, depend_on_function=True):
+    def __init__(self, job_id, load_function, 
+            resources: Resources = Resources.SingleCore,
+            depend_on_function=True):
         if isinstance(job_id, Path):
             job_id = str(_normalize_path(job_id))
         self.depend_on_function = depend_on_function
         self.load_function = load_function
-        super().__init__([job_id])
+        super().__init__([job_id], resources=resources)
 
     def readd(self):
         super().readd()

@@ -498,7 +498,7 @@ class TestInvariant:
             os.kill(os.getpid(), signal.SIGINT)
             counter("A")
 
-        job = ppg.DataLoadingJob("A", sigint, lambda x: None)
+        job = ppg.DataLoadingJob("A", sigint)
         force_load(job)
         ppg.run()
         assert read("a") == "1"
