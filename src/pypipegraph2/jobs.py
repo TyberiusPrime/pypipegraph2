@@ -1750,7 +1750,9 @@ class AttributeLoadingJob(
         return _dedup_job(cls, job_id)
 
     def __init__(
-        self, job_id, object, attribute_name, data_function, depend_on_function=True
+        self, job_id, object, attribute_name, data_function, depend_on_function=True,
+        resources: Resources = Resources.SingleCore,
+
     ):
         from . import global_pipegraph
 
@@ -1780,7 +1782,7 @@ class AttributeLoadingJob(
         self.object = object
         self.attribute_name = attribute_name
         self.callback = data_function
-        super().__init__([job_id])
+        super().__init__([job_id], resources=resources)
         self.cleanup_job_class = _AttributeCleanupJob
 
     def readd(self):  # Todo: refactor
