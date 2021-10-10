@@ -140,7 +140,7 @@ class Runner:
                 self.job_states[job_id] = s
                 s.initialize()  # so that output_needed can access the history
             self.event_lock = threading.Lock()
-            self.jobs_to_run_que = queue.SimpleQueue()
+            self.jobs_to_run_que = queue.PriorityQueue()
             self.threads = []
             self.jobs_that_need_propagation = deque()
 
@@ -380,6 +380,7 @@ class Runner:
                     # log_job_trace(f"jtnp: {self.jobs_that_need_propagation}")
                     check_job_id = self.jobs_that_need_propagation.popleft()
                     check_state = self.job_states[check_job_id]
+                    check_job = self.jobs[check_job_id]
                     should_run_before = check_state.should_run
                     validation_before = check_state.validation_state
                     new = check_state.update()
@@ -416,7 +417,12 @@ class Runner:
                                     ),
                                 )  # which will in turn upstream fail all downstreams
                             else:
-                                self.jobs_to_run_que.put(check_job_id)
+                                #log_job_trace(
+                                    #f"{check_job_id} priority {check_job.que_priority}"
+                                #)
+                                self.jobs_to_run_que.put(
+                                    (check_job.que_priority, check_job_id)
+                                )
                     elif check_state.proc_state is ProcessingStatus.Schedulded:
                         pass
                     elif (check_state.validation_state != validation_before) or (
@@ -503,7 +509,7 @@ class Runner:
         finally:
             # log_job_trace("Joining threads")
             for t in self.threads:
-                self.jobs_to_run_que.put(ExitNow)
+                self.jobs_to_run_que.put((0, ExitNow))
             for t in self.threads:
                 t.join()
             # log_job_trace("Joined threads")
@@ -789,9 +795,9 @@ class Runner:
         job_id = None
         try:
             while not self.stopped:
-                job_id = self.jobs_to_run_que.get()
+                _que_priority, job_id = self.jobs_to_run_que.get()
                 self.jobs_in_flight.append(job_id)
-                # log_job_trace(f"Executing thread, got {job_id}")
+                #log_job_trace(f"Executing thread, got {job_id}")
                 if job_id is ExitNow:
                     break
                 job = self.jobs[job_id]

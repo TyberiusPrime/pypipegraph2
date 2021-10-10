@@ -1940,3 +1940,4 @@ class TestNoDotDotInJobIds:
             assert j.table.job_id in collector
             for job_id in collector:
                 assert not ".." in job_id
+

@@ -18,6 +18,7 @@ from io import StringIO
 from collections import namedtuple
 from threading import Lock
 from deepdiff.deephash import DeepHash
+from functools import total_ordering
 
 from . import hashers, exceptions, ppg_traceback
 from .enums import JobKind, Resources, ValidationState
@@ -110,6 +111,7 @@ class JobList(list):
             job.depends_on(*args, **kwargs)
 
 
+@total_ordering
 class Job:
     job_id: int
     historical: Optional[Tuple[str, Dict[str, str]]]
@@ -137,6 +139,10 @@ class Job:
             self, "dependency_callbacks"
         ):  # first definition. Otherwise we are a deduped job that has been initialized
             self.dependency_callbacks = []
+        if not hasattr(self, "que_priority"):
+            self.que_priority = (
+                0  # lower priority jobs get run before high priority jobs
+            )
         self._validate()
         self.readd()
         if not hasattr(
@@ -152,6 +158,20 @@ class Job:
 
     def _validate(self):
         pass
+
+    def __eq__(self, other):
+        if not isinstance(other, Job):
+            return False
+        return self.job_id == other.job_id
+
+    def __ne__(self, other):
+        return not (self.job_id == other.job_id)
+
+    def __lt__(self, other):
+        return self.job_id < other.job_id
+
+    def __hash__(self):
+        return hash('Job_' + self.job_id)
 
     def _validate_outputs(self, outputs):
         res = []
@@ -409,6 +429,7 @@ class MultiFileGeneratingJob(Job):
         self.stdout = "not captured"
         self.stderr = "not captured"
         self.pid = None
+        self.que_priority = -2  # bdefore data loading at least.
 
     def __getitem__(self, key):
         if not self._lookup:
@@ -911,6 +932,7 @@ class _FileCleanupJob(Job):
 
     def __init__(self, parent_job):
         Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
+        self.que_priority = -5  # run them early, but after Attribute cleanups
         self.parent_job = parent_job
 
     def run(self, _ignored_runner, _historical_output):
@@ -1656,9 +1678,13 @@ class DataLoadingJob(Job):
             job_id = str(_normalize_path(job_id))
         return _dedup_job(cls, job_id)
 
-    def __init__(self, job_id, load_function, 
-            resources: Resources = Resources.SingleCore,
-            depend_on_function=True):
+    def __init__(
+        self,
+        job_id,
+        load_function,
+        resources: Resources = Resources.SingleCore,
+        depend_on_function=True,
+    ):
         if isinstance(job_id, Path):
             job_id = str(_normalize_path(job_id))
         self.depend_on_function = depend_on_function
@@ -1750,9 +1776,13 @@ class AttributeLoadingJob(
         return _dedup_job(cls, job_id)
 
     def __init__(
-        self, job_id, object, attribute_name, data_function, depend_on_function=True,
+        self,
+        job_id,
+        object,
+        attribute_name,
+        data_function,
+        depend_on_function=True,
         resources: Resources = Resources.SingleCore,
-
     ):
         from . import global_pipegraph
 
@@ -1865,6 +1895,9 @@ class _AttributeCleanupJob(Job):
 
     def __init__(self, parent_job):
         Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
+        self.que_priority = (
+            -10
+        )  # since these free memory, we run them at the earliest timepoint
         self.parent_job = parent_job  # what are we cleaning up?
         # and that is necessary for the invalidation to do it's thing
         # but the real parent will the one we read the files from

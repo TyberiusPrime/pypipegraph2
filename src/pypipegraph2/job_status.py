@@ -148,7 +148,7 @@ class JobStatus:
             raise NotImplementedError(f"succeded but state was {self.proc_state}")
         ljt(f"{self.job_id} succeeded")
         self.updated_output = output
-        #self.run_time = time.time() - self.start_time
+        # self.run_time = time.time() - self.start_time
         self.proc_state = ProcessingStatus.Done
         self.outcome = JobOutcome.Success
         self._update_downstreams()
@@ -193,7 +193,9 @@ class JobStatus:
         ljt(
             f"{self.job_id} update {self.update_counter} {self.should_run} {self.validation_state} {self.proc_state}"
         )
-        if self.update_counter > len(self.runner.jobs) + 1: # seems like a reasonable upper bound
+        if (
+            self.update_counter > len(self.runner.jobs) + 1
+        ):  # seems like a reasonable upper bound
             self.update_counter += 1
 
         if self.proc_state != ProcessingStatus.Waiting:
