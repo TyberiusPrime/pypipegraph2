@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 from .shared import counter, read
 import pypipegraph2 as ppg
 import pytest
@@ -1572,3 +1573,56 @@ class TestsFromTheField:
         Path("t2").unlink()
         ppg.run()
         assert read("ct2") == "3"  # only t2 get's run...
+
+    def test_20211001(self, job_trace_log):
+        do_fail = False
+
+        class DummyObject:
+            pass
+
+        def dummy_fg(of):
+            of.parent.mkdir(exist_ok=True, parents=True)
+            of.write_text("fg")
+
+        def fail():  # fail on demand
+            if do_fail:
+                raise ValueError()
+
+        job_3 = ppg.DataLoadingJob("3", lambda: None, depend_on_function=False)
+        job_48 = ppg.AttributeLoadingJob(
+            "48", DummyObject(), "attr_48", fail, depend_on_function=False
+        )
+        job_61 = ppg.FileGeneratingJob("61", dummy_fg, depend_on_function=False)
+        job_67 = ppg.JobGeneratingJob("67", lambda: None, depend_on_function=False)
+
+        edges = []
+
+        edges.append(("61", "48"))
+        edges.append(("67", "48"))
+        edges.append(("61", "3"))
+
+        for (a, b) in edges:
+            if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
+                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+
+        ppg.run()
+        ppg.run()
+        do_fail = True
+        with pytest.raises(ppg.JobsFailed):
+            ppg.run()
+        assert (
+            ppg.global_pipegraph.last_run_result["48"].outcome
+            == ppg.enums.JobOutcome.Failed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["61"].outcome
+            == ppg.enums.JobOutcome.UpstreamFailed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["61"].outcome
+            == ppg.enums.JobOutcome.UpstreamFailed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["3"].outcome
+            == ppg.enums.JobOutcome.Skipped
+        )

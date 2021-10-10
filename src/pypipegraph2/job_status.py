@@ -110,7 +110,9 @@ class JobStatus:
             if self.runner.jobs[upstream_id].is_conditional():
                 upstream_state = self.runner.job_states[upstream_id]
                 upstream_state.should_run = ShouldRun.Yes
-                log_job_trace(f"Propagated Should_run = yes to {upstream_id} from {self.job_id}")
+                log_job_trace(
+                    f"Propagated Should_run = yes to {upstream_id} from {self.job_id}"
+                )
                 upstream_state.progate_should_run_yes_to_upstream_conditionals()
 
     def __del__(self):
@@ -167,9 +169,17 @@ class JobStatus:
         self._update_downstreams_with_upstream_failure(
             f"Upstream failed: {self.job_id}"
         )
+        self.inform_conditional_upstreams_of_failure()
+
+    def inform_conditional_upstreams_of_failure(self):
+        for upstream_id in self.upstreams:
+            if self.runner.jobs[upstream_id].is_conditional():
+                log_debug(f"failed {self.job_id} signaled to upstream {upstream_id} (a conditional job)")
+                self.runner.jobs_that_need_propagation.append(upstream_id)
+
         # -> job_became_terminal
 
-    # well it wasn't deceided, but the upstream decided for us.
+    # well it wasn't decided, but the upstream decided for us.
     # no point in (re)calculating it if it's not certain whether the upstream will change
     # or not.
     def upstream_failed(self, msg):
@@ -290,11 +300,13 @@ class JobStatus:
                     res.append(ds_id)
                 elif ds_job_state.should_run == ShouldRun.IfParentJobRan:
                     ds_no_count += 1
-                elif ds_job_state.should_run in (
-                    ShouldRun.IfDownstreamNeedsMe,
-                    ShouldRun.Maybe,
-                ):
+                elif ds_job_state.should_run in (ShouldRun.IfDownstreamNeedsMe,):
                     res.append(ds_id)
+                elif ds_job_state.should_run in (ShouldRun.Maybe,):
+                    if ds_job_state.validation_state == ValidationState.UpstreamFailed:
+                        ds_no_count += 1
+                    else:
+                        res.append(ds_id)
                 elif ds_job_state.should_run in (
                     # ShouldRun.No,
                     ShouldRun.IfParentJobRan,
@@ -518,6 +530,7 @@ class JobStatus:
             ds_state = self.runner.job_states[ds_id]
             ds_state.upstream_failed(msg)
             ds_state._update_downstreams_with_upstream_failure(msg)
+            ds_state.inform_conditional_upstreams_of_failure()
 
     def all_upstreams_terminal(self):
         for upstream_id in self.upstreams:
