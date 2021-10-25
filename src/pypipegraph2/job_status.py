@@ -346,9 +346,9 @@ class JobStatus:
             return []  # validation only changes when jobs actually finish
 
         if action == Action.Schedulde:
-            ljt(
-                f"{self.job_id} -> schedulde? {self.should_run}, {self.all_upstreams_terminal()}"
-            )
+            #ljt(
+                #f"{self.job_id} -> schedulde? {self.should_run}, {self.all_upstreams_terminal()}"
+            #)
 
             if self.should_run == ShouldRun.No:
                 ljt(f"{self.job_id} -> schedulde for skip now...")

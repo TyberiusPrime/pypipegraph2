@@ -1,5 +1,11 @@
 Open stuff
 	- magic turn-notebook-cell-into-job-thing
+
+	- can we not reavaluate function invariants for jobs using identical functions
+	  (but rebound variables, I suppose)?
+	- can we somewhow deduplicate the above when dumping the history (though I suppose gzip does a decent job?).
+	  (yes it does... for example 100k jobs have 138mb of history that get's compressed down to 7.5mb.. but still, 
+	  would be better to not have this is in memory at all.)
  
 	- notebook interaction vs early exploding (mostly testing)
 	- 
