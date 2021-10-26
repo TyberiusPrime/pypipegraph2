@@ -111,6 +111,8 @@ class PyPipeGraph:
         self.next_job_number = 0
         self._path_cache = {}
         self.report_done_filter = report_done_filter
+        self.func_cache = {}
+        self.dir_absolute = Path(".").absolute()
 
     def run(
         self,

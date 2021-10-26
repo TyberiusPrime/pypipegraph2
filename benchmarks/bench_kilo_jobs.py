@@ -18,7 +18,7 @@ def kilo_jobs():
     ppg.new()
     final = ppg.FileGeneratingJob(f"final.dat", lambda of: of.write_text("h"))
 
-    for ii in range(10000):
+    for ii in range(100000):
         final.depends_on(gen_job(ii))
     ppg.run()
 
@@ -35,4 +35,10 @@ if __name__ == "__main__":
 # after dicodon fixes
 # noop rerun:   22s
 # rerrun with rebuild final:  9s
+
+
+
+# 100k
+# run : 25m35s. 1.8M (compressed) history. 81MB uncompressed...
+# noop run: 1minute.
 

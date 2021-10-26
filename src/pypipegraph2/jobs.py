@@ -52,7 +52,10 @@ def _normalize_path(path):
     if path.is_absolute():
         res = path.resolve()
     else:
-        res = path.resolve().relative_to(Path(".").absolute())
+        try:
+            res = path.resolve().relative_to(global_pipegraph.dir_absolute)
+        except AttributeError:
+            res = path.resolve().relative_to(Path('.').absolute())
     if global_pipegraph is not None:
         global_pipegraph._path_cache[org_path] = res
     return res
@@ -171,7 +174,7 @@ class Job:
         return self.job_id < other.job_id
 
     def __hash__(self):
-        return hash('Job_' + self.job_id)
+        return hash("Job_" + self.job_id)
 
     def _validate_outputs(self, outputs):
         res = []
@@ -993,7 +996,7 @@ class _FileInvariantMixin:
             }
         else:
             if runner is not None:
-                if not hasattr(runner, '_hash_file_cache'):
+                if not hasattr(runner, "_hash_file_cache"):
                     runner._hash_file_cache = {}
                 if file in runner._hash_file_cache:
                     return runner._hash_file_cache[file]
@@ -1043,7 +1046,6 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         self.verify_arguments(name, function)
         self.function = function  # must assign after verify!
 
-        self.source_file = self.get_source_file()
         Job.__init__(self, [name], Resources.RunsHere)
 
     def output_needed(self, _ignored_runner):
@@ -1053,7 +1055,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
         res = {}
-        sf = self.source_file
+        sf = self.get_source_file()
         if historical_output:
             historical_output = historical_output[self.job_id]
         else:
@@ -1175,18 +1177,27 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
     @staticmethod
     def _get_python_source(function):
-        source = inspect.getsource(function).strip()
-        # cut off function definition / name, but keep parameters
-        if source.startswith("def"):
-            source = source[source.find("(") :]
-        # filter doc string
-        if function.__doc__:
-            for prefix in ['"""', "'''", '"', "'"]:
-                if prefix + function.__doc__ + prefix in source:
-                    source = source.replace(
-                        prefix + function.__doc__ + prefix,
-                        "",
-                    )
+        from . import global_pipegraph
+
+        key = (function.__code__.co_filename, function.__code__.co_firstlineno)
+        if key in global_pipegraph.func_cache:
+            return global_pipegraph.func_cache[key]
+        else:
+            source = inspect.getsource(function).strip()
+
+            # cut off function definition / name, but keep parameters
+            if source.startswith("def"):
+                source = source[source.find("(") :]
+            # filter doc string
+            if function.__doc__:
+                for prefix in ['"""', "'''", '"', "'"]:
+                    if prefix + function.__doc__ + prefix in source:
+                        source = source.replace(
+                            prefix + function.__doc__ + prefix,
+                            "",
+                        )
+
+            global_pipegraph.func_cache[key] = source
         return source
 
     @classmethod

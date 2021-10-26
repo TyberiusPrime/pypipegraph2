@@ -204,10 +204,10 @@ class JobStatus:
             self.error += "\n" + msg  # multiple upstreams failed. Combine messages
 
     def update(self) -> bool:
+        #ljt(
+            #f"{self.job_id} update {self.update_counter} {self.should_run} {self.validation_state} {self.proc_state}"
+        #)
         # a bit of bug defense spray...
-        ljt(
-            f"{self.job_id} update {self.update_counter} {self.should_run} {self.validation_state} {self.proc_state}"
-        )
         if (
             self.update_counter > len(self.runner.jobs) + 1
         ):  # seems like a reasonable upper bound
@@ -216,7 +216,7 @@ class JobStatus:
         if self.proc_state != ProcessingStatus.Waiting:
             # we only leave waiting once we have made a decision and are ready to run!
             # so we can short-circuit here
-            ljt(f"update: {self.job_id} -> already decided and ready to run")
+            #ljt(f"update: {self.job_id} -> already decided and ready to run")
             return []
 
         # we don't have rusts exhaustive pattern matching.
