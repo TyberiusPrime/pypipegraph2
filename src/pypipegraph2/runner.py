@@ -29,10 +29,11 @@ from collections import deque
 ljt = log_job_trace
 
 
-class ExitNow:
-    """Token for leave-this-thread-now-signal"""
+ExitNow = "___!!!ExitNow!!___"
+#class ExitNow:
+#   """Token for leave-this-thread-now-signal"""
 
-    pass
+#   pass
 
 
 class Runner:
