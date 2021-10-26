@@ -174,7 +174,9 @@ class JobStatus:
     def inform_conditional_upstreams_of_failure(self):
         for upstream_id in self.upstreams:
             if self.runner.jobs[upstream_id].is_conditional():
-                log_debug(f"failed {self.job_id} signaled to upstream {upstream_id} (a conditional job)")
+                log_debug(
+                    f"failed {self.job_id} signaled to upstream {upstream_id} (a conditional job)"
+                )
                 self.runner.jobs_that_need_propagation.append(upstream_id)
 
         # -> job_became_terminal
@@ -199,7 +201,7 @@ class JobStatus:
             self.error += "\n" + msg  # multiple upstreams failed. Combine messages
 
     def update(self) -> bool:
-        # ab it of big defense spray...
+        # a bit of bug defense spray...
         ljt(
             f"{self.job_id} update {self.update_counter} {self.should_run} {self.validation_state} {self.proc_state}"
         )
@@ -346,9 +348,9 @@ class JobStatus:
             return []  # validation only changes when jobs actually finish
 
         if action == Action.Schedulde:
-            #ljt(
-                #f"{self.job_id} -> schedulde? {self.should_run}, {self.all_upstreams_terminal()}"
-            #)
+            # ljt(
+            # f"{self.job_id} -> schedulde? {self.should_run}, {self.all_upstreams_terminal()}"
+            # )
 
             if self.should_run == ShouldRun.No:
                 ljt(f"{self.job_id} -> schedulde for skip now...")
@@ -533,14 +535,30 @@ class JobStatus:
             ds_state.inform_conditional_upstreams_of_failure()
 
     def all_upstreams_terminal(self):
-        for upstream_id in self.upstreams:
-            s = self.runner.job_states[upstream_id].proc_state
-            if not s.is_terminal():
-                ljt(
-                    f"{self.job_id} all_upstreams_terminal->False (because {upstream_id})"
+        # if you have a job with 30k inputs, this becomes really a bottleneck,
+        #
+        if not hasattr(self, "_upstream_states"):
+            # cache to save on dict lookup
+            self._upstream_states = list(
+                reversed(
+                    [
+                        self.runner.job_states[upstream_id]
+                        for upstream_id in self.upstreams
+                    ]
                 )
+            )
+            # this is a stupid hack, but since we're apperantly doing executing the jobs in
+            # self.upstreams orderer
+            # going it reverse means we basically always error out soonest...
+
+        for us in self._upstream_states:
+            s = us.proc_state
+            if not s.is_terminal():
+                # ljt(
+                # f"{self.job_id} all_upstreams_terminal->False (because {upstream_id})"
+                # )
                 return False
-        ljt(f"{self.job_id} all_upstreams_terminal->True")
+        # ljt(f"{self.job_id} all_upstreams_terminal->True")
         return True
 
     @property
