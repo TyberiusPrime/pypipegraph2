@@ -960,7 +960,7 @@ class _InvariantMixin:
 
 class _FileInvariantMixin:
     def calculate(
-        self, file, stat
+        self, file, stat, runner=None
     ):  # so that FileInvariant and FunctionInvariant can reuse it
 
         # ppg1 had the option of using an external .md5sum file for the hash
@@ -992,7 +992,17 @@ class _FileInvariantMixin:
                 "size": stat.st_size,
             }
         else:
-            return hashers.hash_file(file)
+            if runner is not None:
+                if not hasattr(runner, '_hash_file_cache'):
+                    runner._hash_file_cache = {}
+                if file in runner._hash_file_cache:
+                    return runner._hash_file_cache[file]
+                else:
+                    h = hashers.hash_file(file)
+                    runner._hash_file_cache[file] = h
+                    return h
+            else:
+                return hashers.hash_file(file)
 
     def _md5_fallback(self, filename):
         import hashlib
@@ -1039,7 +1049,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     def output_needed(self, _ignored_runner):
         return True
 
-    def run(self, _runner, historical_output):
+    def run(self, runner, historical_output):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
         res = {}
@@ -1066,7 +1076,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                         file_unchanged = True
                         new_file_hash = historical_output["source_file"]
                     else:
-                        new_file_hash = self.calculate(sf, stat)
+                        new_file_hash = self.calculate(sf, stat, runner)
                         if (
                             new_file_hash["hash"]
                             == historical_output["source_file"]["hash"]
@@ -1074,7 +1084,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                             file_unchanged = True
                             new_file_hash = historical_output["source_file"]
             if not new_file_hash:
-                new_file_hash = self.calculate(sf, stat)
+                new_file_hash = self.calculate(sf, stat, runner)
 
         if not hasattr(self.function, "__code__"):  # build ins
             line_no = -1
