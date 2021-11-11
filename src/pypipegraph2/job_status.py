@@ -49,7 +49,9 @@ ljt = log_job_trace
 class JobStatus:
     """Job run information collector"""
 
-    def __init__(self, job_id, runner, historical_input, historical_output):
+    def __init__(
+        self, job_id, runner, historical_input, historical_output, topo_order_number
+    ):
         self.job_id = job_id
         self.runner = runner
 
@@ -66,6 +68,7 @@ class JobStatus:
         self.error = None
         self.update_counter = 0
         self.refresh_after = set()
+        self.topo_order_number = topo_order_number
 
     def was_pruned(self):
         self.validation_state = ValidationState.Unknown
@@ -174,7 +177,9 @@ class JobStatus:
     def inform_conditional_upstreams_of_failure(self):
         for upstream_id in self.upstreams:
             if self.runner.jobs[upstream_id].is_conditional():
-                log_debug(f"failed {self.job_id} signaled to upstream {upstream_id} (a conditional job)")
+                log_debug(
+                    f"failed {self.job_id} signaled to upstream {upstream_id} (a conditional job)"
+                )
                 self.runner.jobs_that_need_propagation.append(upstream_id)
 
         # -> job_became_terminal
@@ -199,10 +204,10 @@ class JobStatus:
             self.error += "\n" + msg  # multiple upstreams failed. Combine messages
 
     def update(self) -> bool:
-        # ab it of big defense spray...
-        ljt(
-            f"{self.job_id} update {self.update_counter} {self.should_run} {self.validation_state} {self.proc_state}"
-        )
+        #ljt(
+            #f"{self.job_id} update {self.update_counter} {self.should_run} {self.validation_state} {self.proc_state}"
+        #)
+        # a bit of bug defense spray...
         if (
             self.update_counter > len(self.runner.jobs) + 1
         ):  # seems like a reasonable upper bound
@@ -211,7 +216,7 @@ class JobStatus:
         if self.proc_state != ProcessingStatus.Waiting:
             # we only leave waiting once we have made a decision and are ready to run!
             # so we can short-circuit here
-            ljt(f"update: {self.job_id} -> already decided and ready to run")
+            #ljt(f"update: {self.job_id} -> already decided and ready to run")
             return []
 
         # we don't have rusts exhaustive pattern matching.
@@ -346,9 +351,9 @@ class JobStatus:
             return []  # validation only changes when jobs actually finish
 
         if action == Action.Schedulde:
-            #ljt(
-                #f"{self.job_id} -> schedulde? {self.should_run}, {self.all_upstreams_terminal()}"
-            #)
+            # ljt(
+            # f"{self.job_id} -> schedulde? {self.should_run}, {self.all_upstreams_terminal()}"
+            # )
 
             if self.should_run == ShouldRun.No:
                 ljt(f"{self.job_id} -> schedulde for skip now...")
@@ -468,13 +473,13 @@ class JobStatus:
         return invalidated
 
     def all_upstreams_terminal_or_conditional_or_decided(self):  # todo: cache if true?
-        for upstream_id in self.upstreams:
-            s = self.runner.job_states[upstream_id]
-            if not s.proc_state.is_terminal():
+        def is_ready(job_state):
+            upstream_id = job_state.job_id
+            if not job_state.proc_state.is_terminal():
                 if self.runner.jobs[upstream_id].is_conditional():
                     if (
-                        s.should_run == ShouldRun.Yes
-                        or s.validation_state == ValidationState.Invalidated
+                        job_state.should_run == ShouldRun.Yes
+                        or job_state.validation_state == ValidationState.Invalidated
                     ):
                         # this should be run first, but hasn't
                         ljt(
@@ -501,17 +506,49 @@ class JobStatus:
                         else:
                             return False  # I can't tell yet!
                 elif (
-                    s.should_run == ShouldRun.No
-                    and s.proc_state == ProcessingStatus.Waiting
+                    job_state.should_run == ShouldRun.No
+                    and job_state.proc_state == ProcessingStatus.Waiting
                 ):
-                    raise ValueError(f"shoulrun no, but proc_state waiting {s.job_id}")
+                    raise ValueError(f"shoulrun no, but proc_state waiting {job_state.job_id}")
                 else:
                     ljt(
-                        f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was not terminal {s.proc_state}"
+                        f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was not terminal {job_state.proc_state}"
                     )
                     return False
-        ljt(f"\t{self.job_id} all_upstreams_terminal_or_conditional_or_decided->True")
-        return True
+            return True
+
+        if not hasattr(self, "_largest_topo_all_upstreams_terminal_or_conditional_or_decided"):
+            try:
+                self._largest_topo_all_upstreams_terminal_or_conditional_or_decided = self.runner.job_states[
+                    max(
+                        self.upstreams,
+                        key=lambda upstream_id: self.runner.job_states[
+                            upstream_id
+                        ].topo_order_number,
+                    )
+                ]
+            except ValueError:  # no upstreams
+                ljt(f"\t{self.job_id} all_upstreams_terminal_or_conditional_or_decided->True (no upstreams)")
+                return True
+
+        if not is_ready(self._largest_topo_all_upstreams_terminal_or_conditional_or_decided):
+            return False
+        else: 
+            # latest by topography is ready. Are the others?
+            not_yet_terminal = []
+            for upstream_id in self.upstreams:
+                s = self.runner.job_states[upstream_id]
+                if not is_ready(s):
+                    not_yet_terminal.append(s)
+            if not_yet_terminal:
+                # no? ok, redefine the one we use as sentinel to be the last stared one in the remainder...
+                self._largest_topo_all_upstreams_terminal_or_conditional_or_decided = max(
+                    not_yet_terminal, key=lambda job_state: job_state.topo_order_number
+                )
+                return False
+            else:
+                ljt(f"\t{self.job_id} all_upstreams_terminal_or_conditional_or_decided->True")
+                return True
 
     def _update_downstreams(self):
         for ds_id in self.downstreams:
@@ -533,15 +570,43 @@ class JobStatus:
             ds_state.inform_conditional_upstreams_of_failure()
 
     def all_upstreams_terminal(self):
-        for upstream_id in self.upstreams:
-            s = self.runner.job_states[upstream_id].proc_state
-            if not s.is_terminal():
-                ljt(
-                    f"{self.job_id} all_upstreams_terminal->False (because {upstream_id})"
+        # if you have a job with 30k inputs, this becomes really a bottleneck,
+
+        # now technically, I only need to look at the job that's the last one in
+        # the execution que, right?
+        # it is not necessarily the latest to finish, but that one is impossible to predict
+        # and we can refine to the penultimate one by execution order (= topo_order_number)
+        # if we find the last one is done, but other's aren't.
+        if not hasattr(self, "_largest_topo_all_upstreams_terminal"):
+            try:
+                self._largest_topo_all_upstreams_terminal = self.runner.job_states[
+                    max(
+                        self.upstreams,
+                        key=lambda upstream_id: self.runner.job_states[
+                            upstream_id
+                        ].topo_order_number,
+                    )
+                ]
+            except ValueError:  # no upstreams
+                return True
+
+        if self._largest_topo_all_upstreams_terminal.proc_state.is_terminal():
+            # the last-to-start is done. Are all others?
+            not_yet_terminal = []
+            for upstream_id in self.upstreams:
+                s = self.runner.job_states[upstream_id]
+                if not s.proc_state.is_terminal():
+                    not_yet_terminal.append(s)
+            if not_yet_terminal:
+                # no? ok, redefine the one we use as sentinel to be the last stared one in the remainder...
+                self._largest_topo_all_upstreams_terminal = max(
+                    not_yet_terminal, key=lambda job_state: job_state.topo_order_number
                 )
                 return False
-        ljt(f"{self.job_id} all_upstreams_terminal->True")
-        return True
+            else:
+                return True
+        else:
+            return False
 
     @property
     def downstreams(self):

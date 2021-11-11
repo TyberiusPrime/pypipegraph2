@@ -52,7 +52,10 @@ def _normalize_path(path):
     if path.is_absolute():
         res = path.resolve()
     else:
-        res = path.resolve().relative_to(Path(".").absolute())
+        try:
+            res = path.resolve().relative_to(global_pipegraph.dir_absolute)
+        except AttributeError:
+            res = path.resolve().relative_to(Path('.').absolute())
     if global_pipegraph is not None:
         global_pipegraph._path_cache[org_path] = res
     return res
@@ -171,7 +174,7 @@ class Job:
         return self.job_id < other.job_id
 
     def __hash__(self):
-        return hash('Job_' + self.job_id)
+        return hash("Job_" + self.job_id)
 
     def _validate_outputs(self, outputs):
         res = []
@@ -969,7 +972,7 @@ class _InvariantMixin:
 
 class _FileInvariantMixin:
     def calculate(
-        self, file, stat
+        self, file, stat, runner=None
     ):  # so that FileInvariant and FunctionInvariant can reuse it
 
         # ppg1 had the option of using an external .md5sum file for the hash
@@ -1001,7 +1004,17 @@ class _FileInvariantMixin:
                 "size": stat.st_size,
             }
         else:
-            return hashers.hash_file(file)
+            if runner is not None:
+                if not hasattr(runner, "_hash_file_cache"):
+                    runner._hash_file_cache = {}
+                if file in runner._hash_file_cache:
+                    return runner._hash_file_cache[file]
+                else:
+                    h = hashers.hash_file(file)
+                    runner._hash_file_cache[file] = h
+                    return h
+            else:
+                return hashers.hash_file(file)
 
     def _md5_fallback(self, filename):
         import hashlib
@@ -1042,17 +1055,16 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         self.verify_arguments(name, function)
         self.function = function  # must assign after verify!
 
-        self.source_file = self.get_source_file()
         Job.__init__(self, [name], Resources.RunsHere)
 
     def output_needed(self, _ignored_runner):
         return True
 
-    def run(self, _runner, historical_output):
+    def run(self, runner, historical_output):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
         res = {}
-        sf = self.source_file
+        sf = self.get_source_file()
         if historical_output:
             historical_output = historical_output[self.job_id]
         else:
@@ -1075,7 +1087,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                         file_unchanged = True
                         new_file_hash = historical_output["source_file"]
                     else:
-                        new_file_hash = self.calculate(sf, stat)
+                        new_file_hash = self.calculate(sf, stat, runner)
                         if (
                             new_file_hash["hash"]
                             == historical_output["source_file"]["hash"]
@@ -1083,7 +1095,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                             file_unchanged = True
                             new_file_hash = historical_output["source_file"]
             if not new_file_hash:
-                new_file_hash = self.calculate(sf, stat)
+                new_file_hash = self.calculate(sf, stat, runner)
 
         if not hasattr(self.function, "__code__"):  # build ins
             line_no = -1
@@ -1174,18 +1186,27 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
     @staticmethod
     def _get_python_source(function):
-        source = inspect.getsource(function).strip()
-        # cut off function definition / name, but keep parameters
-        if source.startswith("def"):
-            source = source[source.find("(") :]
-        # filter doc string
-        if function.__doc__:
-            for prefix in ['"""', "'''", '"', "'"]:
-                if prefix + function.__doc__ + prefix in source:
-                    source = source.replace(
-                        prefix + function.__doc__ + prefix,
-                        "",
-                    )
+        from . import global_pipegraph
+
+        key = (function.__code__.co_filename, function.__code__.co_firstlineno)
+        if key in global_pipegraph.func_cache:
+            return global_pipegraph.func_cache[key]
+        else:
+            source = inspect.getsource(function).strip()
+
+            # cut off function definition / name, but keep parameters
+            if source.startswith("def"):
+                source = source[source.find("(") :]
+            # filter doc string
+            if function.__doc__:
+                for prefix in ['"""', "'''", '"', "'"]:
+                    if prefix + function.__doc__ + prefix in source:
+                        source = source.replace(
+                            prefix + function.__doc__ + prefix,
+                            "",
+                        )
+
+            global_pipegraph.func_cache[key] = source
         return source
 
     @classmethod

@@ -29,10 +29,11 @@ from collections import deque
 ljt = log_job_trace
 
 
-class ExitNow:
-    """Token for leave-this-thread-now-signal"""
+ExitNow = "___!!!ExitNow!!___"
+#class ExitNow:
+#   """Token for leave-this-thread-now-signal"""
 
-    pass
+#   pass
 
 
 class Runner:
@@ -129,13 +130,13 @@ class Runner:
                     f"Not a directed *acyclic* graph after modification. See {error_fn}. Cycles between {cycles}"
                 )
 
-            for job_id in networkx.algorithms.dag.topological_sort(
+            for topo_order_number, job_id in enumerate(networkx.algorithms.dag.topological_sort(
                 self.dag
-            ):  # must be topological so we can do upstreams whilst building
+            )):  # must be topological so we can do upstreams whilst building
                 historical_input, historical_output = history.get(
                     job_id, ({}, {})
                 )  # todo: support renaming jobs.
-                s = JobStatus(job_id, self, historical_input, historical_output)
+                s = JobStatus(job_id, self, historical_input, historical_output, topo_order_number)
                 log_trace(
                     f"Loaded history for {job_id} in: {len(s.historical_input)}, out: {len(s.historical_output)}"
                 )
@@ -250,7 +251,8 @@ class Runner:
                 job.job_id, ({}, {})
             )  # todo: support renaming jobs.
             self.job_states[job.job_id] = JobStatus(
-                job.job_id, self, historical_input, historical_output
+                job.job_id, self, historical_input, historical_output, 
+                topo_order_number=-1
             )
             # no need to do the downstream calls - this is just an ignored job
             self.job_states[job.job_id].proc_state = ProcessingStatus.Done
@@ -534,7 +536,7 @@ class Runner:
         for job_id in self.pruned:
             ljt(f"Logging as pruned {job_id}")
             assert not job_id in self.job_states
-            self.job_states[job_id] = JobStatus(job_id, self, None, None)
+            self.job_states[job_id] = JobStatus(job_id, self, None, None, topo_order_number=-1)
             self.job_states[job_id].was_pruned()
 
         if len(global_pipegraph.jobs) != job_count and not self.aborted:

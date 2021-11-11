@@ -52,6 +52,7 @@ ppg_status*
 tests/run
 .vim_session
 benchmarks/run
+benchmarks/run*
 benchmarks/flames.svg
 */.ppg/*
 examples/run
