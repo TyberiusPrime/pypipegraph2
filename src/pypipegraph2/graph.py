@@ -1,5 +1,6 @@
 from typing import Optional, Union, Dict
 import gzip
+import threading
 import logging
 import shutil
 import collections
@@ -109,6 +110,7 @@ class PyPipeGraph:
         self.prevent_absolute_paths = prevent_absolute_paths
         self._debug_allow_ctrl_c = False  # see examples/abort_when_stalled.py
         self.next_job_number = 0
+        self.next_job_number_lock = threading.Lock()
         self._path_cache = {}
         self.report_done_filter = report_done_filter
         self.func_cache = {}
@@ -195,7 +197,6 @@ class PyPipeGraph:
                     else "<blue>{elapsed}s</blue> | <level>{level.icon}</level> <bold>|</bold>{file:8.8}:{line:4} <level>{message}</level>"
                 ),
             )  # pragma: no cover
-            import threading
 
             self._link_logs()
 
@@ -600,8 +601,13 @@ class PyPipeGraph:
                     f"new job: {job} id: {id(job)}",
                     f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
                 )
-        job.job_number = self.next_job_number
-        self.next_job_number += 1
+        if not self.running: # one core., no locking
+            job.job_number = self.next_job_number
+            self.next_job_number += 1
+        else: # multiple jobGeneratingJobs might be creating jobs at the same time.
+            with self.next_job_number_lock:
+                job.job_number = self.next_job_number
+                self.next_job_number += 1
         self.jobs[job.job_id] = job
         self.job_dag.add_node(job.job_id)
         # assert len(self.jobs) == len(self.job_dag) - we verify this when running
