@@ -101,6 +101,8 @@ class Runner:
             job_numbers = set()
             for job_id, job in self.jobs.items():
                 # log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
+                if job.job_number in job_numbers:
+                    raise ValueError("Duplicate job_number", job.job_number, job_id,job)
                 job_numbers.add(job.job_number)
             assert len(job_numbers) == len(self.jobs)
             if len(self.jobs) - len(self.pruned) != len(self.dag):

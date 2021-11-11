@@ -1816,7 +1816,7 @@ class TestDependency:
             print()
 
             # ppg2
-            assert ppg.util.global_pipegraph.has_edge("FIout/B", "out/B")
+            assert ppg.util.global_pipegraph.has_edge("FITestDependency.test_dependency_placeholder_dynamic_auto_invariants.<locals>.check_function_invariant", "out/B")
 
         def gen_deps():
             jobB = ppg.FileGeneratingJob("out/B", check_function_invariant)

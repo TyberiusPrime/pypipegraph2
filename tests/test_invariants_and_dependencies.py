@@ -64,38 +64,36 @@ class TestInvariant:
         of = "out/a"
 
         def do_write(of):
-            counter('A')
+            counter("A")
             append(of, "shu" * self.sentinel_count())
 
         job = ppg.FileGeneratingJob(of, do_write)
         ppg.run()
 
         assert read(of) == "shu"
-        assert read('A') == '1'
+        assert read("A") == "1"
         ppg.new()
         job = ppg.FileGeneratingJob(of, do_write)
         ppg.run()
         assert read(of) == "shu"  # has not been run again, for no change
-        assert read('A') == '1'
+        assert read("A") == "1"
 
         ppg.new()
 
         def do_write2(of):
-            counter('A')
+            counter("A")
             append(of, "sha")
 
         job = ppg.FileGeneratingJob(of, do_write2, depend_on_function=False)
         ppg.run()
         assert read(of) == "sha"  # has been run again - number of invariants changed!
-        assert read('A') == '2'
+        assert read("A") == "2"
 
         ppg.new()
         job = ppg.FileGeneratingJob(of, do_write2)
         ppg.run()
-        assert (
-            read(of) == "sha"
-        )  # Readding the invariant does trigger again
-        assert read('A') == '3'
+        assert read(of) == "sha"  # Readding the invariant does trigger again
+        assert read("A") == "3"
 
     def test_parameter_dependency(self):
         of = "out/a"
@@ -646,27 +644,28 @@ class TestInvariant:
         ppg.run()
         assert read("counter") == "1"
 
-
     def test_file_invariant_replaced(self):
-        Path('a.tsv').write_text('a')
-        a = ppg.FileInvariant('a.tsv')
+        Path("a.tsv").write_text("a")
+        a = ppg.FileInvariant("a.tsv")
+
         def func(of):
-            counter('J')
-            of.write_text('j')
-        j = ppg.FileGeneratingJob('j', func)
+            counter("J")
+            of.write_text("j")
+
+        j = ppg.FileGeneratingJob("j", func)
         j.depends_on(a)
         ppg.run()
-        assert read('j') == 'j'
-        assert read('J') == '1'
+        assert read("j") == "j"
+        assert read("J") == "1"
         ppg.run()
-        assert read('J') == '1'
+        assert read("J") == "1"
         ppg.new()
-        Path('b.tsv').write_text('b')
-        b = ppg.FileInvariant('b.tsv')
-        j = ppg.FileGeneratingJob('j', func)
+        Path("b.tsv").write_text("b")
+        b = ppg.FileInvariant("b.tsv")
+        j = ppg.FileGeneratingJob("j", func)
         j.depends_on(b)
         ppg.run()
-        assert read('J') == '2'
+        assert read("J") == "2"
 
 
 def first_value(d):
@@ -708,9 +707,11 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None, first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_lambdas(self):
@@ -747,9 +748,11 @@ class TestFunctionInvariant:
         cv = c.run(None, None)
         self.maxDiff = 20000
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_inner_functions(self):
@@ -782,9 +785,11 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_nested_inner_functions(self):
@@ -826,9 +831,11 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_inner_functions_with_parameters(self):
@@ -849,9 +856,11 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_passing_non_function_raises(self):
@@ -963,9 +972,11 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_function_to_str_builtin(self):
@@ -989,9 +1000,11 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_closure_capturing_set(self):
@@ -1016,9 +1029,11 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_closure_capturing_frozen_set(self):
@@ -1043,9 +1058,11 @@ class TestFunctionInvariant:
         bv = b.run(None, None)
         cv = c.run(None, None)
         assert a.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_function_invariants_are_equal_if_dis_identical_or_source_identical(self):
@@ -1055,12 +1072,12 @@ class TestFunctionInvariant:
         b["source"] = "hello_world"
         c = a.copy()
         c[python_version] = ("disB", "closure")
-        assert ppg.FunctionInvariant.compare_hashes(None,a, a, python_version)
-        assert ppg.FunctionInvariant.compare_hashes(None,
-            a, b, python_version
+        assert ppg.FunctionInvariant.compare_hashes(None, a, a, python_version)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, a, b, python_version
         )  # same dis ,different source
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            a, c, python_version
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, a, c, python_version
         )  # different dis, same source
 
     def test_source_file_mtime_change_without_hash_change(self):
@@ -1386,7 +1403,10 @@ class TestDependency:
 
         def check_function_invariant(of):
             write("out/B", "B")
-            assert "FIout/B" in ppg.global_pipegraph.jobs
+            assert (
+                "FITestDependency.test_dependency_placeholder_dynamic_auto_invariants.<locals>.check_function_invariant"
+                in ppg.global_pipegraph.jobs
+            )
 
         def gen_deps():
             jobB = ppg.FileGeneratingJob("out/B", check_function_invariant)
@@ -1449,9 +1469,11 @@ class TestFunctionInvariantDisChanges_BetweenVersions:
         av = a.run(None, None)
         bv = b.run(None, None)
         cv = c.run(None, None)
-        assert ppg.FunctionInvariant.compare_hashes(None,first_value(av), first_value(bv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,
-            first_value(av), first_value(cv)
+        assert ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(bv)
+        )
+        assert not ppg.FunctionInvariant.compare_hashes(
+            None, first_value(av), first_value(cv)
         )
 
     def test_docstring_is_irrelevant(self):
@@ -1483,6 +1505,6 @@ class TestFunctionInvariantDisChanges_BetweenVersions:
         bv = first_value(b.run(None, None))
         cv = first_value(c.run(None, None))
         dv = first_value(d.run(None, None))
-        assert ppg.FunctionInvariant.compare_hashes(None,(av), (bv))
-        assert ppg.FunctionInvariant.compare_hashes(None,(cv), (dv))
-        assert not ppg.FunctionInvariant.compare_hashes(None,(av), (cv))
+        assert ppg.FunctionInvariant.compare_hashes(None, (av), (bv))
+        assert ppg.FunctionInvariant.compare_hashes(None, (cv), (dv))
+        assert not ppg.FunctionInvariant.compare_hashes(None, (av), (cv))

@@ -208,7 +208,16 @@ class Job:
             # e.g. FileGeneratingJob ppg1 compatibility with 'no-output-filename parameter'.
             func = func.wrapped_function
             # log_debug(f"Falling back to wrapped function {self.job_id}")
-        func_invariant = FunctionInvariant(func, self.job_id)
+        try:
+            # we try to share FunctionInvariants if no closure is involved
+            # that saves us many Jobs in some cases
+            if hasattr(func, '__closure__') and func.__closure__ is None:
+                func_invariant = FunctionInvariant(func)#, self.job_id)
+                func_invariant.usage_counter = getattr(func_invariant, 'usage_counter', 0) + 1
+            else:
+                func_invariant = FunctionInvariant(func, self.job_id)
+        except TypeError:
+            func_invariant = FunctionInvariant(func, self.job_id)
         self.func_invariant = func_invariant  # we only store it so ppg1.compatibility ignore_code_changes can prune it
         self.depends_on(func_invariant)
 
@@ -2250,6 +2259,19 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             delattr(self, "_target_folder")
         return super().depends_on(*args, **kwargs)
 
+    def _handle_function_dependency(self, func):
+        """Unlike the other jobs, SharedMultiFileGeneratingJob do not 'merge' their FunctionInvariants when possible"""
+        while hasattr(
+            func, "wrapped_function"
+        ):  # the actual function is just an adaptor, ignore it for the wrapped function
+            # e.g. FileGeneratingJob ppg1 compatibility with 'no-output-filename parameter'.
+            func = func.wrapped_function
+            # log_debug(f"Falling back to wrapped function {self.job_id}")
+        func_invariant = FunctionInvariant(func, self.job_id)
+        self.func_invariant = func_invariant  # we only store it so ppg1.compatibility ignore_code_changes can prune it
+        self.depends_on(func_invariant)
+
+
     @property
     def target_folder(self):
         """read the target folder as of the last ppg run,
@@ -2341,9 +2363,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
             self._target_folder = symlink  # so the downstream knows where to look
             self.files = [self._map_filename(fn) for fn in self.org_files]
-
         else:
             self._raise_partial_result_exception()
+            #self._raise_partial_result_exception()
         missing = [x for x in fns if not x.exists()]
         if missing:
             raise ValueError(
