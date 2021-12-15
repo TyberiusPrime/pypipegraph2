@@ -541,15 +541,16 @@ class MultiFileGeneratingJob(Job):
                             ].get("size", -1)
                             if mtime_the_same and size_the_same:
                                 continue
-                            if size_the_same:
+                            if size_the_same: # but the mtime changed->rehash
                                 new_hash = hashers.hash_file(fn)
                                 if new_hash["hash"] == historical_output[str(fn)].get(
                                     "hash", "No hash "
                                 ):  # hash the same
                                     continue
-                            raise ValueError(
-                                historical_output, stat.st_mtime, stat.st_size
-                            )
+                            #raise ValueError( # this means the file and the historical output mismatch, right?
+                                    # then we should unlink and redo
+                                #historical_output, stat.st_mtime, stat.st_size
+                            #)
                 # at least one file was missing
                 log_trace(f"unlinking {fn}")
                 fn.unlink()
@@ -2396,6 +2397,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         # now log that we're the ones using this.
         # our key is a hash of our history path.
         abs_hd = str(global_pipegraph.get_history_filename().absolute())
+        if abs_hd.startswith('/project') and 'ANYSNAKE2_PROJECT_DIR' in os.environ:
+            # I hate having to do this, but I can't see a cleaner way to actually implement it
+            abs_hd = abs_hd[len('/project'):) + os.environ['ANYSNAKE2_PROJECT_DIR']
         usage_dir_hash = hashlib.sha512(abs_hd.encode("utf-8")).hexdigest()
         log_job_trace(f"usage_dir_hash {usage_dir_hash}")
         lookup_file = self.usage_dir / (usage_dir_hash + ".source")

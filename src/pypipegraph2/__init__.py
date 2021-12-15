@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__version__ = '2.4.0'
+__version__ = '2.4.1'
 
 from pathlib import Path
 import logging
