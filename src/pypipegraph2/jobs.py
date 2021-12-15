@@ -2399,7 +2399,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         abs_hd = str(global_pipegraph.get_history_filename().absolute())
         if abs_hd.startswith('/project') and 'ANYSNAKE2_PROJECT_DIR' in os.environ:
             # I hate having to do this, but I can't see a cleaner way to actually implement it
-            abs_hd = abs_hd[len('/project'):) + os.environ['ANYSNAKE2_PROJECT_DIR']
+            abs_hd = abs_hd[len('/project'):] + os.environ['ANYSNAKE2_PROJECT_DIR']
         usage_dir_hash = hashlib.sha512(abs_hd.encode("utf-8")).hexdigest()
         log_job_trace(f"usage_dir_hash {usage_dir_hash}")
         lookup_file = self.usage_dir / (usage_dir_hash + ".source")
