@@ -46,6 +46,7 @@ reuse_last_or_default = object()
 default = object()
 
 _last_new_arguments = {}
+_ppg1_compatibility_mode = False
 
 
 def _last_or_default(name, value, default_value):
@@ -100,13 +101,19 @@ def new(
             ("log_retention", 3),
             ("cache_dir", Path("cache")),
             ("prevent_absolute_paths", True),
-            ('report_done_filter', 1)
+            ("report_done_filter", 1),
         ]
     }
     util.do_jobtrace_log = arguments["log_level"] <= 6
     # if arguments['run_mode'] != RunMode.NONINTERACTIVE:
     # raise ValueError()
     global_pipegraph = PyPipeGraph(**arguments)
+
+    if _ppg1_compatibility_mode:
+        from . import ppg1_compatibility
+
+        ppg1_compatibility._add_graph_comp(global_pipegraph)
+
     return global_pipegraph
 
 
@@ -167,12 +174,17 @@ def replace_ppg1():
     """
     from . import ppg1_compatibility
 
+    global _ppg1_compatibility_mode
+    _ppg1_compatibility_mode = True
     ppg1_compatibility.replace_ppg1()
 
 
 def unreplace_ppg1():
     """undo replace_ppg1."""
     from . import ppg1_compatibility
+
+    global _ppg1_compatibility_mode
+    _ppg1_compatibility_mode = False
 
     ppg1_compatibility.unreplace_ppg1()
 

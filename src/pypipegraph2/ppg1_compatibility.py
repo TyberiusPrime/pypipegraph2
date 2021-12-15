@@ -284,11 +284,14 @@ def new_pipegraph(
         cache_dir=Path(cache_folder),
         **kwargs,
     )
-    res.cache_folder = res.cache_dir  # ppg1 compatibility
-    res.rc = FakeRC()
-    util.global_pipegraph = res
-
+    _add_graph_comp(res)
     return res
+
+def _add_graph_comp(graph):
+    graph.cache_folder = graph.cache_dir  # ppg1 compatibility
+    graph.rc = FakeRC()
+    util.global_pipegraph = graph
+
 
 
 def run_pipegraph(*args, **kwargs):
