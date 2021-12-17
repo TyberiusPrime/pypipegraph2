@@ -97,6 +97,17 @@ class TestJobs:
         assert read("ac") == "2"
         assert read("bc") == "1"
 
+    def test_dependency_callback_plus_job(self):
+        data = []
+        def load_a():
+            data.append('a')
+        a = ppg.DataLoadingJob('A', load_a)
+        b = lambda: ppg.FileGeneratingJob('B', lambda of: of.write_text('b'))
+        c = ppg.FileGeneratingJob('C', lambda of: 
+                of.write_text(Path('B').read_text() + data[0]))
+        c.depends_on(b, a)
+        ppg.run()
+
     def test_data_loading_MultiFile_dowstream(self, job_trace_log):
         def tf(ofs):
             counter("A")

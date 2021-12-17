@@ -17,7 +17,7 @@ from pathlib import Path
 from io import StringIO
 from collections import namedtuple
 from threading import Lock
-from deepdiff.deephash import DeepHash
+from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
 
 from . import hashers, exceptions, ppg_traceback
@@ -28,6 +28,7 @@ import shutil
 from .util import log_info, log_error, log_warning, log_debug, log_trace, log_job_trace
 
 module_type = type(sys)
+is_hex_re = re.compile("^[a-fA-F0-9]+$")
 
 non_chdired_path = Path(".").absolute()
 python_version = ".".join(
@@ -249,6 +250,10 @@ class Job:
         if other_job is False and not other_jobs:
             # raise ValueError("You have to pass in at least one job")
             return self  # this is how ppg1 did it
+        if other_jobs:
+            for o in other_jobs:
+                self.depends_on(o)
+
         if isinstance(other_job, (CachedJobTuple, PlotJobTuple)):
             raise TypeError(
                 "You passed in a CachedJobTuple/PlotJobTuple - unclear what to depend on. Pass in either .load/.calc or .plot/.cache/.table"
@@ -264,7 +269,7 @@ class Job:
                 return self
             elif hasattr(other_job, "__call__"):
                 self.dependency_callbacks.append(other_job)
-                return self
+                return self # don't do the 'add a job right now' dance
             else:
                 if isinstance(other_job, Path):
                     other_job = str(other_job)
@@ -287,9 +292,6 @@ class Job:
             log_trace(f"adding edge {o_job.job_id}, {self.job_id}")
             global_pipegraph.add_edge(o_job, self)
             global_pipegraph.job_inputs[self.job_id].update(o_inputs)
-        if other_jobs:
-            for o in other_jobs:
-                self.depends_on(o)
         return self
 
     def output_needed(self, _ignored_runner):
@@ -1650,7 +1652,16 @@ class ParameterInvariant(_InvariantMixin, Job):
             raise TypeError(
                 "ParamaterInvariants do not store Functions. Use FunctionInvariant for that"
             )
-        return DeepHash(obj, hasher=hashers.hash_str)[obj]
+        # if isinstance(obj, str) and len(obj) == 32 and is_hex_re.match(obj):
+            # If it's already a hash, we keep it that way
+         #   return obj
+        res = DeepHash(obj, hasher=hashers.hash_str)
+        if UNPROCESSED_KEY in res:
+            errs = []
+            for k in res[UNPROCESSED_KEY]:
+                errs.append(k)
+            raise ValueError("Hashing failed on parent obj", obj, 'reasons', errs)
+        return res[obj]
 
     def extract_strict_hash(self, a_hash) -> bytes:
         return str(ParameterInvariant.freeze(a_hash)).encode("utf-8")
