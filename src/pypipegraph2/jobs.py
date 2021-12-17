@@ -56,7 +56,7 @@ def _normalize_path(path):
         try:
             res = path.resolve().relative_to(global_pipegraph.dir_absolute)
         except AttributeError:
-            res = path.resolve().relative_to(Path(".").absolute())
+            res = path.resolve().relative_to(Path('.').absolute())
     if global_pipegraph is not None:
         global_pipegraph._path_cache[org_path] = res
     return res
@@ -215,11 +215,9 @@ class Job:
         try:
             # we try to share FunctionInvariants if no closure is involved
             # that saves us many Jobs in some cases
-            if hasattr(func, "__closure__") and func.__closure__ is None:
-                func_invariant = FunctionInvariant(func)  # , self.job_id)
-                func_invariant.usage_counter = (
-                    getattr(func_invariant, "usage_counter", 0) + 1
-                )
+            if hasattr(func, '__closure__') and func.__closure__ is None:
+                func_invariant = FunctionInvariant(func)#, self.job_id)
+                func_invariant.usage_counter = getattr(func_invariant, 'usage_counter', 0) + 1
             else:
                 func_invariant = FunctionInvariant(func, self.job_id)
         except TypeError:
@@ -271,7 +269,7 @@ class Job:
                 return self
             elif hasattr(other_job, "__call__"):
                 self.dependency_callbacks.append(other_job)
-                return self  # don't do the 'add a job right now' dance
+                return self # don't do the 'add a job right now' dance
             else:
                 if isinstance(other_job, Path):
                     other_job = str(other_job)
@@ -545,16 +543,16 @@ class MultiFileGeneratingJob(Job):
                             ].get("size", -1)
                             if mtime_the_same and size_the_same:
                                 continue
-                            if size_the_same:  # but the mtime changed->rehash
+                            if size_the_same: # but the mtime changed->rehash
                                 new_hash = hashers.hash_file(fn)
                                 if new_hash["hash"] == historical_output[str(fn)].get(
                                     "hash", "No hash "
                                 ):  # hash the same
                                     continue
-                            # raise ValueError( # this means the file and the historical output mismatch, right?
-                            # then we should unlink and redo
-                            # historical_output, stat.st_mtime, stat.st_size
-                            # )
+                            #raise ValueError( # this means the file and the historical output mismatch, right?
+                                    # then we should unlink and redo
+                                #historical_output, stat.st_mtime, stat.st_size
+                            #)
                 # at least one file was missing
                 log_trace(f"unlinking {fn}")
                 fn.unlink()
@@ -1655,14 +1653,14 @@ class ParameterInvariant(_InvariantMixin, Job):
                 "ParamaterInvariants do not store Functions. Use FunctionInvariant for that"
             )
         # if isinstance(obj, str) and len(obj) == 32 and is_hex_re.match(obj):
-        # If it's already a hash, we keep it that way
-        #   return obj
+            # If it's already a hash, we keep it that way
+         #   return obj
         res = DeepHash(obj, hasher=hashers.hash_str)
         if UNPROCESSED_KEY in res:
             errs = []
             for k in res[UNPROCESSED_KEY]:
                 errs.append(k)
-            raise ValueError("Hashing failed on parent obj", obj, "reasons", errs)
+            raise ValueError("Hashing failed on parent obj", obj, 'reasons', errs)
         return res[obj]
 
     def extract_strict_hash(self, a_hash) -> bytes:
@@ -2306,6 +2304,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         self.func_invariant = func_invariant  # we only store it so ppg1.compatibility ignore_code_changes can prune it
         self.depends_on(func_invariant)
 
+
     @property
     def target_folder(self):
         """read the target folder as of the last ppg run,
@@ -2320,16 +2319,11 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
     @staticmethod
     def _handle_anysnake2(absolute_str_path):
-        if (
-            absolute_str_path.startswith("/project")
-            and "ANYSNAKE2_PROJECT_DIR" in os.environ
-        ):
+        if absolute_str_path.startswith('/project') and 'ANYSNAKE2_PROJECT_DIR' in os.environ:
             # I hate having to do this, but I can't see a cleaner way to actually implement it
-            absolute_str_path = (
-                os.environ["ANYSNAKE2_PROJECT_DIR"]
-                + absolute_str_path[len("/project") :]
-            )
-        return absolute_str_path
+            absolute_str_path = os.environ['ANYSNAKE2_PROJECT_DIR'] + absolute_str_path[len('/project'):] 
+        return absolute_str_path 
+
 
     def run(self, runner, historical_output):
         import socket
@@ -2412,7 +2406,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             self.files = [self._map_filename(fn) for fn in self.org_files]
         else:
             self._raise_partial_result_exception()
-            # self._raise_partial_result_exception()
+            #self._raise_partial_result_exception()
         missing = [x for x in fns if not x.exists()]
         if missing:
             raise ValueError(
