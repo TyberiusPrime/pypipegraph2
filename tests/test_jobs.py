@@ -1880,6 +1880,7 @@ class TestNoDotDotInJobIds:
     def test_no_dot_dot(self):
         """ all ../ must be resolved before it becomes a job id"""
         import unittest
+        from unittest.mock import patch
 
         collector = set()
         org_dedup = ppg.jobs._dedup_job
@@ -1888,7 +1889,7 @@ class TestNoDotDotInJobIds:
             collector.add(job_id)
             return org_dedup(cls, job_id)
 
-        with unittest.mock.patch("pypipegraph2.jobs._dedup_job", collecting_dedup):
+        with patch("pypipegraph2.jobs._dedup_job", collecting_dedup):
             j = ppg.MultiFileGeneratingJob(["something/../shu"], lambda of: 5)
             assert j.job_id in collector
             assert not ".." in j.job_id
