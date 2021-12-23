@@ -97,6 +97,17 @@ class TestJobs:
         assert read("ac") == "2"
         assert read("bc") == "1"
 
+    def test_dependency_callback_plus_job(self):
+        data = []
+        def load_a():
+            data.append('a')
+        a = ppg.DataLoadingJob('A', load_a)
+        b = lambda: ppg.FileGeneratingJob('B', lambda of: of.write_text('b'))
+        c = ppg.FileGeneratingJob('C', lambda of: 
+                of.write_text(Path('B').read_text() + data[0]))
+        c.depends_on(b, a)
+        ppg.run()
+
     def test_data_loading_MultiFile_dowstream(self, job_trace_log):
         def tf(ofs):
             counter("A")
@@ -1869,6 +1880,7 @@ class TestNoDotDotInJobIds:
     def test_no_dot_dot(self):
         """ all ../ must be resolved before it becomes a job id"""
         import unittest
+        from unittest.mock import patch
 
         collector = set()
         org_dedup = ppg.jobs._dedup_job
@@ -1877,7 +1889,7 @@ class TestNoDotDotInJobIds:
             collector.add(job_id)
             return org_dedup(cls, job_id)
 
-        with unittest.mock.patch("pypipegraph2.jobs._dedup_job", collecting_dedup):
+        with patch("pypipegraph2.jobs._dedup_job", collecting_dedup):
             j = ppg.MultiFileGeneratingJob(["something/../shu"], lambda of: 5)
             assert j.job_id in collector
             assert not ".." in j.job_id
