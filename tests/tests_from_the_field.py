@@ -1626,3 +1626,75 @@ class TestsFromTheField:
             ppg.global_pipegraph.last_run_result["3"].outcome
             == ppg.enums.JobOutcome.Skipped
         )
+
+
+    def test_20211221(self):
+           global do_fail
+           do_fail = [False]
+           # ppg.new(log_level=20)
+           gen_20211221(lambda: 55)
+           ppg.run()
+           assert Path('651').exists()
+           ppg.new()
+           do_fail[0] = True
+           gen_20211221(lambda: 56)
+           ppg.run()
+           assert not Path('651').exists()
+           
+
+def gen_20211221(func):
+        class DummyObject:
+            pass
+        
+        def dummy_smfg(files, prefix):
+            Path(prefix).mkdir(exist_ok=True, parents=True)
+            for f in files:
+                f.write_text("hello")
+        
+        
+        def dummy_mfg(files):
+            for f in files:
+                 f.parent.mkdir(exist_ok=True, parents=True)
+                 f.write_text("hello")
+        
+        global do_fail
+
+        def dummy_fg(of):
+            of.parent.mkdir(exist_ok=True, parents=True)
+            of.write_text("fg")
+
+        def dummy_fg_fail(of):
+            global do_fail
+            if do_fail[0]:
+               raise ValueError()
+            of.parent.mkdir(exist_ok=True, parents=True)
+            of.write_text("fg")
+        
+       # debugged job PIGenes_KD5MA closest genes_parent
+       # debugged job load_cache/GenomicRegions/H4ac_ISX_specific/calc
+
+        job_650 = ppg.DataLoadingJob('650', lambda: 35, depend_on_function=False)
+        # debugged job cache/GenomicRegions/H4ac_ISX_specific/calc
+        job_651 = ppg.FileGeneratingJob('651', dummy_fg_fail, depend_on_function=False)
+        job_651.depends_on(ppg.FunctionInvariant('shu', func))
+        job_661 = ppg.DataLoadingJob('661', lambda: 35, depend_on_function=False)
+        job_1079 = ppg.FileGeneratingJob('1079', dummy_fg, depend_on_function=False)
+        job_1096 = ppg.DataLoadingJob('1096', lambda: 35, depend_on_function=False)
+
+
+        cjobs_by_no = {}
+        for k, v in locals().items():
+            if k.startswith('job_'):
+                no = k[k.find('_') + 1 :]
+                cjobs_by_no[no] = v
+        edges = []
+        ea = edges.append
+        ea(('1079', '1096'))
+        ea(('1096', '650'))
+        ea(('1096', '661'))
+        ea(('650', '651'))
+        for (a,b) in edges:
+            if a in cjobs_by_no and b in cjobs_by_no:        
+                cjobs_by_no[a].depends_on(cjobs_by_no[b])
+                # print(f"ea(('{a}', '{b}'))")
+        

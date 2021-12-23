@@ -56,7 +56,7 @@ def _normalize_path(path):
         try:
             res = path.resolve().relative_to(global_pipegraph.dir_absolute)
         except AttributeError:
-            res = path.resolve().relative_to(Path('.').absolute())
+            res = path.resolve().relative_to(Path(".").absolute())
     if global_pipegraph is not None:
         global_pipegraph._path_cache[org_path] = res
     return res
@@ -215,9 +215,11 @@ class Job:
         try:
             # we try to share FunctionInvariants if no closure is involved
             # that saves us many Jobs in some cases
-            if hasattr(func, '__closure__') and func.__closure__ is None:
-                func_invariant = FunctionInvariant(func)#, self.job_id)
-                func_invariant.usage_counter = getattr(func_invariant, 'usage_counter', 0) + 1
+            if hasattr(func, "__closure__") and func.__closure__ is None:
+                func_invariant = FunctionInvariant(func)  # , self.job_id)
+                func_invariant.usage_counter = (
+                    getattr(func_invariant, "usage_counter", 0) + 1
+                )
             else:
                 func_invariant = FunctionInvariant(func, self.job_id)
         except TypeError:
@@ -269,7 +271,7 @@ class Job:
                 return self
             elif hasattr(other_job, "__call__"):
                 self.dependency_callbacks.append(other_job)
-                return self # don't do the 'add a job right now' dance
+                return self  # don't do the 'add a job right now' dance
             else:
                 if isinstance(other_job, Path):
                     other_job = str(other_job)
@@ -410,6 +412,147 @@ class Job:
         else:
             return 1
 
+    def dump_subgraph_for_debug(self, job_ids=None, jobs=None, dag=None):
+        """Take every job leading up to this job
+        and write a mock dependency graph to
+        subgraph_debug.py
+
+        Very handy for debugging, but ugly :).
+
+        Note that you can just throw out Jobs later,
+        the edges of non-existant jobs will be ignored.
+        """
+
+        import pypipegraph2 as ppg
+
+        nodes = []
+        seen = set()
+        edges = set()
+        counter = [0]
+        node_to_counters = {}
+        if jobs is None:
+            jobs = ppg.global_pipegraph.jobs
+        if dag is None:
+            dag = ppg.global_pipegraph.job_dag
+
+        def descend(node):
+            if node in seen:
+                return
+            seen.add(node)
+            j = jobs[node]
+            if j.job_id in job_ids:
+                nodes.append(f"# debugged job {j.job_id}")
+            if isinstance(j, ppg.FileInvariant):
+                nodes.append(f"Path('{counter[0]}').write_text('A')")
+                nodes.append(f"job_{counter[0]} = ppg.FileInvariant('{counter[0]}')")
+            elif isinstance(j, ppg.ParameterInvariant):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.ParameterInvariant('{counter[0]}', 55)"
+                )
+            elif isinstance(j, ppg.FunctionInvariant):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.FunctionInvariant('{counter[0]}', lambda: 55)"
+                )
+            elif isinstance(j, ppg.SharedMultiFileGeneratingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.SharedMultiFileGeneratingJob('{counter[0]}', {[x.name for x in j.files]!r}, dummy_smfg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.TempFileGeneratingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.TempFileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.FileGeneratingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.FileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.MultiTempFileGeneratingJob):
+                files = [counter[0] + "/" + x.name for x in j.files]
+                nodes.append(
+                    f"job_{counter[0]} = ppg.MultiTempFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.MultiFileGeneratingJob):
+                files = [str(counter[0]) + "/" + x.name for x in j.files]
+                nodes.append(
+                    f"job_{counter[0]} = ppg.MultiFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.DataLoadingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.DataLoadingJob('{counter[0]}', lambda: 35, depend_on_function=False)"
+                )
+            elif isinstance(j, ppg.AttributeLoadingJob):
+                nodes.append(
+                    f"job_{counter[0]} = ppg.AttributeLoadingJob('{counter[0]}', DummyObject(), 'attr_{counter[0]}', lambda: None, depend_on_function=False)"
+                )
+            else:
+                raise ValueError(j)
+            node_to_counters[node] = counter[0]
+            counter[0] += 1
+            for parent in dag.predecessors(node):
+                descend(parent)
+
+        def build_edges(node):
+            for parent in dag.predecessors(node):
+                edges.add(
+                    f"ea(('{node_to_counters[node]}', '{node_to_counters[parent]}'))"
+                )
+                build_edges(parent)
+
+        if job_ids is None:
+            job_ids = [self.job_id]
+        job_ids = set(job_ids)
+        for job_id in job_ids:
+            descend(job_id)
+
+        nodes.extend(
+            [
+                "cjobs_by_no = {}",
+                "for k, v in locals().items():",
+                "    if k.startswith('job_'):",
+                "        no = k[k.find('_') + 1 :]",
+                "        cjobs_by_no[no] = v",
+            ]
+        )
+        for job_id in job_ids:
+            build_edges(job_id)
+        edges = (
+            ["edges = []", "ea = edges.append"]
+            + list(edges)
+            + [
+                "for (a,b) in edges:",
+                "    if a in cjobs_by_no and b in cjobs_by_no:",
+                "        cjobs_by_no[a].depends_on(cjobs_by_no[b])",
+                "        # print(f\"ea(('{a}', '{b}'))\")",
+            ]
+        )
+        with open("subgraph_debug.py", "w") as op:
+            lines = """
+class DummyObject:
+    pass
+
+def dummy_smfg(files, prefix):
+    Path(prefix).mkdir(exist_ok=True, parents=True)
+    for f in files:
+        f.write_text("hello")
+
+
+def dummy_mfg(files):
+    for f in files:
+        f.parent.mkdir(exist_ok=True, parents=True)
+        f.write_text("hello")
+
+def dummy_fg(of):
+    of.parent.mkdir(exist_ok=True, parents=True)
+    of.write_text("fg")
+
+""".split(
+                "\n"
+            )
+            lines += nodes
+            lines += edges
+            lines += ["", "ppg.run()", "ppg.run"]
+
+            op.write("\n".join("        " + l for l in lines))
+
 
 class MultiFileGeneratingJob(Job):
     job_kind = JobKind.Output
@@ -543,16 +686,16 @@ class MultiFileGeneratingJob(Job):
                             ].get("size", -1)
                             if mtime_the_same and size_the_same:
                                 continue
-                            if size_the_same: # but the mtime changed->rehash
+                            if size_the_same:  # but the mtime changed->rehash
                                 new_hash = hashers.hash_file(fn)
                                 if new_hash["hash"] == historical_output[str(fn)].get(
                                     "hash", "No hash "
                                 ):  # hash the same
                                     continue
-                            #raise ValueError( # this means the file and the historical output mismatch, right?
-                                    # then we should unlink and redo
-                                #historical_output, stat.st_mtime, stat.st_size
-                            #)
+                            # raise ValueError( # this means the file and the historical output mismatch, right?
+                            # then we should unlink and redo
+                            # historical_output, stat.st_mtime, stat.st_size
+                            # )
                 # at least one file was missing
                 log_trace(f"unlinking {fn}")
                 fn.unlink()
@@ -1204,10 +1347,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             if function.__doc__:
                 for prefix in ['"""', "'''", '"', "'"]:
                     if prefix + function.__doc__ + prefix in source:
-                        source = source.replace(
-                            prefix + function.__doc__ + prefix,
-                            "",
-                        )
+                        source = source.replace(prefix + function.__doc__ + prefix, "",)
 
             global_pipegraph.func_cache[key] = source
         return source
@@ -1653,14 +1793,14 @@ class ParameterInvariant(_InvariantMixin, Job):
                 "ParamaterInvariants do not store Functions. Use FunctionInvariant for that"
             )
         # if isinstance(obj, str) and len(obj) == 32 and is_hex_re.match(obj):
-            # If it's already a hash, we keep it that way
-         #   return obj
+        # If it's already a hash, we keep it that way
+        #   return obj
         res = DeepHash(obj, hasher=hashers.hash_str)
         if UNPROCESSED_KEY in res:
             errs = []
             for k in res[UNPROCESSED_KEY]:
                 errs.append(k)
-            raise ValueError("Hashing failed on parent obj", obj, 'reasons', errs)
+            raise ValueError("Hashing failed on parent obj", obj, "reasons", errs)
         return res[obj]
 
     def extract_strict_hash(self, a_hash) -> bytes:
@@ -1800,9 +1940,7 @@ def CachedDataLoadingJob(
     )
 
     load_job = DataLoadingJob(
-        "load_" + cache_job.job_id,
-        load,
-        depend_on_function=depend_on_function,
+        "load_" + cache_job.job_id, load, depend_on_function=depend_on_function,
     )
     load_job.depends_on(cache_job)
     # do this after you have sucessfully created both jobs
@@ -2304,7 +2442,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         self.func_invariant = func_invariant  # we only store it so ppg1.compatibility ignore_code_changes can prune it
         self.depends_on(func_invariant)
 
-
     @property
     def target_folder(self):
         """read the target folder as of the last ppg run,
@@ -2319,11 +2456,16 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
     @staticmethod
     def _handle_anysnake2(absolute_str_path):
-        if absolute_str_path.startswith('/project') and 'ANYSNAKE2_PROJECT_DIR' in os.environ:
+        if (
+            absolute_str_path.startswith("/project")
+            and "ANYSNAKE2_PROJECT_DIR" in os.environ
+        ):
             # I hate having to do this, but I can't see a cleaner way to actually implement it
-            absolute_str_path = os.environ['ANYSNAKE2_PROJECT_DIR'] + absolute_str_path[len('/project'):] 
-        return absolute_str_path 
-
+            absolute_str_path = (
+                os.environ["ANYSNAKE2_PROJECT_DIR"]
+                + absolute_str_path[len("/project") :]
+            )
+        return absolute_str_path
 
     def run(self, runner, historical_output):
         import socket
@@ -2406,7 +2548,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             self.files = [self._map_filename(fn) for fn in self.org_files]
         else:
             self._raise_partial_result_exception()
-            #self._raise_partial_result_exception()
+            # self._raise_partial_result_exception()
         missing = [x for x in fns if not x.exists()]
         if missing:
             raise ValueError(

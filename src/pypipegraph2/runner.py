@@ -48,6 +48,7 @@ class Runner:
         jobs_already_run_previously,
         dump_graphml,
         run_id,
+        jobs_do_dump_subgraph_debug,
     ):
         from . import _with_changed_global_pipegraph
 
@@ -146,6 +147,10 @@ class Runner:
             self.jobs_to_run_que = queue.PriorityQueue()
             self.threads = []
             self.jobs_that_need_propagation = deque()
+            if jobs_do_dump_subgraph_debug:
+                j1 = self.jobs[list(jobs_do_dump_subgraph_debug)[0]]
+                j1.dump_subgraph_for_debug(jobs_do_dump_subgraph_debug, self.jobs, self.dag)
+
 
     def _apply_pruning(self, dag, focus_on_these_jobs, jobs_already_run_previously):
         def _recurse_pruning(job_id, reason):
@@ -458,14 +463,15 @@ class Runner:
                     # long time, no event.
                     if not self.jobs_in_flight:
                         log_error(
-                            f"Coding error lead to que empty with no jobs in flight? todo: {todo}"
+                            f"Coding error lead to que empty with no jobs in flight? todo: {todo}, {len(self.jobs_that_need_propagation)}"
                         )
                         # ok, a coding error has lead to us not finishing
                         # the todo graph.
                         for job_id in self.job_states:
-                            log_warning(
-                                f"{job_id}, {self.job_states[job_id].proc_state} {self.jobs[job_id].depth}"
-                            )
+                            if self.job_states[job_id].proc_state != ProcessingStatus.Done:
+                                log_warning(
+                                    f"{job_id}, {self.job_states[job_id].proc_state} {self.jobs[job_id].depth}"
+                                )
                         raise exceptions.RunFailedInternally
                     continue
 
@@ -607,7 +613,7 @@ class Runner:
     def _handle_event(self, event):
         """A job came back"""
         todo = 0
-        log_job_trace(f"reveiced event {escape_logging(event)}")
+        log_job_trace(f"received event {escape_logging(event)}")
         if event[0] == "JobSuccess":
             self._handle_job_success(*event[1])
             todo -= 1

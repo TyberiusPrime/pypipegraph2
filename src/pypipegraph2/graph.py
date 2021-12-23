@@ -67,7 +67,7 @@ class PyPipeGraph:
         allow_short_filenames=False,
         log_retention=None,
         prevent_absolute_paths=True,
-        report_done_filter=1
+        report_done_filter=1,
     ):
 
         if cores is ALL_CORES:
@@ -115,6 +115,7 @@ class PyPipeGraph:
         self.report_done_filter = report_done_filter
         self.func_cache = {}
         self.dir_absolute = Path(".").absolute()
+        self._jobs_do_dump_subgraph_debug = False
 
     def run(
         self,
@@ -233,6 +234,7 @@ class PyPipeGraph:
                         jobs_already_run,
                         dump_graphml,
                         self.run_id,
+                        self._jobs_do_dump_subgraph_debug,
                     )
                     result = self.runner.run(result, print_failures=print_failures)
                     aborted = self.runner.aborted
@@ -353,11 +355,9 @@ class PyPipeGraph:
         )
         new_history.update(
             {
-                job_id: (
-                    jr.updated_input,
-                    jr.updated_output,
-                )
-                for job_id, jr in job_results.items() if jr.outcome is not JobOutcome.Pruned
+                job_id: (jr.updated_input, jr.updated_output,)
+                for job_id, jr in job_results.items()
+                if jr.outcome is not JobOutcome.Pruned
             }
         )
         done = False
@@ -601,10 +601,10 @@ class PyPipeGraph:
                     f"new job: {job} id: {id(job)}",
                     f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
                 )
-        if not self.running: # one core., no locking
+        if not self.running:  # one core., no locking
             job.job_number = self.next_job_number
             self.next_job_number += 1
-        else: # multiple jobGeneratingJobs might be creating jobs at the same time.
+        else:  # multiple jobGeneratingJobs might be creating jobs at the same time.
             with self.next_job_number_lock:
                 job.job_number = self.next_job_number
                 self.next_job_number += 1
@@ -646,3 +646,31 @@ class PyPipeGraph:
         Used by the interactive console
         """
         self._restart_afterwards = True  # pragma: no cover - todo: interactive
+
+    def dump_subgraph_for_debug(self, jobs):
+        """Write a subgraph_debug.py
+        with a faked-out version of this graph.
+        See Job.dump_subgraph_for_debug for details"""
+        if jobs:
+            jall = list(jobs)
+        else:
+            jall = list(self.jobs.keys())
+        j1 = self.jobs[jall[0]]
+        j1.dump_subgraph_for_debug(jall)
+
+    def dump_subgraph_for_debug_at_run(self, jobs):
+        """Write a subgraph_debug.py
+        with a faked-out version of this graph.
+        See Job.dump_subgraph_for_debug for details.
+
+        This version dumps *after* the cleanup jobs
+        and so on have been assembled (ie. when run is called)
+
+        """
+        if jobs:
+            jall = list(jobs)
+        else:
+            jall = list(self.jobs.keys())
+        j1 = self.jobs[jall[0]]
+        # j1.dump_subgraph_for_debug(jall)
+        self._jobs_do_dump_subgraph_debug = jall
