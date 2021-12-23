@@ -5,29 +5,33 @@ import pypipegraph2 as ppg
 import pytest
 
 
+class DummyObject:
+    pass
+
+
+def dummy_smfg(files, prefix):
+    Path(prefix).mkdir(exist_ok=True, parents=True)
+    for f in files:
+        f.write_text("hello")
+
+
+def dummy_mfg(files):
+    for f in files:
+        f.parent.mkdir(exist_ok=True, parents=True)
+        f.write_text("hello")
+
+
+def dummy_fg(of):
+    of.parent.mkdir(exist_ok=True, parents=True)
+    of.write_text("fg")
+
+
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestsFromTheField:
     def test_issue_20210726a(self, job_trace_log):
         """This uncovered a depth first vs breadth first invalidation proagation bug.
         Created with Job_Status.dump_subgraph_for_debug and then heavily pruned
         """
-
-        class DummyObject:
-            pass
-
-        def dummy_smfg(files, prefix):
-            Path(prefix).mkdir(exist_ok=True, parents=True)
-            for f in files:
-                f.write_text("hello")
-
-        def dummy_mfg(files):
-            for f in files:
-                f.parent.mkdir(exist_ok=True, parents=True)
-                f.write_text("hello")
-
-        def dummy_fg(of):
-            of.parent.mkdir(exist_ok=True, parents=True)
-            of.write_text("fg")
 
         job_0 = ppg.FileGeneratingJob("J0", dummy_fg, depend_on_function=False)
         job_2 = ppg.DataLoadingJob("J2", lambda: None, depend_on_function=False)
@@ -50,23 +54,6 @@ class TestsFromTheField:
         ppg.run(event_timeout=1)
 
     def test_issue_20210726b(self, job_trace_log):
-        class DummyObject:
-            pass
-
-        def dummy_smfg(files, prefix):
-            Path(prefix).mkdir(exist_ok=True, parents=True)
-            for f in files:
-                f.write_text("hello")
-
-        def dummy_mfg(files):
-            for f in files:
-                f.parent.mkdir(exist_ok=True, parents=True)
-                f.write_text("hello")
-
-        def dummy_fg(of):
-            of.parent.mkdir(exist_ok=True, parents=True)
-            of.write_text("fg")
-
         job_0 = ppg.FileGeneratingJob("0", dummy_fg, depend_on_function=False)
         job_1 = ppg.FunctionInvariant("1", lambda: 55)
         job_2 = ppg.DataLoadingJob("2", lambda: None, depend_on_function=False)
@@ -1467,23 +1454,6 @@ class TestsFromTheField:
         ppg.run()
 
     def test_20210729(self, job_trace_log):
-        class DummyObject:
-            pass
-
-        def dummy_smfg(files, prefix):
-            Path(prefix).mkdir(exist_ok=True, parents=True)
-            for f in files:
-                f.write_text("hello")
-
-        def dummy_mfg(files):
-            for f in files:
-                f.parent.mkdir(exist_ok=True, parents=True)
-                f.write_text("hello")
-
-        def dummy_fg(of):
-            of.parent.mkdir(exist_ok=True, parents=True)
-            of.write_text("fg")
-
         def build():
             jobs_by_no = {}
 
@@ -1577,13 +1547,6 @@ class TestsFromTheField:
     def test_20211001(self, job_trace_log):
         do_fail = False
 
-        class DummyObject:
-            pass
-
-        def dummy_fg(of):
-            of.parent.mkdir(exist_ok=True, parents=True)
-            of.write_text("fg")
-
         def fail():  # fail on demand
             if do_fail:
                 raise ValueError()
@@ -1627,74 +1590,71 @@ class TestsFromTheField:
             == ppg.enums.JobOutcome.Skipped
         )
 
-
     def test_20211221(self):
-           global do_fail
-           do_fail = [False]
-           # ppg.new(log_level=20)
-           gen_20211221(lambda: 55)
-           ppg.run()
-           assert Path('651').exists()
-           ppg.new()
-           do_fail[0] = True
-           gen_20211221(lambda: 56)
-           ppg.run()
-           assert not Path('651').exists()
-           
+        global do_fail
+        do_fail = [False]
+        # ppg.new(log_level=20)
+        gen_20211221(lambda: 55)
+        ppg.run()
+        assert Path("651").exists()
+        ppg.new(log_level=5)
+        do_fail[0] = True
+        gen_20211221(lambda: 56)
+        with pytest.raises(ppg.JobsFailed):
+            ppg.run()
+        assert not Path("651").exists()
+        assert (
+            ppg.global_pipegraph.last_run_result["651"].outcome
+            == ppg.enums.JobOutcome.Failed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["1079"].outcome
+            == ppg.enums.JobOutcome.UpstreamFailed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["1096"].outcome
+            == ppg.enums.JobOutcome.UpstreamFailed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["661"].outcome
+            == ppg.enums.JobOutcome.Skipped
+        )
+
 
 def gen_20211221(func):
-        class DummyObject:
-            pass
-        
-        def dummy_smfg(files, prefix):
-            Path(prefix).mkdir(exist_ok=True, parents=True)
-            for f in files:
-                f.write_text("hello")
-        
-        
-        def dummy_mfg(files):
-            for f in files:
-                 f.parent.mkdir(exist_ok=True, parents=True)
-                 f.write_text("hello")
-        
+
+    global do_fail
+
+    def dummy_fg_fail(of):
         global do_fail
+        if do_fail[0]:
+            raise ValueError()
+        of.parent.mkdir(exist_ok=True, parents=True)
+        of.write_text("fg")
 
-        def dummy_fg(of):
-            of.parent.mkdir(exist_ok=True, parents=True)
-            of.write_text("fg")
+    # debugged job PIGenes_KD5MA closest genes_parent
+    # debugged job load_cache/GenomicRegions/H4ac_ISX_specific/calc
 
-        def dummy_fg_fail(of):
-            global do_fail
-            if do_fail[0]:
-               raise ValueError()
-            of.parent.mkdir(exist_ok=True, parents=True)
-            of.write_text("fg")
-        
-       # debugged job PIGenes_KD5MA closest genes_parent
-       # debugged job load_cache/GenomicRegions/H4ac_ISX_specific/calc
+    job_650 = ppg.DataLoadingJob("650", lambda: 35, depend_on_function=False)
+    # debugged job cache/GenomicRegions/H4ac_ISX_specific/calc
+    job_651 = ppg.FileGeneratingJob("651", dummy_fg_fail, depend_on_function=False)
+    job_651.depends_on(ppg.FunctionInvariant("shu", func))
+    job_661 = ppg.DataLoadingJob("661", lambda: 35, depend_on_function=False)
+    job_1079 = ppg.FileGeneratingJob("1079", dummy_fg, depend_on_function=False)
+    job_1096 = ppg.DataLoadingJob("1096", lambda: 35, depend_on_function=False)
 
-        job_650 = ppg.DataLoadingJob('650', lambda: 35, depend_on_function=False)
-        # debugged job cache/GenomicRegions/H4ac_ISX_specific/calc
-        job_651 = ppg.FileGeneratingJob('651', dummy_fg_fail, depend_on_function=False)
-        job_651.depends_on(ppg.FunctionInvariant('shu', func))
-        job_661 = ppg.DataLoadingJob('661', lambda: 35, depend_on_function=False)
-        job_1079 = ppg.FileGeneratingJob('1079', dummy_fg, depend_on_function=False)
-        job_1096 = ppg.DataLoadingJob('1096', lambda: 35, depend_on_function=False)
-
-
-        cjobs_by_no = {}
-        for k, v in locals().items():
-            if k.startswith('job_'):
-                no = k[k.find('_') + 1 :]
-                cjobs_by_no[no] = v
-        edges = []
-        ea = edges.append
-        ea(('1079', '1096'))
-        ea(('1096', '650'))
-        ea(('1096', '661'))
-        ea(('650', '651'))
-        for (a,b) in edges:
-            if a in cjobs_by_no and b in cjobs_by_no:        
-                cjobs_by_no[a].depends_on(cjobs_by_no[b])
-                # print(f"ea(('{a}', '{b}'))")
-        
+    cjobs_by_no = {}
+    for k, v in locals().items():
+        if k.startswith("job_"):
+            no = k[k.find("_") + 1 :]
+            cjobs_by_no[no] = v
+    edges = []
+    ea = edges.append
+    ea(("1079", "1096"))
+    ea(("1096", "650"))
+    ea(("1096", "661"))
+    ea(("650", "651"))
+    for (a, b) in edges:
+        if a in cjobs_by_no and b in cjobs_by_no:
+            cjobs_by_no[a].depends_on(cjobs_by_no[b])
+            # print(f"ea(('{a}', '{b}'))")

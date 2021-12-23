@@ -308,11 +308,9 @@ class JobStatus:
                     res.append(ds_id)
                 elif ds_job_state.should_run == ShouldRun.IfParentJobRan:
                     ds_no_count += 1
-                elif ds_job_state.should_run in (ShouldRun.IfDownstreamNeedsMe,):
-                    res.append(ds_id)
-                elif ds_job_state.should_run in (ShouldRun.Maybe,):
+                elif ds_job_state.should_run in (ShouldRun.Maybe,ShouldRun.IfDownstreamNeedsMe,):
                     if ds_job_state.validation_state == ValidationState.UpstreamFailed:
-                        ds_no_count += 1
+                        ds_no_count += 1 # but another upstream migth still need me.
                     else:
                         res.append(ds_id)
                 elif ds_job_state.should_run in (
@@ -323,6 +321,7 @@ class JobStatus:
                 else:
                     raise ValueError(ds_job_state.should_run)
                     assert False
+
             ljt(f"{self.job_id}\t{ds_count}, {ds_no_count}")
             if action == Action.GoYes:
                 pass
