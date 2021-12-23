@@ -54,7 +54,7 @@ def _normalize_path(path):
     else:
         try:
             res = path.resolve().relative_to(global_pipegraph.dir_absolute)
-        except AttributeError:
+        except (AttributeError, ValueError):
             res = path.resolve().relative_to(Path('.').absolute())
     if global_pipegraph is not None:
         global_pipegraph._path_cache[org_path] = res
