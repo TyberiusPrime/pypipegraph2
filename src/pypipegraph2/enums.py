@@ -2,17 +2,17 @@ from enum import Enum, auto
 
 
 class ProcessingStatus(Enum):
-    Waiting = auto() # not yet ready
-    ReadyToRun = auto() # short livened, turns into schedulded very soon
-    Schedulded = auto() # it's in the pipeline. Stand by for outcome.
-    Done = auto() # grilled and done.
+    Waiting = auto()  # not yet ready
+    ReadyToRun = auto()  # short livened, turns into schedulded very soon
+    Schedulded = auto()  # it's in the pipeline. Stand by for outcome.
+    Done = auto()  # grilled and done.
 
     def is_terminal(self):
         return self is ProcessingStatus.Done
 
 
 class JobOutcome(Enum):
-    NotYet = auto() # default
+    NotYet = auto()  # default
     Success = auto()
     Skipped = auto()
     Failed = auto()
@@ -32,9 +32,6 @@ class ShouldRun(Enum):
     def is_decided(self):
         return self in (ShouldRun.Yes, ShouldRun.No)
 
-    def almost_decided(self):
-        return self in (ShouldRun.Yes, ShouldRun.No, ShouldRun.IfInvalidated)
-
 
 class Action(Enum):
     Schedulde = auto()
@@ -45,14 +42,12 @@ class Action(Enum):
     RefreshValidationAndTryAgain = auto()
     ConditionalValidated = auto()
 
+
 class ValidationState(Enum):
     Unknown = auto()
     Validated = auto()
     Invalidated = auto()
     UpstreamFailed = auto()
-
-    def is_terminal(self):
-        return self != ValidationState.Unknown
 
 
 class JobKind(Enum):

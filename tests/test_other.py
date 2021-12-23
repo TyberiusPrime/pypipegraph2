@@ -583,3 +583,28 @@ def test_broken_case_from_delayeddataframe(ppg2_per_test):
     assert read('EVENT') == '1'
     assert read('EVENT2') == '1'
     assert read('ANNO_SEQUENCE') == '1'
+
+
+def test_strict_mode_two_jobs_same_id(ppg2_per_test):
+    ppg.new(run_mode=ppg.RunMode.CONSOLE)
+    assert ppg.global_pipegraph.run_mode.is_strict()
+    a = lambda of: None
+    ppg.FileGeneratingJob('a', a, depend_on_function=False)
+    ppg.FileGeneratingJob('a', a, depend_on_function=False)
+    # the testing is actually on the FunctionInvariant :(
+    ppg.FileGeneratingJob('a', a, depend_on_function=True)
+    with pytest.raises(ppg.JobRedefinitionError):
+        ppg.FileGeneratingJob('a', lambda of: of.write_text('h'), depend_on_function=True)
+
+
+def test_calling_function_difference():
+    def gen(x):
+        return lambda: x+5
+    a = gen(5)
+    b = gen(10)
+    r = ppg.FunctionInvariant.debug_function_differences(a,b)
+    assert 'The function closures differed.' in r
+    assert ppg.FunctionInvariant.debug_function_differences(None,None) == "No difference"
+
+
+

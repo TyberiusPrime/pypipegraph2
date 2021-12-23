@@ -99,12 +99,15 @@ class TestJobs:
 
     def test_dependency_callback_plus_job(self):
         data = []
+
         def load_a():
-            data.append('a')
-        a = ppg.DataLoadingJob('A', load_a)
-        b = lambda: ppg.FileGeneratingJob('B', lambda of: of.write_text('b'))
-        c = ppg.FileGeneratingJob('C', lambda of: 
-                of.write_text(Path('B').read_text() + data[0]))
+            data.append("a")
+
+        a = ppg.DataLoadingJob("A", load_a)
+        b = lambda: ppg.FileGeneratingJob("B", lambda of: of.write_text("b"))
+        c = ppg.FileGeneratingJob(
+            "C", lambda of: of.write_text(Path("B").read_text() + data[0])
+        )
         c.depends_on(b, a)
         ppg.run()
 
@@ -134,6 +137,24 @@ class TestJobs:
         assert read("B") == "1"
         assert read("A") == "1"
 
+    def test_returning_none(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
+        b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
+        c = ppg.DataLoadingJob("o", lambda: counter('c') and None)
+        b.depends_on(a)
+        a.depends_on_params("x")
+        a.depends_on(c)
+        b.depends_on(c)
+        ppg.run()
+        assert read("a") == "1"
+        assert read("b") == "1"
+        assert read("c") == "1"
+        a.depends_on_params("y")
+        ppg.run()
+        assert read("a") == "2"
+        assert read("c") == "2"
+        assert read("b") == "2"
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestJobs2:
@@ -1412,6 +1433,26 @@ class TestAttributeJob:
             o = Dummy()
             ppg.AttributeLoadingJob("load_dummy_shu", o, "a", "shu")
 
+    def test_returning_none(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        o = Dummy()
+        a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
+        b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
+        c = ppg.AttributeLoadingJob("o", o, "o", lambda: counter('c') and None)
+        b.depends_on(a)
+        a.depends_on_params("x")
+        a.depends_on(c)
+        b.depends_on(c)
+        ppg.run()
+        assert read("a") == "1"
+        assert read("b") == "1"
+        assert read("c") == "1"
+        a.depends_on_params("y")
+        ppg.run()
+        assert read("a") == "2"
+        assert read("c") == "2"
+        assert read("b") == "2"
+
 
 @pytest.mark.usefixtures("create_out_dir")
 @pytest.mark.usefixtures("ppg2_per_test")
@@ -1952,4 +1993,3 @@ class TestNoDotDotInJobIds:
             assert j.table.job_id in collector
             for job_id in collector:
                 assert not ".." in job_id
-

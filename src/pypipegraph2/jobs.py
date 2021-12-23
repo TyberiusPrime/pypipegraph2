@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from multiprocessing import Value
 import signal
 
 import time
@@ -108,9 +109,13 @@ def _safe_str(x):  # pragma: no cover
 class JobList(list):
     """Jobs.depends_on already takes any iterable of jobs.
     But sometimes you want to say [jobs,...].depends_on,
-    and this allows that"""
+    and this allows that.
 
-    def depends_on(self, *args, **kwargs):
+    For ppg1 compatibility
+
+    """
+
+    def depends_on(self, *args, **kwargs): # pragma: no cover
         for job in self:
             job.depends_on(*args, **kwargs)
 
@@ -1043,18 +1048,8 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
 
     def output_needed(
         self, runner
-    ):  # yeah yeah yeah the temp jobs need to delegate to their downstreams dude!
-        raise ValueError("unreachable")
-        for downstream_id in runner.dag.neighbors(self.job_id):
-            job = runner.jobs[downstream_id]
-            if job.output_needed(runner):
-                log_job_trace(
-                    f"Tempfile {self.job_id} said output needed because of {job.job_id}"
-                )
-                return True
-        log_job_trace("Tempfile {self.job_id} said no output needed")
-        return False
-
+    ):
+        raise NotImplementedError("unreachable")
 
 class TempFileGeneratingJob(
     MultiTempFileGeneratingJob
@@ -1129,54 +1124,19 @@ class _FileInvariantMixin:
         # the pro argument is basically, ppg1. compatibility.
         # the draw back is the complexity for the common case,
         # and the weakness of the md5 algorithm (can't easily upgrade though)
-        md5sum_path = Path(file.with_name(file.name + ".md5sum"))
-        if (
-            False and md5sum_path.exists()
-        ):  # I think it's a good idea no to rely on files produced by ppg1
-            new_stat = file.stat
-            st_md5 = os.stat(md5sum_path)
-            if stat.st_mtime == st_md5.st_mtime:
-                checksum = md5sum_path.read_text()
+  
+        if runner is not None:
+            if not hasattr(runner, "_hash_file_cache"):
+                runner._hash_file_cache = {}
+            if file in runner._hash_file_cache:
+                return runner._hash_file_cache[file]
             else:
-                checksum = self._md5_fallback(file)
-                with open(md5sum_path, "wb") as op:
-                    op.write(checksum.encode("utf-8"))
-                os.utime(md5sum_path, (stat.st_mtime, stat.st_mtime))
-
-            stat = file.stat()
-            return {
-                "hash": checksum,
-                "mtime": int(stat.st_mtime),
-                "size": stat.st_size,
-            }
+                h = hashers.hash_file(file)
+                runner._hash_file_cache[file] = h
+                return h
         else:
-            if runner is not None:
-                if not hasattr(runner, "_hash_file_cache"):
-                    runner._hash_file_cache = {}
-                if file in runner._hash_file_cache:
-                    return runner._hash_file_cache[file]
-                else:
-                    h = hashers.hash_file(file)
-                    runner._hash_file_cache[file] = h
-                    return h
-            else:
-                return hashers.hash_file(file)
+            return hashers.hash_file(file)
 
-    def _md5_fallback(self, filename):
-        import hashlib
-
-        file_size = filename.stat().st_size
-        if file_size > 200 * 1024 * 1024:  # pragma: no cover
-            print("Taking md5 of large file", filename)
-        with open(filename, "rb") as op:
-            block_size = 1024 ** 2 * 10
-            block = op.read(block_size)
-            _hash = hashlib.md5()
-            while block:
-                _hash.update(block)
-                block = op.read(block_size)
-            res = _hash.hexdigest()
-        return res
 
 
 class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
@@ -1585,7 +1545,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if match:
             line_no = int(match.group("line"))
             filename = match.group("file_name")
-        else:
+        else: # pragma: no cover - could use a test case, but uargh...
             first_doc_line = cython_func.__doc__.split("\n")[0]
             module_name = cython_func.__module__
             if not first_doc_line.startswith("File:"):
@@ -1796,7 +1756,7 @@ class ParameterInvariant(_InvariantMixin, Job):
         # If it's already a hash, we keep it that way
         #   return obj
         res = DeepHash(obj, hasher=hashers.hash_str)
-        if UNPROCESSED_KEY in res:
+        if UNPROCESSED_KEY in res: # pragma: no cover
             errs = []
             for k in res[UNPROCESSED_KEY]:
                 errs.append(k)
@@ -2003,6 +1963,9 @@ class AttributeLoadingJob(
     def run(self, _runner, historical_output):
         value = self.callback()
         if value is None:
+            log_warning(
+                f"AttributeLoadingJob {self.job_id} returned None - downstreams will be invalidated whenever this runs."
+            )
             try:
                 hash = historical_output.get(self.outputs[0], 0) + 1
             except TypeError:
@@ -2426,7 +2389,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
     def depends_on(self, *args, **kwargs):
         # make sure that we throw away the _target_folder if the dependency list changes.
-        if hasattr(self, "_target_folder"):
+        if hasattr(self, "_target_folder"): # pragma: no cover
             delattr(self, "_target_folder")
         return super().depends_on(*args, **kwargs)
 
@@ -2459,7 +2422,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         if (
             absolute_str_path.startswith("/project")
             and "ANYSNAKE2_PROJECT_DIR" in os.environ
-        ):
+        ): # pragma: no cover
             # I hate having to do this, but I can't see a cleaner way to actually implement it
             absolute_str_path = (
                 os.environ["ANYSNAKE2_PROJECT_DIR"]
@@ -2550,7 +2513,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             self._raise_partial_result_exception()
             # self._raise_partial_result_exception()
         missing = [x for x in fns if not x.exists()]
-        if missing:
+        if missing: # pragma: no cover - defensive
             raise ValueError(
                 "missing output files - did somebody go and delete them?!", missing
             )

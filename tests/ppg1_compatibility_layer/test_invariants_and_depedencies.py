@@ -981,9 +981,12 @@ class TestFunctionInvariant:
             def __init__(self, letter):
                 self.letter = letter
 
+            def write(self, of):
+                append("out/" + self.letter, "A")
+
             def get_job(self):
                 job = ppg.FileGeneratingJob(
-                    "out/" + self.letter, lambda: append("out/" + self.letter, "A")
+                    "out/" + self.letter, self.write
                 )
                 job.depends_on(ppg.FunctionInvariant("shu.sha", self.sha))
                 return job
