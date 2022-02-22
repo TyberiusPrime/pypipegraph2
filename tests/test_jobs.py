@@ -125,6 +125,8 @@ class TestJobs:
             ofs[1].write_text("c" + read("a1"))
 
         bc = ppg.MultiFileGeneratingJob(["b", "c"], write)
+        assert bc[0] == Path('b')
+        assert bc[1] == Path('c')
         bc.depends_on(a)
         bc()
         assert read("c") == "ca1"

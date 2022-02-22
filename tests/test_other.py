@@ -605,6 +605,8 @@ def test_calling_function_difference():
     r = ppg.FunctionInvariant.debug_function_differences(a,b)
     assert 'The function closures differed.' in r
     assert ppg.FunctionInvariant.debug_function_differences(None,None) == "No difference"
+    assert ppg.FunctionInvariant.debug_function_differences(gen,gen) == "The functions were identical"
+
 
 
 

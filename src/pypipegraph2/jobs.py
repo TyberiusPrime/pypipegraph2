@@ -115,7 +115,7 @@ class JobList(list):
 
     """
 
-    def depends_on(self, *args, **kwargs): # pragma: no cover
+    def depends_on(self, *args, **kwargs):  # pragma: no cover
         for job in self:
             job.depends_on(*args, **kwargs)
 
@@ -339,8 +339,8 @@ class Job:
         self.depends_on(job)
         return DependsOnInvariant(job, self)
 
-    def depends_on_params(self, params):
-        job = ParameterInvariant(self.job_id, params)
+    def depends_on_params(self, params, job_name_postfix=""):
+        job = ParameterInvariant(self.job_id + job_name_postfix, params)
         self.depends_on(job)
         return DependsOnInvariant(job, self)
 
@@ -407,17 +407,19 @@ class Job:
         gg = global_pipegraph
         return [gg.jobs[job_id] for job_id in gg.job_dag.predecessors(self.job_id)]
 
-    @property
-    def depth(self):
-        if self.job_kind is JobKind.Cleanup:
-            return self.parent_job.depth + 1
-        upstreams = self.upstreams
-        if upstreams:
-            return 1 + max((upstream_job.depth for upstream_job in upstreams))
-        else:
-            return 1
+    # @property
+    # def depth(self):
+    # if self.job_kind is JobKind.Cleanup:
+    # return self.parent_job.depth + 1
+    # upstreams = self.upstreams
+    # if upstreams:
+    # return 1 + max((upstream_job.depth for upstream_job in upstreams))
+    # else:
+    # return 1
 
-    def dump_subgraph_for_debug(self, job_ids=None, jobs=None, dag=None):
+    def dump_subgraph_for_debug(
+        self, job_ids=None, jobs=None, dag=None
+    ):  # pragma: no cover
         """Take every job leading up to this job
         and write a mock dependency graph to
         subgraph_debug.py
@@ -652,8 +654,8 @@ class MultiFileGeneratingJob(Job):
         if self.depend_on_function:
             self._handle_function_dependency(self.generating_function)
 
-    def callback(self):
-        self.generating_function(*self.get_input())
+    # def callback(self):
+    # self.generating_function(*self.get_input())
 
     def run(self, runner, historical_output):  # noqa:C901
         self.files = [self._map_filename(fn) for fn in self.org_files]
@@ -704,6 +706,7 @@ class MultiFileGeneratingJob(Job):
                 # at least one file was missing
                 log_trace(f"unlinking {fn}")
                 fn.unlink()
+                del_counter += 1
                 all_present = False
             else:
                 all_present = False
@@ -928,7 +931,7 @@ class MultiFileGeneratingJob(Job):
             stdout_text = stdout.read()
             try:
                 stdout.close()
-            except FileNotFoundError:
+            except FileNotFoundError:  # pragma: no cover
                 pass
         except ValueError as e:  # pragma: no cover - defensive
             if "I/O operation on closed file" in str(e):
@@ -943,7 +946,7 @@ class MultiFileGeneratingJob(Job):
             stderr_text = stderr.read()
             try:
                 stderr.close()
-            except FileNotFoundError:
+            except FileNotFoundError:  # pragma: no cover
                 pass
         except ValueError as e:  # pragma: no cover - defensive
             if "I/O operation on closed file" in str(e):
@@ -1046,10 +1049,9 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
 
         self.cleanup_job_class = _FileCleanupJob
 
-    def output_needed(
-        self, runner
-    ):
-        raise NotImplementedError("unreachable")
+    def output_needed(self, runner):
+        raise NotImplementedError("unreachable")  # pragma: no cover
+
 
 class TempFileGeneratingJob(
     MultiTempFileGeneratingJob
@@ -1124,7 +1126,7 @@ class _FileInvariantMixin:
         # the pro argument is basically, ppg1. compatibility.
         # the draw back is the complexity for the common case,
         # and the weakness of the md5 algorithm (can't easily upgrade though)
-  
+
         if runner is not None:
             if not hasattr(runner, "_hash_file_cache"):
                 runner._hash_file_cache = {}
@@ -1136,7 +1138,6 @@ class _FileInvariantMixin:
                 return h
         else:
             return hashers.hash_file(file)
-
 
 
 class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
@@ -1307,7 +1308,10 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             if function.__doc__:
                 for prefix in ['"""', "'''", '"', "'"]:
                     if prefix + function.__doc__ + prefix in source:
-                        source = source.replace(prefix + function.__doc__ + prefix, "",)
+                        source = source.replace(
+                            prefix + function.__doc__ + prefix,
+                            "",
+                        )
 
             global_pipegraph.func_cache[key] = source
         return source
@@ -1371,14 +1375,14 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                         in_a += f"\t{id(xc)} {type(xc) }{_safe_str(xc)[:40]}\n"
                         try:
                             set_a.add(xc)
-                        except:
+                        except:  # pragma: no cover
                             pass
                     for x in b.__closure__:
                         xc = x.cell_contents
                         in_b += f"\t{id(xc)} {type(xc)} {_safe_str(xc)[:40]}\n"
                         try:
                             set_b.add(xc)
-                        except:
+                        except:  # pragma: no cover
                             pass
                     only_in_a = sorted(_safe_str(xc) for xc in set_a.difference(set_b))
                     only_in_b = sorted(_safe_str(xc) for xc in set_b.difference(set_a))
@@ -1386,7 +1390,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                     return f"The function closures differed. Contents:: \n{in_a} \n {in_b}\n Only in a {only_in_a}\nOnly in b {only_in_b}"
                 else:
                     return "The functions were identical"
-            else:
+            else:  # pragma: no cover
                 return "Could not get code & closure on both functions"
         else:
             return "Could not get code & closure on both functions"
@@ -1545,7 +1549,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if match:
             line_no = int(match.group("line"))
             filename = match.group("file_name")
-        else: # pragma: no cover - could use a test case, but uargh...
+        else:  # pragma: no cover - could use a test case, but uargh...
             first_doc_line = cython_func.__doc__.split("\n")[0]
             module_name = cython_func.__module__
             if not first_doc_line.startswith("File:"):
@@ -1756,7 +1760,7 @@ class ParameterInvariant(_InvariantMixin, Job):
         # If it's already a hash, we keep it that way
         #   return obj
         res = DeepHash(obj, hasher=hashers.hash_str)
-        if UNPROCESSED_KEY in res: # pragma: no cover
+        if UNPROCESSED_KEY in res:  # pragma: no cover
             errs = []
             for k in res[UNPROCESSED_KEY]:
                 errs.append(k)
@@ -1851,7 +1855,7 @@ class DataLoadingJob(Job):
             )
             try:
                 my_hash = historical_output.get(self.outputs[0], 0) + 1
-            except TypeError:
+            except TypeError:  # pragma: no cover
                 my_hash = 0  # start over. Historical can't have been 0
             # so the downstream get's invalidated when ever this runs. This is a safe,
             # but potentially wasteful
@@ -1900,7 +1904,9 @@ def CachedDataLoadingJob(
     )
 
     load_job = DataLoadingJob(
-        "load_" + cache_job.job_id, load, depend_on_function=depend_on_function,
+        "load_" + cache_job.job_id,
+        load,
+        depend_on_function=depend_on_function,
     )
     load_job.depends_on(cache_job)
     # do this after you have sucessfully created both jobs
@@ -1968,7 +1974,7 @@ class AttributeLoadingJob(
             )
             try:
                 hash = historical_output.get(self.outputs[0], 0) + 1
-            except TypeError:
+            except TypeError:  # pragma: no cover
                 hash = 0
         else:
             value, hash = _hash_object(value)
@@ -2178,8 +2184,7 @@ def PlotJob(  # noqa:C901
         output_filename, do_plot, depend_on_function=depend_on_function
     )
     output_filename = plot_job.files[0]  # that's resolved!
-    param_job = ParameterInvariant(output_filename, render_args)
-    plot_job.depends_on(param_job)
+    plot_job.depends_on_params(render_args, "_render")
 
     def _call_result():
         if not hasattr(plot_job, "data_"):
@@ -2389,7 +2394,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
     def depends_on(self, *args, **kwargs):
         # make sure that we throw away the _target_folder if the dependency list changes.
-        if hasattr(self, "_target_folder"): # pragma: no cover
+        if hasattr(self, "_target_folder"):  # pragma: no cover
             delattr(self, "_target_folder")
         return super().depends_on(*args, **kwargs)
 
@@ -2399,7 +2404,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             func, "wrapped_function"
         ):  # the actual function is just an adaptor, ignore it for the wrapped function
             # e.g. FileGeneratingJob ppg1 compatibility with 'no-output-filename parameter'.
-            func = func.wrapped_function
+            func = func.wrapped_function  # pragma: no cover
             # log_debug(f"Falling back to wrapped function {self.job_id}")
         func_invariant = FunctionInvariant(func, self.job_id)
         self.func_invariant = func_invariant  # we only store it so ppg1.compatibility ignore_code_changes can prune it
@@ -2422,7 +2427,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         if (
             absolute_str_path.startswith("/project")
             and "ANYSNAKE2_PROJECT_DIR" in os.environ
-        ): # pragma: no cover
+        ):  # pragma: no cover
             # I hate having to do this, but I can't see a cleaner way to actually implement it
             absolute_str_path = (
                 os.environ["ANYSNAKE2_PROJECT_DIR"]
@@ -2513,7 +2518,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             self._raise_partial_result_exception()
             # self._raise_partial_result_exception()
         missing = [x for x in fns if not x.exists()]
-        if missing: # pragma: no cover - defensive
+        if missing:  # pragma: no cover - defensive
             raise ValueError(
                 "missing output files - did somebody go and delete them?!", missing
             )
