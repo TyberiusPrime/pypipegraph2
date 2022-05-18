@@ -288,7 +288,7 @@ class Job:
                     raise KeyError(
                         f"Dependency specified via job_id {repr(other_job)}. No such job found"
                     )
-                o_inputs = [other_job]
+                o_inputs = [other_job] # that's actually the filenames!
             if o_job.job_id == self.job_id:
                 raise exceptions.NotADag("Job can not depend on itself")
             if global_pipegraph.has_edge(self, o_job):

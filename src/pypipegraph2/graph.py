@@ -266,6 +266,8 @@ class PyPipeGraph:
             self.last_run_result = final_result
             if raise_on_job_error and self.do_raise and not self._restart_afterwards:
                 raise exceptions.JobsFailed("At least one job failed", self.do_raise)
+            elif not raise_on_job_error and self.do_raise:
+                log_error("At least one job failed")
             if aborted:
                 raise KeyboardInterrupt("Run aborted") # pragma: no cover
             ok = True

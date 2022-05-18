@@ -30,7 +30,7 @@ ljt = log_job_trace
 
 
 ExitNow = "___!!!ExitNow!!___"
-#class ExitNow:
+# class ExitNow:
 #   """Token for leave-this-thread-now-signal"""
 
 #   pass
@@ -104,7 +104,9 @@ class Runner:
             for job_id, job in self.jobs.items():
                 # log_job_trace(f"{job_id} {type(self.jobs[job_id])}")
                 if job.job_number in job_numbers:
-                    raise ValueError("Duplicate job_number", job.job_number, job_id,job)
+                    raise ValueError(
+                        "Duplicate job_number", job.job_number, job_id, job
+                    )
                 job_numbers.add(job.job_number)
             assert len(job_numbers) == len(self.jobs)
             if len(self.jobs) - len(self.pruned) != len(self.dag):
@@ -131,13 +133,15 @@ class Runner:
                     f"Not a directed *acyclic* graph after modification. See {error_fn}. Cycles between {cycles}"
                 )
 
-            for topo_order_number, job_id in enumerate(networkx.algorithms.dag.topological_sort(
-                self.dag
-            )):  # must be topological so we can do upstreams whilst building
+            for topo_order_number, job_id in enumerate(
+                networkx.algorithms.dag.topological_sort(self.dag)
+            ):  # must be topological so we can do upstreams whilst building
                 historical_input, historical_output = history.get(
                     job_id, ({}, {})
                 )  # todo: support renaming jobs.
-                s = JobStatus(job_id, self, historical_input, historical_output, topo_order_number)
+                s = JobStatus(
+                    job_id, self, historical_input, historical_output, topo_order_number
+                )
                 log_trace(
                     f"Loaded history for {job_id} in: {len(s.historical_input)}, out: {len(s.historical_output)}"
                 )
@@ -149,8 +153,9 @@ class Runner:
             self.jobs_that_need_propagation = deque()
             if jobs_do_dump_subgraph_debug:
                 j1 = self.jobs[list(jobs_do_dump_subgraph_debug)[0]]
-                j1.dump_subgraph_for_debug(jobs_do_dump_subgraph_debug, self.jobs, self.dag)
-
+                j1.dump_subgraph_for_debug(
+                    jobs_do_dump_subgraph_debug, self.jobs, self.dag
+                )
 
     def _apply_pruning(self, dag, focus_on_these_jobs, jobs_already_run_previously):
         def _recurse_pruning(job_id, reason):
@@ -256,8 +261,11 @@ class Runner:
                 job.job_id, ({}, {})
             )  # todo: support renaming jobs.
             self.job_states[job.job_id] = JobStatus(
-                job.job_id, self, historical_input, historical_output, 
-                topo_order_number=-1
+                job.job_id,
+                self,
+                historical_input,
+                historical_output,
+                topo_order_number=-1,
             )
             # no need to do the downstream calls - this is just an ignored job
             self.job_states[job.job_id].proc_state = ProcessingStatus.Done
@@ -426,9 +434,9 @@ class Runner:
                                     ),
                                 )  # which will in turn upstream fail all downstreams
                             else:
-                                #log_job_trace(
-                                    #f"{check_job_id} priority {check_job.que_priority}"
-                                #)
+                                # log_job_trace(
+                                # f"{check_job_id} priority {check_job.que_priority}"
+                                # )
                                 self.jobs_to_run_que.put(
                                     (check_job.que_priority, check_job_id)
                                 )
@@ -468,7 +476,10 @@ class Runner:
                         # ok, a coding error has lead to us not finishing
                         # the todo graph.
                         for job_id in self.job_states:
-                            if self.job_states[job_id].proc_state != ProcessingStatus.Done:
+                            if (
+                                self.job_states[job_id].proc_state
+                                != ProcessingStatus.Done
+                            ):
                                 log_warning(
                                     f"{job_id}, {self.job_states[job_id].proc_state} {self.jobs[job_id].depth}"
                                 )
@@ -536,13 +547,15 @@ class Runner:
 
             if hasattr(self, "_status"):
                 self._status.stop()
-            log_info("interactive stop")
+            # log_info("interactive stop")
             self._interactive_stop()
 
         for job_id in self.pruned:
             ljt(f"Logging as pruned {job_id}")
             assert not job_id in self.job_states
-            self.job_states[job_id] = JobStatus(job_id, self, None, None, topo_order_number=-1)
+            self.job_states[job_id] = JobStatus(
+                job_id, self, None, None, topo_order_number=-1
+            )
             self.job_states[job_id].was_pruned()
 
         if len(global_pipegraph.jobs) != job_count and not self.aborted:
@@ -701,16 +714,29 @@ class Runner:
                             "JobCanceled outside of stopped/aborted state?!"
                         )
                 # log error to file. Todo: move to job_state
-                if hasattr(job_state.error.args[1], "stacks"):
-                    stacks = job_state.error.args[1]
-                else:
-                    stacks = None
                 if self.job_graph.error_dir is not None:
                     error_file = (
                         self.job_graph.error_dir
                         / self.job_graph.time_str
                         / (str(job.job_number) + "_exception.txt")
                     )
+                else:
+                    error_file = None
+
+                if hasattr(job_state.error.args[1], "stacks"):
+                    stacks = job_state.error.args[1]
+                    log_info(
+                            f"\n{job_id}\n\t" + 
+                        escape_logging(
+                            stacks._format_rich_traceback_fallback(False, False)
+                        ).replace("\n", "\n\t") + "\n"
+                    )
+                else:
+                    stacks = None
+                    log(job_state.error)
+                    log("no stack available")
+
+                if self.job_graph.error_dir is not None:
                     with open(error_file, "w") as ef:
                         ef.write(f"JobId: {job_id}\n")
                         ef.write(f"Class: {job.__class__.__name__}\n")
@@ -744,16 +770,13 @@ class Runner:
                         ef.flush()
 
                     log(
-                        f"Failed after {job_state.run_time:.2}s: {job_id}. Exception (incl. locals, stdout and stderr) logged to {error_file}"
+                            f"\n\tMore details (stdout, locals) in {error_file}\n"
+                            f"\tFailed after {job_state.run_time:.2}s.\n"
+                            f"\t{job_id}\n"
                     )
                 else:
                     log(f"Failed job: {job_id}")
-                if stacks is not None:
-                    log(escape_logging(stacks._format_rich_traceback_fallback(False)))
-                else:
-                    log(job_state.error)
-                    log("no stack available")
-
+         
             except Exception as e:
                 log_error(
                     f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed."
@@ -807,7 +830,7 @@ class Runner:
             while not self.stopped:
                 _que_priority, job_id = self.jobs_to_run_que.get()
                 self.jobs_in_flight.append(job_id)
-                #log_job_trace(f"Executing thread, got {job_id}")
+                # log_job_trace(f"Executing thread, got {job_id}")
                 if job_id is ExitNow:
                     break
                 job = self.jobs[job_id]
