@@ -77,9 +77,17 @@ def _dedup_job(cls, job_id):
     if global_pipegraph.run_mode.is_strict() and job_id in global_pipegraph.jobs:
         j = global_pipegraph.jobs[job_id]
         if type(j) != cls:
-            raise exceptions.JobRedefinitionError(
-                f"Redefining job {job_id} with different type - prohibited by RunMode. Was {type(j)}, wants to be {cls}"
-            )
+            if (
+                str(cls) == "<class 'pypipegraph2.ppg1_compatibility.FileInvariant'>"
+            ) and (str(type(j)) == "<class 'pypipegraph2.jobs.FileInvariant'>"):
+                # going this way should be save, the compat. class
+                # can do everything the regular one can.
+                # but the other way around is not necessarily safe
+                pass  #
+            else:
+                raise exceptions.JobRedefinitionError(
+                    f"Redefining job {job_id} with different type - prohibited by RunMode. Was {type(j)}, wants to be {cls}"
+                )
         return global_pipegraph.jobs[job_id]
     else:
         return object.__new__(cls)
@@ -288,7 +296,7 @@ class Job:
                     raise KeyError(
                         f"Dependency specified via job_id {repr(other_job)}. No such job found"
                     )
-                o_inputs = [other_job] # that's actually the filenames!
+                o_inputs = [other_job]  # that's actually the filenames!
             if o_job.job_id == self.job_id:
                 raise exceptions.NotADag("Job can not depend on itself")
             if global_pipegraph.has_edge(self, o_job):

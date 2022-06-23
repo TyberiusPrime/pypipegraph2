@@ -25,6 +25,9 @@ from .util import log_info, log_error, log_warning, log_debug, log_trace, log_jo
 import copy
 from .job_status import JobStatus
 from collections import deque
+import signal
+import psutil
+import subprocess
 
 ljt = log_job_trace
 
@@ -358,6 +361,7 @@ class Runner:
         self.last_job_states = last_job_states
 
         self.events = queue.Queue()
+        children_before_run = self.get_children_processes()
 
         todo = len(self.dag)
         log_job_trace("here we go")
@@ -518,6 +522,7 @@ class Runner:
                 self.aborted
             ):  # it might have gotten set by an 'abort' following a stop in the meantim!
                 # log_job_tarce(f"No of threads when aborting {len(self.threads)}")
+                children_after_abort = self.get_children_processes()
                 for t in self.threads:
                     log_job_trace(
                         f"Asking thread {t.ident} to terminate at next Python call {time.time() - self.abort_time}"
@@ -533,6 +538,20 @@ class Runner:
                 self.jobs_to_run_que.put((0, ExitNow))
             for t in self.threads:
                 t.join()
+            if self.aborted:
+                children_to_reap = [
+                    x for x in children_after_abort if not x in children_before_run
+                ]
+                if children_to_reap:
+                    for p in children_to_reap:
+                        try:
+                            log_info(f"Abort: Having to terminate/kill child processes {p.pid} {p.name()}")
+                            p.terminate()
+                        except psutil.NoSuchProcess:
+                            pass
+                    gone, alive = psutil.wait_procs(children_to_reap, timeout=2)
+                    for p in alive:
+                        p.kill()
             # log_job_trace("Joined threads")
             # now capture straglers
             # todo: replace this with something guranteed to work.
@@ -569,6 +588,11 @@ class Runner:
         log_trace("Left runner.run()")
 
         return self.job_states
+
+    def get_children_processes(self):
+        current_process = psutil.Process()
+        children = current_process.children(recursive=True)
+        return children
 
     def _interactive_start(self):
         """Activate the interactive thread"""
@@ -726,10 +750,11 @@ class Runner:
                 if hasattr(job_state.error.args[1], "stacks"):
                     stacks = job_state.error.args[1]
                     log_info(
-                            f"\n{job_id}\n\t" + 
-                        escape_logging(
+                        f"\n{job_id}\n\t"
+                        + escape_logging(
                             stacks._format_rich_traceback_fallback(False, False)
-                        ).replace("\n", "\n\t") + "\n"
+                        ).replace("\n", "\n\t")
+                        + "\n"
                     )
                 else:
                     stacks = None
@@ -770,13 +795,13 @@ class Runner:
                         ef.flush()
 
                     log(
-                            f"\n\tMore details (stdout, locals) in {error_file}\n"
-                            f"\tFailed after {job_state.run_time:.2}s.\n"
-                            f"\t{job_id}\n"
+                        f"\n\tMore details (stdout, locals) in {error_file}\n"
+                        f"\tFailed after {job_state.run_time:.2}s.\n"
+                        f"\t{job_id}\n"
                     )
                 else:
                     log(f"Failed job: {job_id}")
-         
+
             except Exception as e:
                 log_error(
                     f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed."
