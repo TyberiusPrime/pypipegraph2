@@ -459,45 +459,47 @@ class Job:
                 nodes.append(f"# debugged job {j.job_id}")
             if isinstance(j, ppg.FileInvariant):
                 nodes.append(f"Path('{counter[0]}').write_text('A')")
-                nodes.append(f"job_{counter[0]} = ppg.FileInvariant('{counter[0]}')")
+                nodes.append(f"job_{counter[0]} = ppg.FileInvariant('{counter[0]}') #{j.job_id}")
             elif isinstance(j, ppg.ParameterInvariant):
                 nodes.append(
-                    f"job_{counter[0]} = ppg.ParameterInvariant('{counter[0]}', 55)"
+                    f"job_{counter[0]} = ppg.ParameterInvariant('{counter[0]}', 55) #{j.job_id}"
                 )
             elif isinstance(j, ppg.FunctionInvariant):
                 nodes.append(
-                    f"job_{counter[0]} = ppg.FunctionInvariant('{counter[0]}', lambda: 55)"
+                    f"job_{counter[0]} = ppg.FunctionInvariant('{counter[0]}', lambda: 55) #{j.job_id}"
                 )
             elif isinstance(j, ppg.SharedMultiFileGeneratingJob):
                 nodes.append(
-                    f"job_{counter[0]} = ppg.SharedMultiFileGeneratingJob('{counter[0]}', {[x.name for x in j.files]!r}, dummy_smfg, depend_on_function=False)"
+                    f"job_{counter[0]} = ppg.SharedMultiFileGeneratingJob('{counter[0]}', {[x.name for x in j.files]!r}, dummy_smfg, depend_on_function=False) #{j.job_id}"
                 )
             elif isinstance(j, ppg.TempFileGeneratingJob):
                 nodes.append(
-                    f"job_{counter[0]} = ppg.TempFileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False)"
+                    f"job_{counter[0]} = ppg.TempFileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False) #{j.job_id}"
                 )
             elif isinstance(j, ppg.FileGeneratingJob):
                 nodes.append(
-                    f"job_{counter[0]} = ppg.FileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False)"
+                    f"job_{counter[0]} = ppg.FileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False) #{j.job_id}"
                 )
             elif isinstance(j, ppg.MultiTempFileGeneratingJob):
                 files = [counter[0] + "/" + x.name for x in j.files]
                 nodes.append(
-                    f"job_{counter[0]} = ppg.MultiTempFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
+                    f"job_{counter[0]} = ppg.MultiTempFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False) #{j.job_id}"
                 )
             elif isinstance(j, ppg.MultiFileGeneratingJob):
                 files = [str(counter[0]) + "/" + x.name for x in j.files]
                 nodes.append(
-                    f"job_{counter[0]} = ppg.MultiFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False)"
+                    f"job_{counter[0]} = ppg.MultiFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False) #{j.job_id}"
                 )
             elif isinstance(j, ppg.DataLoadingJob):
                 nodes.append(
-                    f"job_{counter[0]} = ppg.DataLoadingJob('{counter[0]}', lambda: 35, depend_on_function=False)"
+                    f"job_{counter[0]} = ppg.DataLoadingJob('{counter[0]}', lambda: 35, depend_on_function=False) #{j.job_id}"
                 )
             elif isinstance(j, ppg.AttributeLoadingJob):
                 nodes.append(
-                    f"job_{counter[0]} = ppg.AttributeLoadingJob('{counter[0]}', DummyObject(), 'attr_{counter[0]}', lambda: None, depend_on_function=False)"
+                    f"job_{counter[0]} = ppg.AttributeLoadingJob('{counter[0]}', DummyObject(), 'attr_{counter[0]}', lambda: None, depend_on_function=False) #{j.job_id}"
                 )
+            elif isinstance(j, _FileCleanupJob):
+                pass # they will get auto generated
             else:
                 raise ValueError(j)
             node_to_counters[node] = counter[0]

@@ -278,9 +278,13 @@ class JobStatus:
                 f"{self.job_id} post validation update {self.should_run}, {self.validation_state} -> {action}"
             )
         elif action == Action.TakeFromParent:
-            self.should_run = self.runner.job_states[
+            sr = self.runner.job_states[
                 self.job.parent_job.job_id
             ].should_run
+            if sr == ShouldRun.IfDownstreamNeedsMe:
+                pass
+            else:
+                self.should_run = sr
             action = action_map[self.should_run, self.validation_state]
             ljt(
                 f"{self.job_id} post take from parent {self.should_run}, {self.validation_state} -> {action}"
@@ -351,6 +355,10 @@ class JobStatus:
             ]
         elif action == Action.RefreshValidationAndTryAgain:
             return []  # validation only changes when jobs actually finish
+        elif action == Action.TakeFromParent:
+            # not ready to be schedulded -
+            # parent was IfDownstreamNeedsMe, so we do not know whether this conditional job should run yet
+            return []  
 
         if action == Action.Schedulde:
             # ljt(

@@ -26,8 +26,15 @@ def dummy_fg(of):
     of.write_text("fg")
 
 
+def dummy_fg_raising(of):
+    of.parent.mkdir(exist_ok=True, parents=True)
+    raise ValueError()
+    of.write_text("fg")
+
+
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestsFromTheField:
+
     def test_issue_20210726a(self, job_trace_log):
         """This uncovered a depth first vs breadth first invalidation proagation bug.
         Created with Job_Status.dump_subgraph_for_debug and then heavily pruned
@@ -46,7 +53,9 @@ class TestsFromTheField:
 
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+                ppg.global_pipegraph.jobs[a].depends_on(
+                    ppg.global_pipegraph.jobs[b]
+                )
             else:
                 print("unused edge", a, b)
 
@@ -83,12 +92,18 @@ class TestsFromTheField:
         job_15 = ppg.FunctionInvariant("15", lambda: 55)
         job_16 = ppg.ParameterInvariant("16", 55)
         job_17 = ppg.SharedMultiFileGeneratingJob(
-            "17", ["cdna.fasta", "cdna.fasta.fai"], dummy_smfg, depend_on_function=False
+            "17",
+            ["cdna.fasta", "cdna.fasta.fai"],
+            dummy_smfg,
+            depend_on_function=False,
         )
         job_18 = ppg.FunctionInvariant("18", lambda: 55)
         job_19 = ppg.ParameterInvariant("19", 55)
         job_20 = ppg.SharedMultiFileGeneratingJob(
-            "20", ["pep.fasta", "pep.fasta.fai"], dummy_smfg, depend_on_function=False
+            "20",
+            ["pep.fasta", "pep.fasta.fai"],
+            dummy_smfg,
+            depend_on_function=False,
         )
         job_21 = ppg.FunctionInvariant("21", lambda: 55)
         job_22 = ppg.ParameterInvariant("22", 55)
@@ -185,7 +200,9 @@ class TestsFromTheField:
         job_80 = ppg.FileGeneratingJob("80", dummy_fg, depend_on_function=False)
         job_81 = ppg.FileGeneratingJob("81", dummy_fg, depend_on_function=False)
         job_82 = ppg.MultiFileGeneratingJob(
-            ["82/Cont-1.bam", "82/sentinel.txt"], dummy_mfg, depend_on_function=False
+            ["82/Cont-1.bam", "82/sentinel.txt"],
+            dummy_mfg,
+            depend_on_function=False,
         )
         job_83 = ppg.TempFileGeneratingJob("83", dummy_fg, depend_on_function=False)
         Path("84").write_text("A")
@@ -1386,7 +1403,9 @@ class TestsFromTheField:
         edges.append(("2", "109"))
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+                ppg.global_pipegraph.jobs[a].depends_on(
+                    ppg.global_pipegraph.jobs[b]
+                )
 
         ppg.run()
         ppg.run()
@@ -1448,7 +1467,9 @@ class TestsFromTheField:
         edges.append(("2", "109"))
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+                ppg.global_pipegraph.jobs[a].depends_on(
+                    ppg.global_pipegraph.jobs[b]
+                )
 
         ppg.run()
         ppg.run()
@@ -1463,13 +1484,19 @@ class TestsFromTheField:
             job_1 = ppg.DataLoadingJob("1", lambda: 55, depend_on_function=False)
             jobs_by_no["1"] = job_1
 
-            job_530 = ppg.DataLoadingJob("530", lambda: 55, depend_on_function=False)
+            job_530 = ppg.DataLoadingJob(
+                "530", lambda: 55, depend_on_function=False
+            )
             jobs_by_no["530"] = job_530
 
-            job_541 = ppg.DataLoadingJob("541", lambda: 55, depend_on_function=False)
+            job_541 = ppg.DataLoadingJob(
+                "541", lambda: 55, depend_on_function=False
+            )
             jobs_by_no["541"] = job_541
 
-            job_542 = ppg.FileGeneratingJob("542", dummy_fg, depend_on_function=False)
+            job_542 = ppg.FileGeneratingJob(
+                "542", dummy_fg, depend_on_function=False
+            )
             jobs_by_no["542"] = job_542
 
             edges = [
@@ -1566,7 +1593,9 @@ class TestsFromTheField:
 
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+                ppg.global_pipegraph.jobs[a].depends_on(
+                    ppg.global_pipegraph.jobs[b]
+                )
 
         ppg.run()
         ppg.run()
@@ -1619,6 +1648,67 @@ class TestsFromTheField:
             ppg.global_pipegraph.last_run_result["661"].outcome
             == ppg.enums.JobOutcome.Skipped
         )
+
+    def test_cleanup_already_decided_to_skip_upstream_failed(self):
+        # debugged job CleanUp:cache/lanes/test/input.fastq
+        # this makes the TF run.
+        job_1 = ppg.FileGeneratingJob("1", dummy_fg, depend_on_function=False)
+        # this one introduceds a cleanup.
+        job_2 = ppg.TempFileGeneratingJob("2", dummy_fg, depend_on_function=False)
+
+        job_8 = ppg.FileGeneratingJob("8", dummy_fg, depend_on_function=False)
+
+        # this one we have fail in the second round
+        job_11 = ppg.FileGeneratingJob("11", dummy_fg, depend_on_function=True)
+
+        cjobs_by_no = {}
+        for k, v in locals().items():
+            if k.startswith("job_"):
+                no = k[k.find("_") + 1 :]
+                cjobs_by_no[no] = v
+        edges = []
+        ea = edges.append
+        ea(("1", "2"))
+        ea(("8", "11"))
+        ea(("8", "2"))
+        for (a, b) in edges:
+            if a in cjobs_by_no and b in cjobs_by_no:
+                cjobs_by_no[a].depends_on(cjobs_by_no[b])
+                # print(f"ea(('{a}', '{b}'))")
+
+        ppg.run()
+
+        # now make it fail
+        ppg.new() # log_level=6)
+        # as above
+        job_1 = ppg.FileGeneratingJob("1", dummy_fg, depend_on_function=False)
+        job_2 = ppg.TempFileGeneratingJob("2", dummy_fg, depend_on_function=False)
+        job_8 = ppg.FileGeneratingJob("8", dummy_fg, depend_on_function=False)
+
+        # make this one fail.
+        job_11 = ppg.FileGeneratingJob("11", dummy_fg_raising, depend_on_function=True)
+        for (a, b) in edges:
+            if a in cjobs_by_no and b in cjobs_by_no:
+                cjobs_by_no[a].depends_on(cjobs_by_no[b])
+
+        with pytest.raises(ppg.JobsFailed):
+            ppg.run()
+        assert (
+                ppg.global_pipegraph.last_run_result["11"].outcome
+                == ppg.enums.JobOutcome.Failed
+            )
+        assert (
+                ppg.global_pipegraph.last_run_result["2"].outcome
+                == ppg.enums.JobOutcome.Skipped
+            )
+        assert (
+                ppg.global_pipegraph.last_run_result["CleanUp:2"].outcome
+                == ppg.enums.JobOutcome.UpstreamFailed # 11 fails, which fails 8, which fails this cleanup
+            )
+
+
+
+        # and boom, job was marked done & skipped, but we now inform it it's upstream failed.
 
 
 def gen_20211221(func):

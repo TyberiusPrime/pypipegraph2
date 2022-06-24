@@ -664,7 +664,7 @@ class PyPipeGraph:
         j1 = self.jobs[jall[0]]
         j1.dump_subgraph_for_debug(jall)
 
-    def dump_subgraph_for_debug_at_run(self, jobs): # pragma: no cover
+    def dump_subgraph_for_debug_at_run(self, job_ids): # pragma: no cover
         """Write a subgraph_debug.py
         with a faked-out version of this graph.
         See Job.dump_subgraph_for_debug for details.
@@ -673,10 +673,10 @@ class PyPipeGraph:
         and so on have been assembled (ie. when run is called)
 
         """
-        if jobs:
-            jall = list(jobs)
+        if job_ids:
+            jall = list(job_ids)
         else:
             jall = list(self.jobs.keys())
-        j1 = self.jobs[jall[0]]
+        # j1 = self.jobs[jall[0]]
         # j1.dump_subgraph_for_debug(jall)
         self._jobs_do_dump_subgraph_debug = jall
