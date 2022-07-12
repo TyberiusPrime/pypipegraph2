@@ -674,7 +674,10 @@ class PyPipeGraph:
 
         """
         if job_ids:
-            jall = list(job_ids)
+            if isinstance(str, job_ids):
+                job_ids = [job_ids]
+            else:
+                jall = list(job_ids)
         else:
             jall = list(self.jobs.keys())
         # j1 = self.jobs[jall[0]]
