@@ -177,10 +177,15 @@ class JobStatus:
     def inform_conditional_upstreams_of_failure(self):
         for upstream_id in self.upstreams:
             if self.runner.jobs[upstream_id].is_conditional():
-                log_debug(
-                    f"failed {self.job_id} signaled to upstream {upstream_id} (a conditional job)"
-                )
-                self.runner.jobs_that_need_propagation.append(upstream_id)
+                if (
+                    self.runner.job_states[self.job_id].proc_state
+                    != ProcessingStatus.Done
+                ):
+                    # premature optimization? if not upstream_id in self.runner.jobs_that_need_propagation:
+                    log_debug(
+                        f"failed {self.job_id} signaled to upstream {upstream_id} (a conditional job) {self.runner.job_states[self.job_id].proc_state} {self.runner.job_states[self.job_id].outcome}"
+                    )
+                    self.runner.jobs_that_need_propagation.append(upstream_id)
 
         # -> job_became_terminal
 
@@ -202,14 +207,16 @@ class JobStatus:
             self.runner._push_event("JobUpstreamFailed", (self.job_id,))
         else:
             if not self.proc_state is ProcessingStatus.Done:
-                raise ValueError("BUG triggered, outcom and validation_state discrepancy")
+                raise ValueError(
+                    "BUG triggered, outcom and validation_state discrepancy"
+                )
 
             self.error += "\n" + msg  # multiple upstreams failed. Combine messages
 
     def update(self) -> bool:
-        #ljt(
-            #f"{self.job_id} update {self.update_counter} {self.should_run} {self.validation_state} {self.proc_state}"
-        #)
+        # ljt(
+        # f"{self.job_id} update {self.update_counter} {self.should_run} {self.validation_state} {self.proc_state}"
+        # )
         # a bit of bug defense spray...
         if (
             self.update_counter > len(self.runner.jobs) + 1
@@ -219,7 +226,7 @@ class JobStatus:
         if self.proc_state != ProcessingStatus.Waiting:
             # we only leave waiting once we have made a decision and are ready to run!
             # so we can short-circuit here
-            #ljt(f"update: {self.job_id} -> already decided and ready to run")
+            # ljt(f"update: {self.job_id} -> already decided and ready to run")
             return []
 
         # we don't have rusts exhaustive pattern matching.
@@ -278,9 +285,7 @@ class JobStatus:
                 f"{self.job_id} post validation update {self.should_run}, {self.validation_state} -> {action}"
             )
         elif action == Action.TakeFromParent:
-            sr = self.runner.job_states[
-                self.job.parent_job.job_id
-            ].should_run
+            sr = self.runner.job_states[self.job.parent_job.job_id].should_run
             if sr == ShouldRun.IfDownstreamNeedsMe:
                 pass
             else:
@@ -312,9 +317,12 @@ class JobStatus:
                     res.append(ds_id)
                 elif ds_job_state.should_run == ShouldRun.IfParentJobRan:
                     ds_no_count += 1
-                elif ds_job_state.should_run in (ShouldRun.Maybe,ShouldRun.IfDownstreamNeedsMe,):
+                elif ds_job_state.should_run in (
+                    ShouldRun.Maybe,
+                    ShouldRun.IfDownstreamNeedsMe,
+                ):
                     if ds_job_state.validation_state == ValidationState.UpstreamFailed:
-                        ds_no_count += 1 # but another upstream migth still need me.
+                        ds_no_count += 1  # but another upstream migth still need me.
                     else:
                         res.append(ds_id)
                 elif ds_job_state.should_run in (
@@ -358,7 +366,7 @@ class JobStatus:
         elif action == Action.TakeFromParent:
             # not ready to be schedulded -
             # parent was IfDownstreamNeedsMe, so we do not know whether this conditional job should run yet
-            return []  
+            return []
 
         if action == Action.Schedulde:
             # ljt(
@@ -519,7 +527,9 @@ class JobStatus:
                     job_state.should_run == ShouldRun.No
                     and job_state.proc_state == ProcessingStatus.Waiting
                 ):
-                    raise ValueError(f"shoulrun no, but proc_state waiting {job_state.job_id}")
+                    raise ValueError(
+                        f"shoulrun no, but proc_state waiting {job_state.job_id}"
+                    )
                 else:
                     ljt(
                         f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was not terminal {job_state.proc_state}"
@@ -527,23 +537,31 @@ class JobStatus:
                     return False
             return True
 
-        if not hasattr(self, "_largest_topo_all_upstreams_terminal_or_conditional_or_decided"):
+        if not hasattr(
+            self, "_largest_topo_all_upstreams_terminal_or_conditional_or_decided"
+        ):
             try:
-                self._largest_topo_all_upstreams_terminal_or_conditional_or_decided = self.runner.job_states[
-                    max(
-                        self.upstreams,
-                        key=lambda upstream_id: self.runner.job_states[
-                            upstream_id
-                        ].topo_order_number,
-                    )
-                ]
+                self._largest_topo_all_upstreams_terminal_or_conditional_or_decided = (
+                    self.runner.job_states[
+                        max(
+                            self.upstreams,
+                            key=lambda upstream_id: self.runner.job_states[
+                                upstream_id
+                            ].topo_order_number,
+                        )
+                    ]
+                )
             except ValueError:  # no upstreams
-                ljt(f"\t{self.job_id} all_upstreams_terminal_or_conditional_or_decided->True (no upstreams)")
+                ljt(
+                    f"\t{self.job_id} all_upstreams_terminal_or_conditional_or_decided->True (no upstreams)"
+                )
                 return True
 
-        if not is_ready(self._largest_topo_all_upstreams_terminal_or_conditional_or_decided):
+        if not is_ready(
+            self._largest_topo_all_upstreams_terminal_or_conditional_or_decided
+        ):
             return False
-        else: 
+        else:
             # latest by topography is ready. Are the others?
             not_yet_terminal = []
             for upstream_id in self.upstreams:
@@ -552,12 +570,17 @@ class JobStatus:
                     not_yet_terminal.append(s)
             if not_yet_terminal:
                 # no? ok, redefine the one we use as sentinel to be the last stared one in the remainder...
-                self._largest_topo_all_upstreams_terminal_or_conditional_or_decided = max(
-                    not_yet_terminal, key=lambda job_state: job_state.topo_order_number
+                self._largest_topo_all_upstreams_terminal_or_conditional_or_decided = (
+                    max(
+                        not_yet_terminal,
+                        key=lambda job_state: job_state.topo_order_number,
+                    )
                 )
                 return False
             else:
-                ljt(f"\t{self.job_id} all_upstreams_terminal_or_conditional_or_decided->True")
+                ljt(
+                    f"\t{self.job_id} all_upstreams_terminal_or_conditional_or_decided->True"
+                )
                 return True
 
     def _update_downstreams(self):
@@ -627,7 +650,7 @@ class JobStatus:
     def upstreams(self):
         yield from self.runner.dag.predecessors(self.job_id)
 
-    
+
 def _dict_values_count_hashed(a_dict, count_this):
     """Specialised 'how many times does this hash occur in this dict. For renamed inputs"""
     counter = 0
