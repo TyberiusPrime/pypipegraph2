@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-__version__ = '2.5.0'
+__version__ = "2.5.0"
 
 from pathlib import Path
 import logging
@@ -131,6 +131,7 @@ def run(
     raise_on_job_error=True,
     event_timeout=1,
     dump_graphml=None,
+    log_message=None,
 ):
     if global_pipegraph is None:
         raise ValueError("Must instantiate a pipegraph before you can run it.")
@@ -140,6 +141,7 @@ def run(
         raise_on_job_error=raise_on_job_error,
         event_timeout=event_timeout,
         dump_graphml=dump_graphml,
+        log_message=log_message,
     )
 
 

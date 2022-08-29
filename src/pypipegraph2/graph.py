@@ -123,6 +123,7 @@ class PyPipeGraph:
         raise_on_job_error=True,
         event_timeout=5,
         dump_graphml=False,
+        log_message=None,
     ) -> Dict[str, JobOutcome]:
         """Run the complete pypipegraph"""
         try:
@@ -132,6 +133,7 @@ class PyPipeGraph:
                 event_timeout,
                 None,
                 dump_graphml=dump_graphml,
+                log_message=log_message,
             )
         except JobsFailed as e:  # shorten the traceback considerably!
             raise JobsFailed(e.args[0], exceptions=e.exceptions)
@@ -143,6 +145,7 @@ class PyPipeGraph:
         event_timeout=5,
         focus_on_these_jobs=None,
         dump_graphml=False,
+        log_message=None,
     ) -> Dict[str, JobOutcome]:
         """Run the jobgraph - possibly focusing on a subset of jobs (ie. ignoring
         anything that's not necessary to calculate them - activated by calling a Job
@@ -210,6 +213,8 @@ class PyPipeGraph:
         self._restart_afterwards = False
         ok = False
         try:
+            if log_message:
+                logger.info(log_message)
             result = None
             self._install_signals()
             history = self._load_history()
@@ -269,7 +274,7 @@ class PyPipeGraph:
             elif not raise_on_job_error and self.do_raise:
                 log_error("At least one job failed")
             if aborted:
-                raise KeyboardInterrupt("Run aborted") # pragma: no cover
+                raise KeyboardInterrupt("Run aborted")  # pragma: no cover
             ok = True
             return final_result
         finally:
@@ -357,7 +362,10 @@ class PyPipeGraph:
         )
         new_history.update(
             {
-                job_id: (jr.updated_input, jr.updated_output,)
+                job_id: (
+                    jr.updated_input,
+                    jr.updated_output,
+                )
                 for job_id, jr in job_results.items()
                 if jr.outcome is not JobOutcome.Pruned
             }
@@ -534,18 +542,18 @@ class PyPipeGraph:
 
         def sigint(*args, **kwargs):
             if self.run_mode is (RunMode.CONSOLE):
-                if self._debug_allow_ctrl_c == "abort": # pragma: no cover
+                if self._debug_allow_ctrl_c == "abort":  # pragma: no cover
                     log_info("CTRL-C from debug - calling interactive abort")
                     self.runner.interactive._cmd_abort(
                         None
                     )  # for testing the abort facility.
-                elif self._debug_allow_ctrl_c == "stop": # pragma: no cover
+                elif self._debug_allow_ctrl_c == "stop":  # pragma: no cover
                     log_info("CTRL-C from debug - calling interactive stop")
                     self.runner.interactive._cmd_default()
                     self.runner.interactive._cmd_stop(
                         None
                     )  # for testing the abort facility.
-                elif self._debug_allow_ctrl_c == "stop&abort": # pragma: no cover
+                elif self._debug_allow_ctrl_c == "stop&abort":  # pragma: no cover
                     log_info("CTRL-C from debug - calling interactive stop")
                     self.runner.interactive._cmd_stop(
                         None
@@ -597,16 +605,15 @@ class PyPipeGraph:
         # we use job numbers during run
         # to keep output files unique etc.
 
-
         # this does not happen - jobs are deduped by job_id, and it's up to the job
         # to verify that it's not an invalid redefinition
-        #if job.job_id in self.jobs and self.jobs[job.job_id] is not job:
-            #if self.run_mode.is_strict():
-                #raise ValueError(
-                    #"Added new job in place of old not supported in run_mode == strict"
-                    #f"new job: {job} id: {id(job)}",
-                    #f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
-                #)
+        # if job.job_id in self.jobs and self.jobs[job.job_id] is not job:
+        # if self.run_mode.is_strict():
+        # raise ValueError(
+        # "Added new job in place of old not supported in run_mode == strict"
+        # f"new job: {job} id: {id(job)}",
+        # f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
+        # )
         if not self.running:  # one core., no locking
             job.job_number = self.next_job_number
             self.next_job_number += 1
@@ -653,7 +660,7 @@ class PyPipeGraph:
         """
         self._restart_afterwards = True  # pragma: no cover - todo: interactive
 
-    def dump_subgraph_for_debug(self, jobs): # pragma: no cover
+    def dump_subgraph_for_debug(self, jobs):  # pragma: no cover
         """Write a subgraph_debug.py
         with a faked-out version of this graph.
         See Job.dump_subgraph_for_debug for details"""
@@ -664,7 +671,7 @@ class PyPipeGraph:
         j1 = self.jobs[jall[0]]
         j1.dump_subgraph_for_debug(jall)
 
-    def dump_subgraph_for_debug_at_run(self, job_ids): # pragma: no cover
+    def dump_subgraph_for_debug_at_run(self, job_ids):  # pragma: no cover
         """Write a subgraph_debug.py
         with a faked-out version of this graph.
         See Job.dump_subgraph_for_debug for details.
@@ -674,7 +681,7 @@ class PyPipeGraph:
 
         """
         if job_ids:
-            if isinstance(str, job_ids):
+            if isinstance(job_ids, str):
                 job_ids = [job_ids]
             else:
                 jall = list(job_ids)
