@@ -485,7 +485,7 @@ class Runner:
                                 != ProcessingStatus.Done
                             ):
                                 log_warning(
-                                    f"{job_id}, {self.job_states[job_id].proc_state} {self.jobs[job_id].depth}"
+                                    f"{job_id}, {self.job_states[job_id].proc_state} {getattr(self.jobs[job_id], 'depth', -1)}"
                                 )
                         raise exceptions.RunFailedInternally
                     continue
