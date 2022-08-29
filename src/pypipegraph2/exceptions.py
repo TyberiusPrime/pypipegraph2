@@ -30,10 +30,10 @@ class JobContractError(PPGException):
 
 
     def __str__(self):
-        return str(msg)
+        return str(self.msg)
 
     def __repr__(self):
-        return repr(msg)
+        return repr(self.msg)
 
 
 class JobDied(PPGException):
