@@ -481,7 +481,7 @@ class Job:
                     f"job_{counter[0]} = ppg.FileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False) #{j.job_id}"
                 )
             elif isinstance(j, ppg.MultiTempFileGeneratingJob):
-                files = [counter[0] + "/" + x.name for x in j.files]
+                files = [str(counter[0]) + "/" + x.name for x in j.files]
                 nodes.append(
                     f"job_{counter[0]} = ppg.MultiTempFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False) #{j.job_id}"
                 )
@@ -920,8 +920,11 @@ class MultiFileGeneratingJob(Job):
             self.generating_function(*input)
         missing_files = [x for x in self.files if not x.exists()]
         if missing_files:
+            print('missing files')
+            for m in sorted(missing_files):
+                print(m)
             raise exceptions.JobContractError(
-                f"Job {self.job_id} did not create the following files: {[str(x) for x in missing_files]}"
+                f"Job {self.job_id} did not create the following files: {[str(x) for x in sorted(missing_files)]}"
             )
         if not self.empty_ok:
             empty_files = [x for x in self.files if x.stat().st_size == 0]
