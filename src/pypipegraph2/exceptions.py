@@ -25,7 +25,15 @@ class JobOutputConflict(ValueError):
 class JobContractError(PPGException):
     """A job did not do what it was supposed to do"""
 
-    pass
+    def __init__(self, msg):
+        self.msg = msg
+
+
+    def __str__(self):
+        return str(msg)
+
+    def __repr__(self):
+        return repr(msg)
 
 
 class JobDied(PPGException):
