@@ -177,7 +177,7 @@ class Util:
         if file_size > 200 * 1024 * 1024:  # pragma: no cover
             print("Taking md5 of large file", filename)
         with open(filename, "rb") as op:
-            block_size = 1024 ** 2 * 10
+            block_size = 1024**2 * 10
             block = op.read(block_size)
             _hash = hashlib.md5()
             while block:
@@ -287,11 +287,11 @@ def new_pipegraph(
     _add_graph_comp(res)
     return res
 
+
 def _add_graph_comp(graph):
     graph.cache_folder = graph.cache_dir  # ppg1 compatibility
     graph.rc = FakeRC()
     util.global_pipegraph = graph
-
 
 
 def run_pipegraph(*args, **kwargs):
@@ -304,15 +304,18 @@ def run_pipegraph(*args, **kwargs):
 def _ignore_code_changes(job):
     job.depend_on_function = False
     if hasattr(job, "func_invariant"):
-        log_job_trace(f"ignoring changes for {job.job_id}")
+        # log_job_trace(f"ignoring changes for {job.job_id}")
+        # whether the FunctionInvariant has further downstreams or not,
+        # remove the dependency of this job from it.
+        for k in job.func_invariant.outputs:
+            # log_job_trace(f"ignoring changes for {job.job_id} -{k}")
+            util.global_pipegraph.job_inputs[job.job_id].remove(k)
         util.global_pipegraph.job_dag.remove_edge(job.func_invariant.job_id, job.job_id)
 
-        if hasattr(job.func_invariant, 'usage_counter'):
-            job.func_invariant.usage_counter -= 1
-        if not hasattr(job.func_invariant, 'usage_counter') or job.func_invariant.usage_counter == 0:
+
+        if not job.func_invariant.downstreams: #FI is orphaned now.
+            # log_job_trace(f"ignoring changes for {job.job_id} -func id now orphan")
             util.global_pipegraph.job_dag.remove_node(job.func_invariant.job_id)
-            for k in job.func_invariant.outputs:
-                util.global_pipegraph.job_inputs[job.job_id].remove(k)
             del util.global_pipegraph.jobs[job.func_invariant.job_id]
 
         del job.func_invariant

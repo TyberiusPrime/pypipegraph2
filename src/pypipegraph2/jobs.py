@@ -415,6 +415,16 @@ class Job:
         gg = global_pipegraph
         return [gg.jobs[job_id] for job_id in gg.job_dag.predecessors(self.job_id)]
 
+    @property
+    def downstreams(self):
+        """Return a list of jobs that are directly downstream of this one by querying the
+        global pipegraph"""
+        from . import global_pipegraph
+
+        gg = global_pipegraph
+        return [gg.jobs[job_id] for job_id in gg.job_dag.successors(self.job_id)]
+
+
     # @property
     # def depth(self):
     # if self.job_kind is JobKind.Cleanup:
