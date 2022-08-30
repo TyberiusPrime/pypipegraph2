@@ -34,7 +34,6 @@ def dummy_fg_raising(of):
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestsFromTheField:
-
     def test_issue_20210726a(self, job_trace_log):
         """This uncovered a depth first vs breadth first invalidation proagation bug.
         Created with Job_Status.dump_subgraph_for_debug and then heavily pruned
@@ -53,9 +52,7 @@ class TestsFromTheField:
 
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(
-                    ppg.global_pipegraph.jobs[b]
-                )
+                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
             else:
                 print("unused edge", a, b)
 
@@ -1403,9 +1400,7 @@ class TestsFromTheField:
         edges.append(("2", "109"))
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(
-                    ppg.global_pipegraph.jobs[b]
-                )
+                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
 
         ppg.run()
         ppg.run()
@@ -1467,9 +1462,7 @@ class TestsFromTheField:
         edges.append(("2", "109"))
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(
-                    ppg.global_pipegraph.jobs[b]
-                )
+                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
 
         ppg.run()
         ppg.run()
@@ -1484,19 +1477,13 @@ class TestsFromTheField:
             job_1 = ppg.DataLoadingJob("1", lambda: 55, depend_on_function=False)
             jobs_by_no["1"] = job_1
 
-            job_530 = ppg.DataLoadingJob(
-                "530", lambda: 55, depend_on_function=False
-            )
+            job_530 = ppg.DataLoadingJob("530", lambda: 55, depend_on_function=False)
             jobs_by_no["530"] = job_530
 
-            job_541 = ppg.DataLoadingJob(
-                "541", lambda: 55, depend_on_function=False
-            )
+            job_541 = ppg.DataLoadingJob("541", lambda: 55, depend_on_function=False)
             jobs_by_no["541"] = job_541
 
-            job_542 = ppg.FileGeneratingJob(
-                "542", dummy_fg, depend_on_function=False
-            )
+            job_542 = ppg.FileGeneratingJob("542", dummy_fg, depend_on_function=False)
             jobs_by_no["542"] = job_542
 
             edges = [
@@ -1593,9 +1580,7 @@ class TestsFromTheField:
 
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(
-                    ppg.global_pipegraph.jobs[b]
-                )
+                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
 
         ppg.run()
         ppg.run()
@@ -1679,7 +1664,7 @@ class TestsFromTheField:
         ppg.run()
 
         # now make it fail
-        ppg.new() # log_level=6)
+        ppg.new()  # log_level=6)
         # as above
         job_1 = ppg.FileGeneratingJob("1", dummy_fg, depend_on_function=False)
         job_2 = ppg.TempFileGeneratingJob("2", dummy_fg, depend_on_function=False)
@@ -1694,19 +1679,17 @@ class TestsFromTheField:
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert (
-                ppg.global_pipegraph.last_run_result["11"].outcome
-                == ppg.enums.JobOutcome.Failed
-            )
+            ppg.global_pipegraph.last_run_result["11"].outcome
+            == ppg.enums.JobOutcome.Failed
+        )
         assert (
-                ppg.global_pipegraph.last_run_result["2"].outcome
-                == ppg.enums.JobOutcome.Skipped
-            )
+            ppg.global_pipegraph.last_run_result["2"].outcome
+            == ppg.enums.JobOutcome.Skipped
+        )
         assert (
-                ppg.global_pipegraph.last_run_result["CleanUp:2"].outcome
-                == ppg.enums.JobOutcome.UpstreamFailed # 11 fails, which fails 8, which fails this cleanup
-            )
-
-
+            ppg.global_pipegraph.last_run_result["CleanUp:2"].outcome
+            == ppg.enums.JobOutcome.UpstreamFailed  # 11 fails, which fails 8, which fails this cleanup
+        )
 
         # and boom, job was marked done & skipped, but we now inform it it's upstream failed.
 
@@ -1748,3 +1731,121 @@ def gen_20211221(func):
         if a in cjobs_by_no and b in cjobs_by_no:
             cjobs_by_no[a].depends_on(cjobs_by_no[b])
             # print(f"ea(('{a}', '{b}'))")
+
+
+def gen_20220829(
+    cjobs_by_no={},
+):
+    job_0 = ppg.FileGeneratingJob("0", dummy_fg, depend_on_function=False)
+    job_3519 = ppg.DataLoadingJob("3519", lambda: 35, depend_on_function=False)
+    job_6453 = ppg.FileGeneratingJob("6453", dummy_fg, depend_on_function=False)
+
+    for k, v in locals().items():
+        if k.startswith("job_"):
+            no = k[k.find("_") + 1 :]
+            cjobs_by_no[no] = v
+    edges = []
+    ea = edges.append
+    ea(("0", "3519"))
+    ea(("0", "6452"))
+    ea(("6452", "6453"))
+    for (a, b) in edges:
+        if a in cjobs_by_no and b in cjobs_by_no:
+            cjobs_by_no[a].depends_on(cjobs_by_no[b])
+            print(f"ea(('{a}', '{b}'))")
+
+
+def test_20220829(ppg2_per_test):
+    # this triggered a sanity check value error
+    # we need the graph completed once
+    gen_20220829()
+    ppg.run(log_message="1st run")
+    ppg.run(log_message=("2nd run"))
+
+    # and then with a new DL job added in
+    ppg2_per_test.new(log_level=5)
+
+    def fail():
+        raise ValueError()
+
+    job_6452 = ppg.DataLoadingJob("6452", fail, depend_on_function=False)
+    gen_20220829(
+        cjobs_by_no={
+            "6452": job_6452,
+        }
+    )
+    with pytest.raises(ppg.JobsFailed):
+        ppg.run(
+            log_message="run 3",
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["6452"].outcome
+            == ppg.enums.JobOutcome.Failed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["0"].outcome
+            == ppg.enums.JobOutcome.UpstreamFailed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["3519"].outcome
+            == ppg.enums.JobOutcome.Skipped
+        )
+
+
+def test_20220829b(ppg2_per_test):
+    # this one triggers teh que empty, something is wrong sanity check
+    from loguru import logger
+
+    gen_20220829b()
+    ppg.run(log_message="1st run")
+    ppg.run(log_message=("2nd run"))
+
+    ppg2_per_test.new()
+
+    def fail():
+        raise ValueError()
+
+    job_6452 = ppg.DataLoadingJob("6452", fail, depend_on_function=False)
+    job_6456 = ppg.FunctionInvariant("6456", lambda: 55)
+    gen_20220829b(cjobs_by_no={"6452": job_6452, "6456": job_6456})
+    ppg.run(
+        log_message="run 3",
+    )
+    ppg.run(
+        log_message="run 4",
+    )
+
+
+def gen_20220829b(
+    cjobs_by_no={},
+):
+    job_0 = ppg.FileGeneratingJob("0", dummy_fg, depend_on_function=False)
+    job_1 = ppg.DataLoadingJob("1", lambda: 35, depend_on_function=False)
+    #job_2 = ppg.FileGeneratingJob("2", dummy_fg, depend_on_function=False)
+    #job_3 = ppg.SharedMultiFileGeneratingJob( "3", ["url.txt"], dummy_smfg, depend_on_function=False)
+    #job_5 = ppg.ParameterInvariant("5", 55)
+
+    #job_3519 = ppg.DataLoadingJob("3519", lambda: 35, depend_on_function=False)
+    #job_6453 = ppg.FileGeneratingJob("6453", dummy_fg, depend_on_function=False)
+
+    for k, v in locals().items():
+        if k.startswith("job_"):
+            no = k[k.find("_") + 1 :]
+            cjobs_by_no[no] = v
+    edges = []
+    ea = edges.append
+    ea(("3", "5"))
+    ea(("6452", "6456"))
+    ea(("0", "3519"))
+    ea(("3519", "1"))
+    ea(("6452", "1"))
+    ea(("0", "6452"))
+    ea(("6452", "6453"))
+    ea(("2", "3"))
+    ea(("1", "2"))
+    ea(("0", "1"))
+    ea(("6453", "1"))
+    for (a, b) in edges:
+        if a in cjobs_by_no and b in cjobs_by_no:
+            cjobs_by_no[a].depends_on(cjobs_by_no[b])
+            print(f"ea(('{a}', '{b}'))")

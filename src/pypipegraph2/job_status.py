@@ -90,6 +90,7 @@ class JobStatus:
             if self.job.is_conditional():
                 # we always have downstreams, or we would have been pruned
                 self._should_run = ShouldRun.IfDownstreamNeedsMe
+
                 # which may be either because it's output is needed,
                 # or because it was invalidated...
             else:  # even if validated, we still might be needed
@@ -139,7 +140,7 @@ class JobStatus:
     # and we never need to look at it again.
     def skipped(self):
         # skip happens very quickly after update
-        ljt(f"{self.job_id} skipped")
+        ljt(f"{self.job_id}: marked skipped")
         if self.proc_state != ProcessingStatus.ReadyToRun:
             raise NotImplementedError(f"skipped but state was {self.proc_state}")
         self.proc_state = ProcessingStatus.Done
@@ -175,10 +176,12 @@ class JobStatus:
         self.inform_conditional_upstreams_of_failure()
 
     def inform_conditional_upstreams_of_failure(self):
+        ljt(f"{self.job_id} inform_conditional_upstreams_of_failure")
         for upstream_id in self.upstreams:
-            if self.runner.jobs[upstream_id].is_conditional():
+            #HERE
+             if self.runner.jobs[upstream_id].is_conditional():
                 if (
-                    self.runner.job_states[self.job_id].proc_state
+                    self.runner.job_states[upstream_id].proc_state
                     != ProcessingStatus.Done
                 ):
                     # premature optimization? if not upstream_id in self.runner.jobs_that_need_propagation:
@@ -208,7 +211,7 @@ class JobStatus:
         else:
             if not self.proc_state is ProcessingStatus.Done:
                 raise ValueError(
-                    "BUG triggered, outcom and validation_state discrepancy"
+                    "Bug triggered, outcome and validation_state discrepancy"
                 )
 
             self.error += "\n" + msg  # multiple upstreams failed. Combine messages
@@ -375,6 +378,8 @@ class JobStatus:
 
             if self.should_run == ShouldRun.No:
                 ljt(f"{self.job_id} -> schedulde for skip now...")
+                # have a look at the downstreams next, ??? HERE
+                res.extend([x for x in self.downstreams if self.runner.jobs[x].is_conditional()])
                 self.proc_state = ProcessingStatus.ReadyToRun
             elif self.all_upstreams_terminal():
                 ljt(f"{self.job_id} -> schedulde now...")
@@ -430,8 +435,15 @@ class JobStatus:
                 new_input.keys()
             ):  # nothing possibly renamed
                 ljt(f"\t{self.job_id} Same set of input keys")
-                # ljt(f"{old_input}")
-                # ljt(f"{new_input}")
+                ljt(f"{old_input}")
+                ljt(f"{new_input}")
+                #ljt(f"inputs: {self.runner.job_inputs[self.job_id]}")
+                # at this point, It is expected that all inputs have been calculated...
+                # so new_input is the complete set.
+                if set(new_input.keys()) != self.runner.job_inputs[self.job_id]:
+                    raise ValueError(f"{self.job_id} - set(new_input.keys()) != self.runner.job_inputs[self.job_id]\n {set(new_input.keys())} != {self.runner.job_inputs[self.job_id]}")
+
+                #BUG: BUt do we have an new input!?
                 for key, old_hash in old_input.items():
                     cmp_job = self.runner.jobs[self.runner.outputs_to_job_ids[key]]
                     if not cmp_job.compare_hashes(old_hash, new_input[key]):
@@ -493,8 +505,11 @@ class JobStatus:
     def all_upstreams_terminal_or_conditional_or_decided(self):  # todo: cache if true?
         def is_ready(job_state):
             upstream_id = job_state.job_id
+            ljt(f'is_ready({upstream_id})');
             if not job_state.proc_state.is_terminal():
+                ljt('a')
                 if self.runner.jobs[upstream_id].is_conditional():
+                    ljt(f'{upstream_id} a {self.runner.jobs[upstream_id].job_kind} {job_state.should_run} {job_state.validation_state}')
                     if (
                         job_state.should_run == ShouldRun.Yes
                         or job_state.validation_state == ValidationState.Invalidated
@@ -505,36 +520,43 @@ class JobStatus:
                         )
                         return False
                     else:
+                        ljt(f'{upstream_id} b')
                         if self.runner.job_states[
                             upstream_id
                         ].all_upstreams_terminal_or_conditional_or_decided():
                             # import history from that one.
+                            ljt(f'{upstream_id} b1 {self.job_id}')
                             for name in self.runner.jobs[upstream_id].outputs:
                                 if name in self.runner.job_inputs[self.job_id]:
-                                    log_trace(
+                                    ljt(
                                         f"\t\t\tHad {name} - non-running conditional job - using historical input"
                                     )
                                     if name in self.historical_input:
                                         self.updated_input[
                                             name
                                         ] = self.historical_input[name]
+                                    #HERE
+                                    else:
+                                        return False
                                     # else: do nothing. We'll come back as invalidated, since we're missing an input
                                     # and then the upstream job will be run, and we'll be back here,
                                     # and it will be  in a terminal state.
                         else:
+                            ljt(f'{upstream_id} c')
                             return False  # I can't tell yet!
                 elif (
                     job_state.should_run == ShouldRun.No
                     and job_state.proc_state == ProcessingStatus.Waiting
                 ):
                     raise ValueError(
-                        f"shoulrun no, but proc_state waiting {job_state.job_id}"
+                        f"should run no, but proc_state waiting {job_state.job_id}"
                     )
                 else:
                     ljt(
                         f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was not terminal {job_state.proc_state}"
                     )
                     return False
+            ljt('d')
             return True
 
         if not hasattr(
