@@ -450,7 +450,7 @@ class Runner:
                         check_state.should_run != should_run_before
                     ):
                         log_job_trace(
-                            f"validation changed. Tell upstreams {check_job_id}"
+                            f"validation changed for {check_job_id} {validation_before} ->{check_state.validation_state}. Tell upstreams"
                         )
                         # we have just changed the validation state
                         # and the upstreams might care about that to decide

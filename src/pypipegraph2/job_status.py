@@ -392,14 +392,31 @@ class JobStatus:
         raise ValueError("unhandled", action)
 
     def check_for_validation_update(self):
+        ljt(f"{self.job_id} check_for_validation_update")
         if self.job.job_kind == JobKind.Cleanup:  # cleanup jobs never invalidate.
             assert False
-        if self.all_upstreams_terminal_or_conditional_or_decided():
+        autcd = self.all_upstreams_terminal_or_conditional_or_decided()
+        ljt(f"{self.job_id} autcd {autcd}")
+        if autcd is True:
+            ljt(f"{self.job_id} check_for_validation_update all_upstreams_terminal_or_conditional_or_decided")
             invalidated = self._consider_invalidation()
             if invalidated:
                 self.validation_state = ValidationState.Invalidated
             else:
                 self.validation_state = ValidationState.Validated
+        elif autcd is None:
+            ljt(f"{self.job_id} check_for_validation_update all_upstreams_terminal_or_conditional_or_decided was None")
+            try:
+                invalidated = self._consider_invalidation()
+            except ValueError:
+                    invalidated = False
+            if invalidated:
+                self.validation_state = ValidationState.Invalidated
+            else:
+                # can't decide case
+                pass
+        else:
+            pass
 
     def _consider_invalidation(self):
         downstream_state = self
@@ -410,6 +427,9 @@ class JobStatus:
         # f"new input {escape_logging(new_input.keys())} old_input {escape_logging(old_input.keys())}"
         # )
         if len(new_input) != len(old_input):  # we lost or gained an input -> invalidate
+            if set(new_input.keys()) != self.runner.job_inputs[self.job_id]:
+                    raise ValueError(f"{self.job_id} - set(new_input.keys()) != self.runner.job_inputs[self.job_id]\n {set(new_input.keys())} != {self.runner.job_inputs[self.job_id]}")
+
             log_info(
                 f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed ({len(old_input)}->{len(new_input)})"
             )
@@ -521,9 +541,11 @@ class JobStatus:
                         return False
                     else:
                         ljt(f'{upstream_id} b')
-                        if self.runner.job_states[
+                        autcd = self.runner.job_states[
                             upstream_id
-                        ].all_upstreams_terminal_or_conditional_or_decided():
+                        ].all_upstreams_terminal_or_conditional_or_decided()
+
+                        if autcd:
                             # import history from that one.
                             ljt(f'{upstream_id} b1 {self.job_id}')
                             for name in self.runner.jobs[upstream_id].outputs:
@@ -537,10 +559,15 @@ class JobStatus:
                                         ] = self.historical_input[name]
                                     #HERE
                                     else:
-                                        return False
+                                        ljt(f"\t\t\t{upstream_id} entered else branch because of {name}")
+                                        return None
                                     # else: do nothing. We'll come back as invalidated, since we're missing an input
                                     # and then the upstream job will be run, and we'll be back here,
                                     # and it will be  in a terminal state.
+                                    # but if the upstream is 'if downstream needs me', we're in deep doodo
+                        elif autcd is None:
+                            ljt(f'{upstream_id} d')
+                            return None
                         else:
                             ljt(f'{upstream_id} c')
                             return False  # I can't tell yet!
@@ -579,9 +606,12 @@ class JobStatus:
                 )
                 return True
 
-        if not is_ready(
+        ready = is_ready(
             self._largest_topo_all_upstreams_terminal_or_conditional_or_decided
-        ):
+        )
+        if ready is None:
+            return None
+        elif not ready:
             return False
         else:
             # latest by topography is ready. Are the others?
@@ -590,6 +620,7 @@ class JobStatus:
                 s = self.runner.job_states[upstream_id]
                 if not is_ready(s):
                     not_yet_terminal.append(s)
+                    return None
             if not_yet_terminal:
                 # no? ok, redefine the one we use as sentinel to be the last stared one in the remainder...
                 self._largest_topo_all_upstreams_terminal_or_conditional_or_decided = (

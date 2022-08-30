@@ -1800,20 +1800,29 @@ def test_20220829b(ppg2_per_test):
     ppg.run(log_message="1st run")
     ppg.run(log_message=("2nd run"))
 
-    ppg2_per_test.new()
+    ppg2_per_test.new(log_level=5)
 
     def fail():
         raise ValueError()
 
     job_6452 = ppg.DataLoadingJob("6452", fail, depend_on_function=False)
-    job_6456 = ppg.FunctionInvariant("6456", lambda: 55)
-    gen_20220829b(cjobs_by_no={"6452": job_6452, "6456": job_6456})
-    ppg.run(
-        log_message="run 3",
-    )
-    ppg.run(
-        log_message="run 4",
-    )
+    gen_20220829b(cjobs_by_no={"6452": job_6452})
+    with pytest.raises(ppg.JobsFailed):
+        ppg.run(
+            log_message="run 3",
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["6452"].outcome
+            == ppg.enums.JobOutcome.Failed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["0"].outcome
+            == ppg.enums.JobOutcome.UpstreamFailed
+        )
+        assert (
+            ppg.global_pipegraph.last_run_result["1"].outcome
+            == ppg.enums.JobOutcome.Success
+        )
 
 
 def gen_20220829b(
@@ -1821,30 +1830,15 @@ def gen_20220829b(
 ):
     job_0 = ppg.FileGeneratingJob("0", dummy_fg, depend_on_function=False)
     job_1 = ppg.DataLoadingJob("1", lambda: 35, depend_on_function=False)
-    #job_2 = ppg.FileGeneratingJob("2", dummy_fg, depend_on_function=False)
-    #job_3 = ppg.SharedMultiFileGeneratingJob( "3", ["url.txt"], dummy_smfg, depend_on_function=False)
-    #job_5 = ppg.ParameterInvariant("5", 55)
-
-    #job_3519 = ppg.DataLoadingJob("3519", lambda: 35, depend_on_function=False)
-    #job_6453 = ppg.FileGeneratingJob("6453", dummy_fg, depend_on_function=False)
-
     for k, v in locals().items():
         if k.startswith("job_"):
             no = k[k.find("_") + 1 :]
             cjobs_by_no[no] = v
     edges = []
     ea = edges.append
-    ea(("3", "5"))
-    ea(("6452", "6456"))
-    ea(("0", "3519"))
-    ea(("3519", "1"))
     ea(("6452", "1"))
     ea(("0", "6452"))
-    ea(("6452", "6453"))
-    ea(("2", "3"))
-    ea(("1", "2"))
     ea(("0", "1"))
-    ea(("6453", "1"))
     for (a, b) in edges:
         if a in cjobs_by_no and b in cjobs_by_no:
             cjobs_by_no[a].depends_on(cjobs_by_no[b])
