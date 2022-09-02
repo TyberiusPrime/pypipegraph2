@@ -224,7 +224,8 @@ class JobStatus:
         if (
             self.update_counter > len(self.runner.jobs) + 1
         ):  # seems like a reasonable upper bound
-            self.update_counter += 1
+            raise ValueError('Updating this much points to a bug')
+        self.update_counter += 1
 
         if self.proc_state != ProcessingStatus.Waiting:
             # we only leave waiting once we have made a decision and are ready to run!
@@ -275,7 +276,7 @@ class JobStatus:
         }
 
         action = action_map[self.should_run, self.validation_state]
-        ljt(f"{self.job_id} {self.should_run}, {self.validation_state} -> {action}")
+        # ljt(f"{self.job_id} {self.should_run}, {self.validation_state} -> {action}")
         res = []
 
         if action == Action.ShouldNotHappen:
@@ -284,9 +285,7 @@ class JobStatus:
         if action == Action.RefreshValidationAndTryAgain:
             self.check_for_validation_update()
             action = action_map[self.should_run, self.validation_state]
-            ljt(
-                f"{self.job_id} post validation update {self.should_run}, {self.validation_state} -> {action}"
-            )
+            #ljt( f"{self.job_id} post validation update {self.should_run}, {self.validation_state} -> {action}")
         elif action == Action.TakeFromParent:
             sr = self.runner.job_states[self.job.parent_job.job_id].should_run
             if sr == ShouldRun.IfDownstreamNeedsMe:
@@ -299,7 +298,7 @@ class JobStatus:
             )
 
         if action == Action.ConditionalValidated:
-            ljt(f"{self.job_id} Action.ConditionalValidated")
+            #ljt(f"{self.job_id} Action.ConditionalValidated")
             # at this point we know we're not invalidated
             # but we need to ask the downstreams whether they need us...
             ds_count = 0
@@ -309,9 +308,7 @@ class JobStatus:
                 ds_count += 1
                 ds_job_state = self.runner.job_states[ds_id]
                 ds_job = self.runner.jobs[ds_id]
-                ljt(
-                    f"{self.job_id}\t{ds_id} {ds_job_state.should_run} {ds_job_state.validation_state}"
-                )
+                #ljt( f"{self.job_id}\t{ds_id} {ds_job_state.should_run} {ds_job_state.validation_state}")
                 if ds_job_state.should_run == ShouldRun.Yes:
                     action = Action.GoYes
                     break
@@ -337,7 +334,7 @@ class JobStatus:
                     raise ValueError(ds_job_state.should_run)
                     assert False
 
-            ljt(f"{self.job_id}\t{ds_count}, {ds_no_count}")
+            #ljt(f"{self.job_id}\t{ds_count}, {ds_no_count}")
             if action == Action.GoYes:
                 pass
             else:
@@ -377,15 +374,15 @@ class JobStatus:
             # )
 
             if self.should_run == ShouldRun.No:
-                ljt(f"{self.job_id} -> schedulde for skip now...")
+                #ljt(f"{self.job_id} -> schedulde for skip now...")
                 # have a look at the downstreams next, ??? HERE
                 res.extend([x for x in self.downstreams if self.runner.jobs[x].is_conditional()])
                 self.proc_state = ProcessingStatus.ReadyToRun
             elif self.all_upstreams_terminal():
-                ljt(f"{self.job_id} -> schedulde now...")
+                #ljt(f"{self.job_id} -> schedulde now...")
                 self.proc_state = ProcessingStatus.ReadyToRun
             else:
-                ljt(f"{self.job_id} -> Wants to run, but upstreams not done")
+                #ljt(f"{self.job_id} -> Wants to run, but upstreams not done")
                 res == []
             return res
 
@@ -525,51 +522,47 @@ class JobStatus:
     def all_upstreams_terminal_or_conditional_or_decided(self):  # todo: cache if true?
         def is_ready(job_state):
             upstream_id = job_state.job_id
-            ljt(f'is_ready({upstream_id})');
+            #log_info(f'is_ready({upstream_id})');
             if not job_state.proc_state.is_terminal():
-                ljt('a')
+                #ljt('a')
                 if self.runner.jobs[upstream_id].is_conditional():
-                    ljt(f'{upstream_id} a {self.runner.jobs[upstream_id].job_kind} {job_state.should_run} {job_state.validation_state}')
+                    #ljt(f'{upstream_id} a {self.runner.jobs[upstream_id].job_kind} {job_state.should_run} {job_state.validation_state}')
                     if (
                         job_state.should_run == ShouldRun.Yes
                         or job_state.validation_state == ValidationState.Invalidated
                     ):
                         # this should be run first, but hasn't
-                        ljt(
-                            f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was conditional, but shouldrun, and not yes"
-                        )
+                        #ljt( f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was conditional, but shouldrun, and not yes")
                         return False
                     else:
-                        ljt(f'{upstream_id} b')
+                        #ljt(f'{upstream_id} b')
                         autcd = self.runner.job_states[
                             upstream_id
                         ].all_upstreams_terminal_or_conditional_or_decided()
 
                         if autcd:
                             # import history from that one.
-                            ljt(f'{upstream_id} b1 {self.job_id}')
+                            #ljt(f'{upstream_id} b1 {self.job_id}')
                             for name in self.runner.jobs[upstream_id].outputs:
                                 if name in self.runner.job_inputs[self.job_id]:
-                                    ljt(
-                                        f"\t\t\tHad {name} - non-running conditional job - using historical input"
-                                    )
+                                    #ljt( f"\t\t\tHad {name} - non-running conditional job - using historical input")
                                     if name in self.historical_input:
                                         self.updated_input[
                                             name
                                         ] = self.historical_input[name]
                                     #HERE
                                     else:
-                                        ljt(f"\t\t\t{upstream_id} entered else branch because of {name}")
+                                        #ljt(f"\t\t\t{upstream_id} entered else branch because of {name}")
                                         return None
                                     # else: do nothing. We'll come back as invalidated, since we're missing an input
                                     # and then the upstream job will be run, and we'll be back here,
                                     # and it will be  in a terminal state.
                                     # but if the upstream is 'if downstream needs me', we're in deep doodo
                         elif autcd is None:
-                            ljt(f'{upstream_id} d')
+                            #ljt(f'{upstream_id} d')
                             return None
                         else:
-                            ljt(f'{upstream_id} c')
+                            #ljt(f'{upstream_id} c')
                             return False  # I can't tell yet!
                 elif (
                     job_state.should_run == ShouldRun.No
@@ -579,11 +572,9 @@ class JobStatus:
                         f"should run no, but proc_state waiting {job_state.job_id}"
                     )
                 else:
-                    ljt(
-                        f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was not terminal {job_state.proc_state}"
-                    )
+                    #ljt( f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was not terminal {job_state.proc_state}")
                     return False
-            ljt('d')
+            #ljt('d')
             return True
 
         if not hasattr(
@@ -618,9 +609,12 @@ class JobStatus:
             not_yet_terminal = []
             for upstream_id in self.upstreams:
                 s = self.runner.job_states[upstream_id]
-                if not is_ready(s):
-                    not_yet_terminal.append(s)
-                    return None
+                ready = is_ready(s)
+                #if ready is None:
+                    #return None
+                #elif ready is False:
+                if not ready:
+                    not_yet_terminal.append(s) # we need em all, I suppose
             if not_yet_terminal:
                 # no? ok, redefine the one we use as sentinel to be the last stared one in the remainder...
                 self._largest_topo_all_upstreams_terminal_or_conditional_or_decided = (
