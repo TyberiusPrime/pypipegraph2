@@ -372,7 +372,11 @@ class Job:
         return None
 
     def is_conditional(self):
-        return self.job_kind in (JobKind.Temp, JobKind.Loading)
+        try:
+            return self._is_conditional
+        except AttributeError:
+            self._is_conditional = self.job_kind in (JobKind.Temp, JobKind.Loading)
+        return self._is_conditional
 
     @property
     def exception(self):

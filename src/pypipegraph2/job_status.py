@@ -90,6 +90,7 @@ class JobStatus:
             if self.job.is_conditional():
                 # we always have downstreams, or we would have been pruned
                 self._should_run = ShouldRun.IfDownstreamNeedsMe
+
                 # which may be either because it's output is needed,
                 # or because it was invalidated...
             else:  # even if validated, we still might be needed
@@ -139,7 +140,7 @@ class JobStatus:
     # and we never need to look at it again.
     def skipped(self):
         # skip happens very quickly after update
-        ljt(f"{self.job_id} skipped")
+        ljt(f"{self.job_id}: marked skipped")
         if self.proc_state != ProcessingStatus.ReadyToRun:
             raise NotImplementedError(f"skipped but state was {self.proc_state}")
         self.proc_state = ProcessingStatus.Done
@@ -175,10 +176,12 @@ class JobStatus:
         self.inform_conditional_upstreams_of_failure()
 
     def inform_conditional_upstreams_of_failure(self):
+        ljt(f"{self.job_id} inform_conditional_upstreams_of_failure")
         for upstream_id in self.upstreams:
-            if self.runner.jobs[upstream_id].is_conditional():
+            #HERE
+             if self.runner.jobs[upstream_id].is_conditional():
                 if (
-                    self.runner.job_states[self.job_id].proc_state
+                    self.runner.job_states[upstream_id].proc_state
                     != ProcessingStatus.Done
                 ):
                     # premature optimization? if not upstream_id in self.runner.jobs_that_need_propagation:
@@ -208,7 +211,7 @@ class JobStatus:
         else:
             if not self.proc_state is ProcessingStatus.Done:
                 raise ValueError(
-                    "BUG triggered, outcom and validation_state discrepancy"
+                    "Bug triggered, outcome and validation_state discrepancy"
                 )
 
             self.error += "\n" + msg  # multiple upstreams failed. Combine messages
@@ -221,7 +224,8 @@ class JobStatus:
         if (
             self.update_counter > len(self.runner.jobs) + 1
         ):  # seems like a reasonable upper bound
-            self.update_counter += 1
+            raise ValueError('Updating this much points to a bug')
+        self.update_counter += 1
 
         if self.proc_state != ProcessingStatus.Waiting:
             # we only leave waiting once we have made a decision and are ready to run!
@@ -272,7 +276,7 @@ class JobStatus:
         }
 
         action = action_map[self.should_run, self.validation_state]
-        ljt(f"{self.job_id} {self.should_run}, {self.validation_state} -> {action}")
+        # ljt(f"{self.job_id} {self.should_run}, {self.validation_state} -> {action}")
         res = []
 
         if action == Action.ShouldNotHappen:
@@ -281,9 +285,7 @@ class JobStatus:
         if action == Action.RefreshValidationAndTryAgain:
             self.check_for_validation_update()
             action = action_map[self.should_run, self.validation_state]
-            ljt(
-                f"{self.job_id} post validation update {self.should_run}, {self.validation_state} -> {action}"
-            )
+            #ljt( f"{self.job_id} post validation update {self.should_run}, {self.validation_state} -> {action}")
         elif action == Action.TakeFromParent:
             sr = self.runner.job_states[self.job.parent_job.job_id].should_run
             if sr == ShouldRun.IfDownstreamNeedsMe:
@@ -296,7 +298,7 @@ class JobStatus:
             )
 
         if action == Action.ConditionalValidated:
-            ljt(f"{self.job_id} Action.ConditionalValidated")
+            #ljt(f"{self.job_id} Action.ConditionalValidated")
             # at this point we know we're not invalidated
             # but we need to ask the downstreams whether they need us...
             ds_count = 0
@@ -306,9 +308,7 @@ class JobStatus:
                 ds_count += 1
                 ds_job_state = self.runner.job_states[ds_id]
                 ds_job = self.runner.jobs[ds_id]
-                ljt(
-                    f"{self.job_id}\t{ds_id} {ds_job_state.should_run} {ds_job_state.validation_state}"
-                )
+                #ljt( f"{self.job_id}\t{ds_id} {ds_job_state.should_run} {ds_job_state.validation_state}")
                 if ds_job_state.should_run == ShouldRun.Yes:
                     action = Action.GoYes
                     break
@@ -334,7 +334,7 @@ class JobStatus:
                     raise ValueError(ds_job_state.should_run)
                     assert False
 
-            ljt(f"{self.job_id}\t{ds_count}, {ds_no_count}")
+            #ljt(f"{self.job_id}\t{ds_count}, {ds_no_count}")
             if action == Action.GoYes:
                 pass
             else:
@@ -374,27 +374,46 @@ class JobStatus:
             # )
 
             if self.should_run == ShouldRun.No:
-                ljt(f"{self.job_id} -> schedulde for skip now...")
+                #ljt(f"{self.job_id} -> schedulde for skip now...")
+                # have a look at the downstreams next, ??? HERE
+                res.extend([x for x in self.downstreams if self.runner.jobs[x].is_conditional()])
                 self.proc_state = ProcessingStatus.ReadyToRun
             elif self.all_upstreams_terminal():
-                ljt(f"{self.job_id} -> schedulde now...")
+                #ljt(f"{self.job_id} -> schedulde now...")
                 self.proc_state = ProcessingStatus.ReadyToRun
             else:
-                ljt(f"{self.job_id} -> Wants to run, but upstreams not done")
+                #ljt(f"{self.job_id} -> Wants to run, but upstreams not done")
                 res == []
             return res
 
         raise ValueError("unhandled", action)
 
     def check_for_validation_update(self):
+        ljt(f"{self.job_id} check_for_validation_update")
         if self.job.job_kind == JobKind.Cleanup:  # cleanup jobs never invalidate.
             assert False
-        if self.all_upstreams_terminal_or_conditional_or_decided():
+        autcd = self.all_upstreams_terminal_or_conditional_or_decided()
+        ljt(f"{self.job_id} autcd {autcd}")
+        if autcd is True:
+            ljt(f"{self.job_id} check_for_validation_update all_upstreams_terminal_or_conditional_or_decided")
             invalidated = self._consider_invalidation()
             if invalidated:
                 self.validation_state = ValidationState.Invalidated
             else:
                 self.validation_state = ValidationState.Validated
+        elif autcd is None:
+            ljt(f"{self.job_id} check_for_validation_update all_upstreams_terminal_or_conditional_or_decided was None")
+            try:
+                invalidated = self._consider_invalidation()
+            except ValueError:
+                    invalidated = False
+            if invalidated:
+                self.validation_state = ValidationState.Invalidated
+            else:
+                # can't decide case
+                pass
+        else:
+            pass
 
     def _consider_invalidation(self):
         downstream_state = self
@@ -405,6 +424,9 @@ class JobStatus:
         # f"new input {escape_logging(new_input.keys())} old_input {escape_logging(old_input.keys())}"
         # )
         if len(new_input) != len(old_input):  # we lost or gained an input -> invalidate
+            if set(new_input.keys()) != self.runner.job_inputs[self.job_id]:
+                    raise ValueError(f"{self.job_id} - set(new_input.keys()) != self.runner.job_inputs[self.job_id]\n {set(new_input.keys())} != {self.runner.job_inputs[self.job_id]}")
+
             log_info(
                 f"Invalidated {shorten_job_id(self.job_id)} - # of inputs changed ({len(old_input)}->{len(new_input)})"
             )
@@ -430,8 +452,15 @@ class JobStatus:
                 new_input.keys()
             ):  # nothing possibly renamed
                 ljt(f"\t{self.job_id} Same set of input keys")
-                # ljt(f"{old_input}")
-                # ljt(f"{new_input}")
+                ljt(f"{old_input}")
+                ljt(f"{new_input}")
+                #ljt(f"inputs: {self.runner.job_inputs[self.job_id]}")
+                # at this point, It is expected that all inputs have been calculated...
+                # so new_input is the complete set.
+                if set(new_input.keys()) != self.runner.job_inputs[self.job_id]:
+                    raise ValueError(f"{self.job_id} - set(new_input.keys()) != self.runner.job_inputs[self.job_id]\n {set(new_input.keys())} != {self.runner.job_inputs[self.job_id]}")
+
+                #BUG: BUt do we have an new input!?
                 for key, old_hash in old_input.items():
                     cmp_job = self.runner.jobs[self.runner.outputs_to_job_ids[key]]
                     if not cmp_job.compare_hashes(old_hash, new_input[key]):
@@ -497,48 +526,59 @@ class JobStatus:
     def all_upstreams_terminal_or_conditional_or_decided(self):  # todo: cache if true?
         def is_ready(job_state):
             upstream_id = job_state.job_id
+            #log_info(f'is_ready({upstream_id})');
             if not job_state.proc_state.is_terminal():
+                #ljt('a')
                 if self.runner.jobs[upstream_id].is_conditional():
+                    #ljt(f'{upstream_id} a {self.runner.jobs[upstream_id].job_kind} {job_state.should_run} {job_state.validation_state}')
                     if (
                         job_state.should_run == ShouldRun.Yes
                         or job_state.validation_state == ValidationState.Invalidated
                     ):
                         # this should be run first, but hasn't
-                        ljt(
-                            f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was conditional, but shouldrun, and not yes"
-                        )
+                        #ljt( f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was conditional, but shouldrun, and not yes")
                         return False
                     else:
-                        if self.runner.job_states[
+                        #ljt(f'{upstream_id} b')
+                        autcd = self.runner.job_states[
                             upstream_id
-                        ].all_upstreams_terminal_or_conditional_or_decided():
+                        ].all_upstreams_terminal_or_conditional_or_decided()
+
+                        if autcd:
                             # import history from that one.
+                            #ljt(f'{upstream_id} b1 {self.job_id}')
                             for name in self.runner.jobs[upstream_id].outputs:
                                 if name in self.runner.job_inputs[self.job_id]:
-                                    log_trace(
-                                        f"\t\t\tHad {name} - non-running conditional job - using historical input"
-                                    )
+                                    #ljt( f"\t\t\tHad {name} - non-running conditional job - using historical input")
                                     if name in self.historical_input:
                                         self.updated_input[
                                             name
                                         ] = self.historical_input[name]
+                                    #HERE
+                                    else:
+                                        #ljt(f"\t\t\t{upstream_id} entered else branch because of {name}")
+                                        return None
                                     # else: do nothing. We'll come back as invalidated, since we're missing an input
                                     # and then the upstream job will be run, and we'll be back here,
                                     # and it will be  in a terminal state.
+                                    # but if the upstream is 'if downstream needs me', we're in deep doodo
+                        elif autcd is None:
+                            #ljt(f'{upstream_id} d')
+                            return None
                         else:
+                            #ljt(f'{upstream_id} c')
                             return False  # I can't tell yet!
                 elif (
                     job_state.should_run == ShouldRun.No
                     and job_state.proc_state == ProcessingStatus.Waiting
                 ):
                     raise ValueError(
-                        f"shoulrun no, but proc_state waiting {job_state.job_id}"
+                        f"should run no, but proc_state waiting {job_state.job_id}"
                     )
                 else:
-                    ljt(
-                        f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was not terminal {job_state.proc_state}"
-                    )
+                    #ljt( f"{self.job_id} all_upstreams_terminal_or_conditional_or_decided -->False, {upstream_id} was not terminal {job_state.proc_state}")
                     return False
+            #ljt('d')
             return True
 
         if not hasattr(
@@ -561,17 +601,24 @@ class JobStatus:
                 )
                 return True
 
-        if not is_ready(
+        ready = is_ready(
             self._largest_topo_all_upstreams_terminal_or_conditional_or_decided
-        ):
+        )
+        if ready is None:
+            return None
+        elif not ready:
             return False
         else:
             # latest by topography is ready. Are the others?
             not_yet_terminal = []
             for upstream_id in self.upstreams:
                 s = self.runner.job_states[upstream_id]
-                if not is_ready(s):
-                    not_yet_terminal.append(s)
+                ready = is_ready(s)
+                #if ready is None:
+                    #return None
+                #elif ready is False:
+                if not ready:
+                    not_yet_terminal.append(s) # we need em all, I suppose
             if not_yet_terminal:
                 # no? ok, redefine the one we use as sentinel to be the last stared one in the remainder...
                 self._largest_topo_all_upstreams_terminal_or_conditional_or_decided = (

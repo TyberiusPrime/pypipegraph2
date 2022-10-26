@@ -397,7 +397,7 @@ class Runner:
             # self._interactive_report()
             while todo:
                 while self.jobs_that_need_propagation:
-                    log_job_trace(f"jtnp: {len(self.jobs_that_need_propagation)}")
+                    #log_job_trace(f"jtnp: {len(self.jobs_that_need_propagation)}")
                     # log_job_trace(f"jtnp: {self.jobs_that_need_propagation}")
                     check_job_id = self.jobs_that_need_propagation.popleft()
                     check_state = self.job_states[check_job_id]
@@ -407,11 +407,9 @@ class Runner:
                     new = check_state.update()
                     if new is None:
                         raise ValueError("none return")
-                    log_job_trace(f"New for checking {new}")
+                    #log_job_trace(f"New for checking {new}")
                     self.jobs_that_need_propagation.extend(new)
-                    log_job_trace(
-                        f"{check_job_id}: State: {check_state.proc_state} {check_state.should_run}"
-                    )
+                    #log_job_trace( f"{check_job_id}: State: {check_state.proc_state} {check_state.should_run}")
                     if check_state.proc_state is ProcessingStatus.ReadyToRun:
                         # this job has transitioned into ReadyToRun  .
                         if check_state.should_run is ShouldRun.No:
@@ -450,7 +448,7 @@ class Runner:
                         check_state.should_run != should_run_before
                     ):
                         log_job_trace(
-                            f"validation changed. Tell upstreams {check_job_id}"
+                            f"validation changed for {check_job_id} {validation_before} ->{check_state.validation_state}. Tell upstreams"
                         )
                         # we have just changed the validation state
                         # and the upstreams might care about that to decide
