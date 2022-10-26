@@ -424,6 +424,15 @@ class Job:
         gg = global_pipegraph
         return [gg.jobs[job_id] for job_id in gg.job_dag.successors(self.job_id)]
 
+    @property
+    def cores_needed(self):
+        raise NotImplementedError("This is a ppg2 job, pass resources=ppg2.Resources.* on construction instead")
+
+    @cores_needed.setter
+    def cores_needed(self, _):
+        raise NotImplementedError("This is a ppg2 job, pass resources=ppg2.Resources.* on construction instead")
+
+
 
     # @property
     # def depth(self):
@@ -1759,6 +1768,7 @@ class ParameterInvariant(_InvariantMixin, Job):
                     f"Parameterinvariant with differing parameters {job_id}, was: {self.parameters}, now: {parameters}"
                 )
         self.parameters = parameters
+        self.full_log_on_hash_change = True
         super().__init__([job_id])
 
     def output_needed(self, _ignored_runner):

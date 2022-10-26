@@ -200,14 +200,20 @@ class TestFileGeneratingJob:
         job = ppg.FileGeneratingJob(of, do_write, depend_on_function=False)
         with pytest.raises(TypeError):
             job.use_resources(0)
-        job.cores_needed = ppg.Resources.SingleCore
-        job.cores_needed = ppg.Resources.AllCores
-        job.cores_needed = ppg.Resources.Exclusive
+        with pytest.raises(NotImplementedError):
+            job.cores_needed = ppg.Resources.SingleCore
+        with pytest.raises(NotImplementedError):
+            job.cores_needed = ppg.Resources.AllCores
+        with pytest.raises(NotImplementedError):
+            job.cores_needed = ppg.Resources.Exclusive
 
         for i in range(10):
-            j = ppg.FileGeneratingJob("out/%i" % i, lambda of, i=i: write(of, f"b{i}"))
             if i % 2 == 0:
-                j.cores_needed = ppg.Resources.Exclusive
+                res = ppg.Resources.Exclusive
+            else: 
+                res = ppg.Resources.SingleCore
+            j = ppg.FileGeneratingJob("out/%i" % i, lambda of, i=i: write(of, f"b{i}"),
+                    resources=res)
 
         ppg.run()
         assert read(of) == data_to_write

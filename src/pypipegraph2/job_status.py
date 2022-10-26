@@ -438,7 +438,11 @@ class JobStatus:
                         log_info(
                             f"\tInvalidated {shorten_job_id(self.job_id)} - Hash change: {key}"
                         )
-                        log_debug(
+                        if getattr(self.job, 'full_log_on_hash_change', False):
+                            l = log_info
+                        else: 
+                            l = log_debug
+                        l(
                             f"\tInvalidated {shorten_job_id(self.job_id)} - Hash change, {key} was {escape_logging(old_hash)} now {escape_logging(new_input[key])} {cmp_job}"
                         )
                         invalidated = True
