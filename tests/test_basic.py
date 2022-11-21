@@ -1,8 +1,8 @@
 import sys
 for p in sys.path: print(p)
-import ppg2_rust
+import pypipegraph2
 
 
 def test_shu():
-    print(dir(ppg2_rust))
-    assert ppg2_rust.sum_as_string(7,10) == "17"
+    print(dir(pypipegraph2))
+    assert pypipegraph2.sum_as_string(7,10) == "17"

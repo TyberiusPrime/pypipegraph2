@@ -319,3 +319,22 @@ class TestJobGeneratingJob:
         ppg.run()
         assert read("out/D") == "E"
         assert counter[0] == 3
+
+    # this test only works if you'd remove the locking around next_job_number
+    # *and* add in a small delay to actually trigger it
+    # def test_massive_trying_to_hit_jobnumber_conflict(self):
+    #     ppg.new(cores=4)
+    #     def fail(of):
+    #         raise ValueError()
+    #     def jj(prefix):
+    #         def inner():
+    #             Path(prefix).mkdir(exist_ok=True)
+    #             for i in range(0,100):
+    #                 ppg.FileGeneratingJob(prefix + '/' + str(i), lambda of: of.write_text(prefix))
+    #         return inner
+    #     a = ppg.JobGeneratingJob('a', jj('a'))
+    #     b = ppg.JobGeneratingJob('b', jj('b'))
+    #     c = ppg.JobGeneratingJob('c', jj('c'))
+    #     d = ppg.JobGeneratingJob('d', jj('d'))
+    #     ppg.run()
+

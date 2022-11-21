@@ -981,9 +981,12 @@ class TestFunctionInvariant:
             def __init__(self, letter):
                 self.letter = letter
 
+            def write(self, of):
+                append("out/" + self.letter, "A")
+
             def get_job(self):
                 job = ppg.FileGeneratingJob(
-                    "out/" + self.letter, lambda: append("out/" + self.letter, "A")
+                    "out/" + self.letter, self.write
                 )
                 job.depends_on(ppg.FunctionInvariant("shu.sha", self.sha))
                 return job
@@ -1816,7 +1819,7 @@ class TestDependency:
             print()
 
             # ppg2
-            assert ppg.util.global_pipegraph.has_edge("FIout/B", "out/B")
+            assert ppg.util.global_pipegraph.has_edge("FITestDependency.test_dependency_placeholder_dynamic_auto_invariants.<locals>.check_function_invariant", "out/B")
 
         def gen_deps():
             jobB = ppg.FileGeneratingJob("out/B", check_function_invariant)

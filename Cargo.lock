@@ -119,13 +119,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ppg2_rust"
-version = "0.1.0"
-dependencies = [
- "pyo3",
-]
-
-[[package]]
 name = "proc-macro-hack"
 version = "0.5.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -186,6 +179,13 @@ dependencies = [
  "pyo3-build-config",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "pypipegraph2"
+version = "2.6.0"
+dependencies = [
+ "pyo3",
 ]
 
 [[package]]

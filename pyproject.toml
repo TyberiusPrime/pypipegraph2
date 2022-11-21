@@ -3,8 +3,17 @@ requires = ["maturin>=0.12,<0.13"]
 build-backend = "maturin"
 
 [project]
-name = "ppg2_rust"
-requires-python = ">=3.6"
+name = "pypipegraph2"
+requires-python = ">=3.7"
+dependencies = [
+	"loguru",
+	"rich",
+	"xxhash",
+	"wrapt",
+	"deepdiff",
+	"psutil",
+	"networkx",
+]
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",

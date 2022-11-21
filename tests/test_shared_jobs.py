@@ -92,13 +92,17 @@ class TestSharedJob:
         ppg.run()
         assert read("doit") == "3"
 
-        #no build, have history -> no cleanup
+        # no build, have history -> no cleanup
         assert len(list(job.output_dir.glob("*"))) == 3  # three different outputs
         assert len(list(job.input_dir.glob("*"))) == 3  # three different outputs
         ppg.global_pipegraph.get_history_filename().unlink()
         ppg.run()
-        assert len(list(job.output_dir.glob("*"))) == 1  # loosing history is reason for cleanup
-        assert len(list(job.input_dir.glob("*"))) == 1  # loosing history is reason for cleanup
+        assert (
+            len(list(job.output_dir.glob("*"))) == 1
+        )  # loosing history is reason for cleanup
+        assert (
+            len(list(job.input_dir.glob("*"))) == 1
+        )  # loosing history is reason for cleanup
 
     def test_multi_file_gen_job_lookup_colission(self):
         with pytest.raises(ValueError):
@@ -181,11 +185,10 @@ class TestSharedJob:
         ).depends_on(c)
         import subprocess
 
-        subprocess.check_call(["fd", "-L"])
+        # subprocess.check_call(["fd", "-L"])
         import time
 
-        # aeou
-        ppg.util.log_error("last befor bookm")
+        ppg.util.log_error("last before bookm")
         ppg.run()
 
         assert read(job.find_file("a")) == "a0"
@@ -266,13 +269,14 @@ class TestSharedJob:
         assert read("A") == "3"  # changed history dir...
 
         known = get_known(job)
+        ha2 = ppg.SharedMultiFileGeneratingJob._handle_anysnake2
 
-        assert str(h1.absolute()) in known
-        assert str(h2.absolute()) in known
-        assert str(h3.absolute()) in known
-        assert known[str(h1.absolute())] == known[str(h2.absolute())]
-        assert known[str(h1.absolute())] != known[str(h3.absolute())]
-        key3 = known[str(h3.absolute())]
+        assert ha2(str(h1.absolute())) in known
+        assert ha2(str(h2.absolute())) in known
+        assert ha2(str(h3.absolute())) in known
+        assert known[ha2(str(h1.absolute()))] == known[ha2(str(h2.absolute()))]
+        assert known[ha2(str(h1.absolute()))] != known[ha2(str(h3.absolute()))]
+        key3 = known[ha2(str(h3.absolute()))]
         assert (Path("out/by_input") / key3).exists()
 
         ppg.run()  # running again is harmless
@@ -294,11 +298,11 @@ class TestSharedJob:
         ppg.run()
         assert read("A") == "4"  # changed input
         known = get_known(job)
-        assert str(h3.absolute()) in known
+        assert ha2(str(h3.absolute())) in known
         print(job.target_folder)
         print(known)
         assert (
-            known[str(h3.absolute())] == known[str(h2.absolute())]
+            known[ha2(str(h3.absolute()))] == known[ha2(str(h2.absolute()))]
         )  # goes back to old value
         assert not (Path("out") / key3).exists()
 
@@ -683,4 +687,3 @@ class TestSharedJob:
         a = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit)
         with pytest.raises(ppg.JobOutputConflict):
             b = ppg.SharedMultiFileGeneratingJob("out", ["b"], doit)
-

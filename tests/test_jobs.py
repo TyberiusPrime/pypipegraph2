@@ -97,6 +97,20 @@ class TestJobs:
         assert read("ac") == "2"
         assert read("bc") == "1"
 
+    def test_dependency_callback_plus_job(self):
+        data = []
+
+        def load_a():
+            data.append("a")
+
+        a = ppg.DataLoadingJob("A", load_a)
+        b = lambda: ppg.FileGeneratingJob("B", lambda of: of.write_text("b"))
+        c = ppg.FileGeneratingJob(
+            "C", lambda of: of.write_text(Path("B").read_text() + data[0])
+        )
+        c.depends_on(b, a)
+        ppg.run()
+
     def test_data_loading_MultiFile_dowstream(self, job_trace_log):
         def tf(ofs):
             counter("A")
@@ -111,6 +125,8 @@ class TestJobs:
             ofs[1].write_text("c" + read("a1"))
 
         bc = ppg.MultiFileGeneratingJob(["b", "c"], write)
+        assert bc[0] == Path('b')
+        assert bc[1] == Path('c')
         bc.depends_on(a)
         bc()
         assert read("c") == "ca1"
@@ -123,6 +139,24 @@ class TestJobs:
         assert read("B") == "1"
         assert read("A") == "1"
 
+    def test_returning_none(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
+        b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
+        c = ppg.DataLoadingJob("o", lambda: counter('c') and None)
+        b.depends_on(a)
+        a.depends_on_params("x")
+        a.depends_on(c)
+        b.depends_on(c)
+        ppg.run()
+        assert read("a") == "1"
+        assert read("b") == "1"
+        assert read("c") == "1"
+        a.depends_on_params("y")
+        ppg.run()
+        assert read("a") == "2"
+        assert read("c") == "2"
+        assert read("b") == "2"
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestJobs2:
@@ -1115,21 +1149,38 @@ class TestDataLoadingJob:
         ppg.DataLoadingJob(Path("shu"), lambda: 55)
 
     def test_job_gen_does_not_clobber_history_of_input_jobs(self):
-        a = ppg.FileGeneratingJob('a', lambda of: counter('A') and of.write_text('a'))
-        b = ppg.JobGeneratingJob('b', lambda: counter('B') and ppg.FileGeneratingJob('c', lambda of: counter('C') and of.write_text('c'))
-)
+        a = ppg.FileGeneratingJob("a", lambda of: counter("A") and of.write_text("a"))
+        b = ppg.JobGeneratingJob(
+            "b",
+            lambda: counter("B")
+            and ppg.FileGeneratingJob(
+                "c", lambda of: counter("C") and of.write_text("c")
+            ),
+        )
         b.depends_on(a)
         ppg.run()
-        assert Path('a').read_text() == 'a'
-        assert Path('A').read_text() == '1'
-        assert Path('B').read_text() == '1'
-        assert Path('C').read_text() == '1'
+        assert Path("a").read_text() == "a"
+        assert Path("A").read_text() == "1"
+        assert Path("B").read_text() == "1"
+        assert Path("C").read_text() == "1"
         ppg.run()
-        assert Path('a').read_text() == 'a'
-        assert Path('A').read_text() == '1'
-        assert Path('B').read_text() == '2'
-        assert Path('C').read_text() == '1'
+        assert Path("a").read_text() == "a"
+        assert Path("A").read_text() == "1"
+        assert Path("B").read_text() == "2"
+        assert Path("C").read_text() == "1"
 
+    def test_dict_return(self):
+        collector = []
+
+        def gen():
+            collector.append("a")
+            return {"hello": 123, "world": "world"}
+
+        a = ppg.DataLoadingJob("gen", gen)
+        b = ppg.FileGeneratingJob("b", lambda of: of.write_text(collector[0]))
+        b.depends_on(a)
+        ppg.run()
+        assert read("b") == "a"
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1383,6 +1434,26 @@ class TestAttributeJob:
         with pytest.raises(TypeError):
             o = Dummy()
             ppg.AttributeLoadingJob("load_dummy_shu", o, "a", "shu")
+
+    def test_returning_none(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        o = Dummy()
+        a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
+        b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
+        c = ppg.AttributeLoadingJob("o", o, "o", lambda: counter('c') and None)
+        b.depends_on(a)
+        a.depends_on_params("x")
+        a.depends_on(c)
+        b.depends_on(c)
+        ppg.run()
+        assert read("a") == "1"
+        assert read("b") == "1"
+        assert read("c") == "1"
+        a.depends_on_params("y")
+        ppg.run()
+        assert read("a") == "2"
+        assert read("c") == "2"
+        assert read("b") == "2"
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1852,6 +1923,7 @@ class TestNoDotDotInJobIds:
     def test_no_dot_dot(self):
         """ all ../ must be resolved before it becomes a job id"""
         import unittest
+        from unittest.mock import patch
 
         collector = set()
         org_dedup = ppg.jobs._dedup_job
@@ -1860,7 +1932,7 @@ class TestNoDotDotInJobIds:
             collector.add(job_id)
             return org_dedup(cls, job_id)
 
-        with unittest.mock.patch("pypipegraph2.jobs._dedup_job", collecting_dedup):
+        with patch("pypipegraph2.jobs._dedup_job", collecting_dedup):
             j = ppg.MultiFileGeneratingJob(["something/../shu"], lambda of: 5)
             assert j.job_id in collector
             assert not ".." in j.job_id
