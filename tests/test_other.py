@@ -302,16 +302,6 @@ def test_interactive_import(ppg2_per_test):
     import pypipegraph2.interactive  # noqa:F401
 
 
-def test_version_is_correct():
-    import configparser
-    from pathlib import Path
-
-    c = configparser.ConfigParser()
-    c.read(Path(__file__).parent.parent / "setup.cfg")
-    version = c["metadata"]["version"]
-    assert version == ppg.__version__
-
-
 def test_dataloading_job_changing_cwd(ppg2_per_test):
     from pathlib import Path
 
@@ -606,6 +596,30 @@ def test_calling_function_difference():
     assert 'The function closures differed.' in r
     assert ppg.FunctionInvariant.debug_function_differences(None,None) == "No difference"
     assert ppg.FunctionInvariant.debug_function_differences(gen,gen) == "The functions were identical"
+
+def test_spawned_processes_get_killed_on_abort(ppg2_per_test):
+    import psutil
+
+    # this process doesn't get reaped
+    p = subprocess.Popen("cat", stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    assert p.pid
+
+    def long_running_proc():
+        ppg.global_pipegraph.runner.abort()
+        p = subprocess.Popen(['sleep', '5'], stdin=subprocess.PIPE)
+        Path('pid').write_text(str(p.pid))
+        p.communicate()
+        Path("done").write_text("done")
+    a = ppg.DataLoadingJob('a', long_running_proc)
+    b = ppg.FileGeneratingJob('b', lambda of: of.write_text(str(of))).depends_on(a)
+    with pytest.raises(KeyboardInterrupt):
+        ppg.run()
+    assert not Path('done').exists()
+    pid = int(Path('pid').read_text())
+    with pytest.raises(psutil.NoSuchProcess):
+        psutil.Process(pid)
+    assert psutil.pid_exists(p.pid)
+    p.communicate()
 
 
 

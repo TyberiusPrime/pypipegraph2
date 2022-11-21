@@ -2,6 +2,8 @@
 
 export CARGO_TARGET_DIR=target
 cargo build
-cp target/debug/libppg2_rust.so python/ppg2_rust/ppg2_rust.cpython-39-x86_64-linux-gnu.so
+cp target/debug/libpypipegraph2.so python/pypipegraph2/pypipegraph2.cpython-39-x86_64-linux-gnu.so
+echo "cargo test"
 cargo test
+echo "pytest"
 pytest $@
