@@ -22,7 +22,7 @@ from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
 
 from . import hashers, exceptions, ppg_traceback
-from .enums import JobKind, Resources, ValidationState
+from .enums import Resources
 from .util import escape_logging
 import hashlib
 import shutil
@@ -132,7 +132,6 @@ class JobList(list):
 class Job:
     job_id: int
     historical: Optional[Tuple[str, Dict[str, str]]]
-    cleanup_job_class = None
 
     def __new__(cls, outputs, *args, **kwargs):
         return _dedup_job(cls, ":::".join(sorted([str(x) for x in outputs])))
@@ -151,7 +150,10 @@ class Job:
         if not hasattr(
             self, "job_id"
         ):  # first definition. Otherwise we are a deduped job that has been initialized
-            self.job_id = ":::".join(self.outputs)
+            self.job_id = ":::".join(self.outputs)  # todo: reconsider this
+        assert (
+            not "!!!" in self.job_id
+        )  # we use that to mark edges in the history hashmap/dict
         if not hasattr(
             self, "dependency_callbacks"
         ):  # first definition. Otherwise we are a deduped job that has been initialized
@@ -371,9 +373,6 @@ class Job:
     def _call_result(self):  # pragma: no cover
         return None
 
-    def is_conditional(self):
-        return self.job_kind in (JobKind.Temp, JobKind.Loading)
-
     @property
     def exception(self):
         """Interrogate global pipegraph for this job's exception.
@@ -415,16 +414,6 @@ class Job:
         gg = global_pipegraph
         return [gg.jobs[job_id] for job_id in gg.job_dag.predecessors(self.job_id)]
 
-    # @property
-    # def depth(self):
-    # if self.job_kind is JobKind.Cleanup:
-    # return self.parent_job.depth + 1
-    # upstreams = self.upstreams
-    # if upstreams:
-    # return 1 + max((upstream_job.depth for upstream_job in upstreams))
-    # else:
-    # return 1
-
     def dump_subgraph_for_debug(
         self, job_ids=None, jobs=None, dag=None
     ):  # pragma: no cover
@@ -459,7 +448,9 @@ class Job:
                 nodes.append(f"# debugged job {j.job_id}")
             if isinstance(j, ppg.FileInvariant):
                 nodes.append(f"Path('{counter[0]}').write_text('A')")
-                nodes.append(f"job_{counter[0]} = ppg.FileInvariant('{counter[0]}') #{j.job_id}")
+                nodes.append(
+                    f"job_{counter[0]} = ppg.FileInvariant('{counter[0]}') #{j.job_id}"
+                )
             elif isinstance(j, ppg.ParameterInvariant):
                 nodes.append(
                     f"job_{counter[0]} = ppg.ParameterInvariant('{counter[0]}', 55) #{j.job_id}"
@@ -499,7 +490,7 @@ class Job:
                     f"job_{counter[0]} = ppg.AttributeLoadingJob('{counter[0]}', DummyObject(), 'attr_{counter[0]}', lambda: None, depend_on_function=False) #{j.job_id}"
                 )
             elif isinstance(j, _FileCleanupJob):
-                pass # they will get auto generated
+                pass  # they will get auto generated
             else:
                 raise ValueError(j)
             node_to_counters[node] = counter[0]
@@ -572,7 +563,7 @@ def dummy_fg(of):
 
 
 class MultiFileGeneratingJob(Job):
-    job_kind = JobKind.Output
+    eval_job_kind = "Output"
 
     def __new__(cls, files, *args, **kwargs):
         files = cls._validate_files_argument(files)[0]
@@ -678,42 +669,44 @@ class MultiFileGeneratingJob(Job):
         # the later two cases are for tempfile jobs
         # so that when their downstream failed,
         # and they were not cleaned up
-        # we still don't rebuild them every  time.
+        # we still don't rebuild them every time.
+        # todo: but in rust eval, we now have history saved?
 
         all_present = True
         del_counter = 0
         for fn in self.files:
             if fn.exists():
-                # if we were invalidated, we run-  mabye
-                log_job_trace(
-                    f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}, in history: {str(fn) in historical_output}"
-                )
-                if all_present:  # so far...
-                    if (
-                        runner.job_states[self.job_id].validation_state
-                        is not ValidationState.Invalidated  # both Valid and Unknown are ok here
-                    ):
-                        if str(fn) in historical_output:
-                            stat = fn.stat()
-                            mtime_the_same = int(stat.st_mtime) == historical_output[
-                                str(fn)
-                            ].get("mtime", -1)
-                            size_the_same = stat.st_size == historical_output[
-                                str(fn)
-                            ].get("size", -1)
-                            if mtime_the_same and size_the_same:
-                                continue
-                            if size_the_same:  # but the mtime changed->rehash
-                                new_hash = hashers.hash_file(fn)
-                                if new_hash["hash"] == historical_output[str(fn)].get(
-                                    "hash", "No hash "
-                                ):  # hash the same
-                                    continue
-                            # raise ValueError( # this means the file and the historical output mismatch, right?
-                            # then we should unlink and redo
-                            # historical_output, stat.st_mtime, stat.st_size
-                            # )
-                # at least one file was missing
+                # todo figure out what to do with tihs...
+                # # if we were invalidated, we run-  mabye
+                # log_job_trace(
+                #     f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}, in history: {str(fn) in historical_output}"
+                # )
+                # if all_present:  # so far...
+                #     if (
+                #         runner.job_states[self.job_id].validation_state
+                #         is not ValidationState.Invalidated  # both Valid and Unknown are ok here
+                #     ):
+                #         if str(fn) in historical_output:
+                #             stat = fn.stat()
+                #             mtime_the_same = int(stat.st_mtime) == historical_output[
+                #                 str(fn)
+                #             ].get("mtime", -1)
+                #             size_the_same = stat.st_size == historical_output[
+                #                 str(fn)
+                #             ].get("size", -1)
+                #             if mtime_the_same and size_the_same:
+                #                 continue
+                #             if size_the_same:  # but the mtime changed->rehash
+                #                 new_hash = hashers.hash_file(fn)
+                #                 if new_hash["hash"] == historical_output[str(fn)].get(
+                #                     "hash", "No hash "
+                #                 ):  # hash the same
+                #                     continue
+                #             # raise ValueError( # this means the file and the historical output mismatch, right?
+                #             # then we should unlink and redo
+                #             # historical_output, stat.st_mtime, stat.st_size
+                #             # )
+                # # at least one file was missing
                 log_trace(f"unlinking {fn}")
                 fn.unlink()
                 del_counter += 1
@@ -1011,13 +1004,13 @@ class MultiFileGeneratingJob(Job):
 
 
 class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
-    def __new__(cls, output_filename, *args, **kwargs):
+    def __new__(cls, output_filename, *_args, **_kwargs):
         return super().__new__(cls, [output_filename])
 
     def __init__(
         self,
         output_filename: Union[Path, str],
-        generating_function: Callable[Path],
+        generating_function: Callable[[Path]],
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
         empty_ok=False,
@@ -1043,7 +1036,7 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
     (due to the 'virtual clean up jobs' capturing the dependencies)
     """
 
-    job_kind = JobKind.Temp
+    eval_job_kind = "Ephemeral"
 
     def __init__(
         self,
@@ -1057,16 +1050,20 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
         )
         self._single_file = False
 
-        self.cleanup_job_class = _FileCleanupJob
-
     def output_needed(self, runner):
         raise NotImplementedError("unreachable")  # pragma: no cover
+
+    def cleanup(self):
+        for fn in self.files:
+            if fn.exists():
+                log_trace(f"unlinking {fn}")
+                fn.unlink()
 
 
 class TempFileGeneratingJob(
     MultiTempFileGeneratingJob
 ):  # todo: should theis be a func?
-    job_kind = JobKind.Temp
+    eval_job_kind = "Ephemeral"
 
     def __new__(cls, output_filename, *args, **kwargs):
         return super().__new__(cls, [output_filename])
@@ -1084,32 +1081,9 @@ class TempFileGeneratingJob(
         self._single_file = True
 
 
-class _FileCleanupJob(Job):
-    """Jobs may register cleanup jobs that injected after their immediate downstreams.
-    This encapsulates those
-
-    """
-
-    job_kind = JobKind.Cleanup
-
-    def __new__(cls, parent_job):
-        return _dedup_job(cls, f"CleanUp:{parent_job.job_id}")
-
-    def __init__(self, parent_job):
-        Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
-        self.que_priority = -5  # run them early, but after Attribute cleanups
-        self.parent_job = parent_job
-
-    def run(self, _ignored_runner, _historical_output):
-        for fn in self.parent_job.files:
-            if fn.exists():
-                log_trace(f"unlinking {fn}")
-                fn.unlink()
-
-        return {self.outputs[0]: None}  # todo: optimize this awy?
-
-
 class _InvariantMixin:
+    eval_job_kind = "Always"
+
     def depends_on(
         self,
         other_job: Union[Union[str, Job], List[Union[str, Job]]] = None,
@@ -1151,8 +1125,6 @@ class _FileInvariantMixin:
 
 
 class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
-    job_kind = JobKind.Invariant
-
     def __new__(cls, function, name=None):
         name, function = cls._parse_args(function, name)
         return super().__new__(cls, [name])
@@ -1181,9 +1153,11 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
         res = {}
-        sf = self.get_source_file()
+        sf = self.get_source_file_name()
         if historical_output:
-            historical_output = historical_output[self.job_id]
+            historical_output = historical_output[
+                self.job_id
+            ]  # todo: can we get rid of this duplication?
         else:
             historical_output = {}
         file_unchanged = False
@@ -1268,7 +1242,7 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     def extract_strict_hash(self, a_hash) -> bytes:
         return a_hash["source"].encode("utf-8")
 
-    def get_source_file(self):
+    def get_source_file_name(self):
         if self.is_python_function(self.function):
             sf = inspect.getsourcefile(self.function)
             if sf == sys.argv[0]:  # at least python 3.8 does not have this absolute.
@@ -1671,8 +1645,6 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
 
 class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
-    job_kind = JobKind.Invariant
-
     def __new__(cls, file):
         return super().__new__(cls, [str(_normalize_path(file))])
 
@@ -1728,8 +1700,6 @@ class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
 
 class ParameterInvariant(_InvariantMixin, Job):
-    job_kind = JobKind.Invariant
-
     def __new__(cls, job_id, *args, **kwargs):
         if isinstance(job_id, Path):
             job_id = str(job_id)
@@ -1827,7 +1797,7 @@ class DataLoadingJob(Job):
     an ValuePlusHash.
     """
 
-    job_kind = JobKind.Loading
+    eval_job_kind = "Ephemeral"
 
     def __new__(cls, job_id, *args, **kwargs):
         if isinstance(job_id, Path):
@@ -1926,7 +1896,7 @@ def CachedDataLoadingJob(
 class AttributeLoadingJob(
     Job
 ):  # Todo: refactor with DataLoadingJob. Also figure out how to hash the result?
-    job_kind = JobKind.Loading
+    eval_job_kind = "Ephemeral"
 
     def __new__(cls, job_id, *args, **kwargs):
         return _dedup_job(cls, job_id)
@@ -1969,7 +1939,9 @@ class AttributeLoadingJob(
         self.attribute_name = attribute_name
         self.callback = data_function
         super().__init__([job_id], resources=resources)
-        self.cleanup_job_class = _AttributeCleanupJob
+
+    def cleanup(self):
+        delattr(self.object, self.attribute_name)
 
     def readd(self):  # Todo: refactor
         super().readd()
@@ -2041,32 +2013,6 @@ def CachedAttributeLoadingJob(
     return CachedJobTuple(load_job, cache_job)
 
 
-class _AttributeCleanupJob(Job):
-    """Jobs may register cleanup jobs that injected after their immediate downstreams.
-    This encapsulates those
-
-    """
-
-    job_kind = JobKind.Cleanup
-
-    def __new__(cls, parent_job):
-        return _dedup_job(cls, f"CleanUp:{parent_job.job_id}")
-
-    def __init__(self, parent_job):
-        Job.__init__(self, [f"CleanUp:{parent_job.job_id}"], Resources.RunsHere)
-        self.que_priority = (
-            -10
-        )  # since these free memory, we run them at the earliest timepoint
-        self.parent_job = parent_job  # what are we cleaning up?
-        # and that is necessary for the invalidation to do it's thing
-        # but the real parent will the one we read the files from
-
-    def run(self, _ignored_runner, _historical_output):
-        delattr(self.parent_job.object, self.parent_job.attribute_name)
-
-        return {self.outputs[0]: None}  # todo: optimize this awy?
-
-
 class JobGeneratingJob(Job):
     """A job generating job runs once per ppg.Graph.run(),
     and may alter the graph in essentially any way. The changes are ignored
@@ -2081,7 +2027,7 @@ class JobGeneratingJob(Job):
 
     """
 
-    job_kind = JobKind.JobGenerating
+    eval_job_kind = "Always"
 
     def __new__(cls, job_id, *args, **kwargs):
         return _dedup_job(cls, job_id)
@@ -2333,6 +2279,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
     cleans up no longer used outputs / symlinks.
 
     """
+
+    eval_job_kind = "Output"
 
     _log_local_lock = Lock()
     log_filename = "SharedMultiFileGeneratingJobs.json"
@@ -2663,43 +2611,11 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         else:
             return ([self._map_filename(f) for f in self.files], self.target_folder)
 
-    def output_needed(self, runner):
+    def output_needed(self, _runner):
         # output needed is called at the very beginning
         # of the ppg run.
-        # we nod'n know the hashed folder names yet.
+        # we don't know the hashed folder names yet.
         return True
-        # log_job_trace(f"{self.job_id} - SharedMultiFileGeneratingJob output needed?")
-
-        # if runner.job_states[self.job_id].validation_state == ValidationState.Unknown:
-        #     log_job_trace("output needed = False because invalidated not done")
-        #     return False
-        # log_job_trace(
-        #     f"{self.job_id} invalidation state {runner.job_states[self.job_id].validation_state}"
-        # )
-        # by_input_name = self._derive_output_name(runner)
-        # self._target_folder = self.input_dir / by_input_name
-        # if not self._target_folder.exists():
-        #     log_job_trace(f"target folder did not exist {self._target_folder}")
-        #     return True
-
-        # for fn in self.org_files:
-        #     if not self._map_filename(fn).exists():  # pragma: no cover
-        #         # this case is unlikely ( same hash, but additional outputfiles?)
-        #         # but it could happen...
-        #         self._raise_partial_result_exception()
-        #     if (
-        #         str(fn) not in runner.job_states[self.job_id].historical_output
-        #     ):  # we must record the hashes
-        #         log_job_trace("hash did not exist")
-        #         return True
-        #     # else:
-        #     # we have a hash... but our inputs may have changed us to a new target folder
-        #     # but only if they changed. which is handled by invalidation
-        #     # so we can safely ignore this case
-        #     # pass # pragma: no cover
-
-        # log_job_trace("output needed = False")
-        # return False
 
     def _call_result(self):
         if self._lookup:
