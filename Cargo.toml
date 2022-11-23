@@ -10,6 +10,20 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { version = "0.15.1", features = ["extension-module"] }
+petgraph = "0.6.2"
+env_logger = "0.9.3"
+log = "0.4.14"
+ctrlc = {version="3.2.1", features = ["termination"] }
+#stderrlog = "0.5.1"
+colored = "2.0.0"
+chrono = "0.4.22"
+thiserror = "1.0.37"
+
 
 [package.metadata.maturin]
 python-source = "python"
+
+[dev-dependencies]
+criterion = {version = "0.3", features = ["html_reports"]}
+
+

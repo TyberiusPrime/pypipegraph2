@@ -1,0 +1,81 @@
+JobId: out:::out/__never_placed_here__/a:::out/__never_placed_here__/b
+Class: SharedMultiFileGeneratingJob
+Input jobs:
+
+
+Exception: AttributeError 'Runner' object has no attribute 'job_states'
+{bold('Traceback')} (most recent call last):
+/home/finkernagel/upstream/ppg2_rust/python/pypipegraph2/runner.py":600, in _executing_thread
+	  597                                 else:
+	  598                                     old_history_for_this_job = {}
+	> 599                                 outputs = job.run(
+	  600                                     self, old_history_for_this_job
+	  601                                 )  # job_state.historical_output)
+	  602                                 # ljt(f"job successfull {job_id}")
+Locals:
+	                       c = 1
+	                     cwd = /home/finkernagel/upstream/ppg2_rust/tests/run/TestSharedJob.test_simple
+	                do_sleep = False
+	                       e = 'Runner' object has no attribute 'job_states'
+	                   error = None
+	          exception_type = <class 'AttributeError'>
+	         exception_value = 'Runner' object has no attribute 'job_states'
+	                     job = SharedMultiFileGeneratingJob: out:::out/__never_placed_here__/a:::out/__never_placed_here__/b
+	                  job_id = out:::out/__never_placed_here__/a:::out/__never_placed_here__/b
+	old_history_for_this_job = {}
+	                 outputs = None
+	                      rr = ['out:::out/__never_placed_here__/a:::out/__never_placed_here__/b', 'FIC']
+	                    self = <pypipegraph2.runner.Runner object at 0x7f1b890ffc10>
+	             str_history = {
+	                            "FID": {
+	                             "3.9": [
+	                              [
+	                               [
+	                                "0\tLOAD_FAST\t0\t(of)\nLOAD_METHOD\t0\t(write_text)\nLOAD_GLOBAL\t1\t(read)\nLOAD_DEREF\t0\t(job)\nLOAD_ATTR\t2\t(files)\nLOAD_CONST\t1\t(1)\nBINARY_SUBSCR\nCALL_FUNCTION\t1\nCALL_METHOD\t1\nPOP_TOP\n\n20\tLOAD_GLOBAL\t3\t(counter)\nLOAD_CONST\t2\t('d')\nCALL_FUNCTION\t1\nPOP_TOP\nLOAD_CONST\t0\t(None)\nRETURN_VALUE\n"
+	                               ]
+	                              ],
+	                              "\nSharedMultiFileGeneratingJob: out:::out/__never_placed_here__/a:::out/__never_placed_here__/b"
+	                             ],
+	                             "source": "(of):\n            of.write_text(read(job.files[1]))\n            counter(\"d\")",
+	                             "source_file": {
+	                              "hash": "f87a6654da461b504ebce3b564a171d9",
+	                              "mtime": 1669025729,
+	                              "size": 23810
+	                             },
+	                             "source_line_no": 37
+	                            }
+	                           }
+	                      tb = <traceback object at 0x7f1b89128780>
+
+/home/finkernagel/upstream/ppg2_rust/python/pypipegraph2/jobs.py":2400, in run
+	  2397         from . import global_pipegraph
+	  2398 
+	> 2399         by_input_key = self._derive_output_name(runner)
+	  2400         log_job_trace(f"{self.job_id} run input key {by_input_key}")
+	  2401         self._target_folder = self.input_dir / by_input_key
+	  2402         if self._target_folder.exists() and not self._target_folder.is_symlink():
+Locals:
+	 global_pipegraph = <pypipegraph2.graph.PyPipeGraph object at 0x7f1b89105940>
+	historical_output = {}
+	           runner = <pypipegraph2.runner.Runner object at 0x7f1b890ffc10>
+	             self = SharedMultiFileGeneratingJob: out:::out/__never_placed_here__/a:::out/__never_placed_here__/b
+	           socket = <module 'socket' from '/nix/store/vzqny68wq33dcg4hkdala51n5vqhpnwc-python3-3.9.12/lib/python3.9/socket.py'>
+
+/home/finkernagel/upstream/ppg2_rust/python/pypipegraph2/jobs.py":2629, in _derive_output_name
+	  2626         """Given the set of inputs, get as the key for by_input"""
+	  2627         if (
+	> 2628             runner.job_states[self.job_id].validation_state == ValidationState.Unknown
+	  2629         ):  # pragma: no cover
+	  2630             raise ValueError(
+	  2631                 "deriving output name on SharedMultiFileGeneratingJob "
+Locals:
+	runner = <pypipegraph2.runner.Runner object at 0x7f1b890ffc10>
+	  self = SharedMultiFileGeneratingJob: out:::out/__never_placed_here__/a:::out/__never_placed_here__/b
+
+Exception (repeated from above): AttributeError 'Runner' object has no attribute 'job_states'
+
+job stdout:
+not captured
+
+job stderr:
+not captured

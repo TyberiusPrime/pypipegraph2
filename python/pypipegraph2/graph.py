@@ -1,6 +1,7 @@
 from typing import Optional, Union, Dict
 import gzip
 import threading
+import json
 import logging
 import shutil
 import collections
@@ -236,7 +237,9 @@ class PyPipeGraph:
                         self.run_id,
                         self._jobs_do_dump_subgraph_debug,
                     )
-                    result = self.runner.run(result, print_failures=print_failures)
+                    result, new_history = self.runner.run(
+                        history, print_failures=print_failures
+                    )
                     aborted = self.runner.aborted
                     del self.runner
                     self.run_id += 1
@@ -244,11 +247,14 @@ class PyPipeGraph:
                 except _RunAgain as e:
                     log_info("Jobs created - running again")
                     result = e.args[0]
-                self._update_history(result, history)
+                if history != new_history:
+                    self._save_history(new_history)
+                history = new_history
                 self._log_runtimes(result, start_time)
                 # assert len(result) == job_count # does not account for cleanup jobs...
                 # leave out the cleanup jobs added virtually by the run
                 jobs_already_run.update((k for k in result.keys() if k in self.jobs))
+                log_info(f"Result len {len(result)}")
                 for k, v in result.items():
                     if (
                         not k in final_result
@@ -260,16 +266,17 @@ class PyPipeGraph:
                     break
                 # final_result.update(result)
             del result
+            log_info(f"Left graph loop {len(final_result)}")
             for job_id, job_state in final_result.items():
                 if job_state.outcome == JobOutcome.Failed:
-                    self.do_raise.append(job_state.error)
+                    self.do_raise.append(job_state.payload)
             self.last_run_result = final_result
             if raise_on_job_error and self.do_raise and not self._restart_afterwards:
                 raise exceptions.JobsFailed("At least one job failed", self.do_raise)
             elif not raise_on_job_error and self.do_raise:
                 log_error("At least one job failed")
             if aborted:
-                raise KeyboardInterrupt("Run aborted") # pragma: no cover
+                raise KeyboardInterrupt("Run aborted")  # pragma: no cover
             ok = True
             return final_result
         finally:
@@ -278,8 +285,6 @@ class PyPipeGraph:
             else:
                 log_info("Run is done - with failure")
             log_info("")
-            if print_failures:
-                self._print_failures()
             self._restore_signals()
             if log_id is not None:
                 logger.remove(log_id)
@@ -347,33 +352,6 @@ class PyPipeGraph:
     def _link_errors(self):
         self._link_latest(self.error_dir, f"*", "latest", True)
 
-    def _update_history(self, job_results, history):
-        """Merge history from previous and this run"""
-        # we must keep the history of jobs unseen in this run.
-        # to to allow partial runs
-        org_history = history.copy()
-        new_history = (
-            history  # .copy() don't copy. we reuse this in the subsequent runs
-        )
-        new_history.update(
-            {
-                job_id: (jr.updated_input, jr.updated_output,)
-                for job_id, jr in job_results.items()
-                if jr.outcome is not JobOutcome.Pruned
-            }
-        )
-        done = False
-        while not done:
-            try:
-                if new_history != org_history:
-                    self._save_history(new_history)
-                else:
-                    log_info("Skipped saving history - unchanged")
-                done = True
-            except KeyboardInterrupt as e:
-                self.do_raise.append(e)
-                pass
-
     def _log_runtimes(self, job_results, run_start_time):
         """Log the runtimes to a file (ever growing. But only runtimes over a threshold)"""
         if self.log_dir:
@@ -395,68 +373,16 @@ class PyPipeGraph:
         # we by default share the history file
         # if it's the same history dir, it's the same project
         # and you'd retrigger the calculations too often otherwise
-        return self.history_dir / "ppg_history.gz"  # don't end on .py
+        return self.history_dir / "ppg_history.2.gz"  # don't end on .py
 
     def _load_history(self):
         log_trace("_load_history")
         fn = self.get_history_filename()
         history = {}
-        self.invariant_loading_issues = set()
         if fn.exists():
             log_trace("Historical existed")
-            try:
-                with gzip.GzipFile(fn, "rb") as op:
-                    try:
-                        counter = 0
-                        while True:
-                            try:
-                                # log_trace(f"History read {counter}")
-                                counter += 1
-                                job_id = None
-                                job_id = pickle.load(op)
-                                # log_trace(f"read job_id {job_id}")
-                                inputs_and_outputs = pickle.load(op)
-                                history[job_id] = inputs_and_outputs
-                            except (TypeError, pickle.UnpicklingError) as e:
-                                # log_trace(f"unpickleing error {e}")
-                                if job_id is None:
-                                    raise exceptions.JobsFailed(
-                                        "Could not depickle job id - history file is borked beyond automatic recovery",
-                                        [],
-                                    )
-                                else:
-                                    msg = (
-                                        f"Could not depickle invariant for {job_id} - "
-                                        "check code for depickling bugs. "
-                                        "Job will rerun, probably until the (de)pickling bug is fixed."
-                                        f"\n Exception: {e}"
-                                    )
-                                    self.do_raise.append(ValueError(msg))
-                                    self.invariant_loading_issues.add(job_id)
-                                # use pickle tools to read the pickles op codes until
-                                # the end of the current pickle, hopefully allowing decoding of the next one
-                                # of course if the actual on disk file is messed up beyond this,
-                                # we're done for.
-                                import pickletools
-
-                                try:
-                                    list(pickletools.genops(op))
-                                except Exception as e:
-                                    raise exceptions.JobsFailed(
-                                        "Could not depickle invariants - "
-                                        f"depickling of {job_id} failed, could not skip to next pickled dataset"
-                                        f" Exception was {e}",
-                                        [],
-                                    )
-
-                    except EOFError:
-                        pass
-            except exceptions.JobsFailed:
-                raise
-            # except Exception as e: coverage indicates this never runs.
-            # raise exceptions.FatalGraphException( # that's pretty terminal
-            # "Could not load history data", e, fn.absolute()
-            # )
+            with gzip.GzipFile(fn, "rb") as op:
+                history = json.loads(op.read().decode("utf-8"))
 
         log_info(f"Loaded {len(history)} history entries")
         return history
@@ -467,35 +393,17 @@ class PyPipeGraph:
         if Path(fn).exists():
             fn.rename(fn.with_suffix(fn.suffix + ".backup"))
         raise_keyboard_interrupt = False
-        raise_run_failed_internally = False
-        with gzip.GzipFile(fn, "wb") as op:
-            # robust history saving.
-            # for KeyboardInterrupt, write again
-            # for other exceptions: skip job
-            for job_id, input_and_output_hashes in historical.items():
-                try_again = True
-                while try_again:
+
+        try_again = True
+        while try_again:
+            with gzip.GzipFile(fn, "wb") as op:
+                try:
+                    op.write(json.dumps(historical, indent=2).encode("utf-8"))
                     try_again = False
-                    try:
-                        a = pickle.dumps(
-                            job_id, pickle.HIGHEST_PROTOCOL
-                        ) + pickle.dumps(
-                            input_and_output_hashes, pickle.HIGHEST_PROTOCOL
-                        )
-                        op.write(a)
-                    except KeyboardInterrupt:
-                        try_again = True
-                        raise_keyboard_interrupt = True
-                    except Exception as e:
-                        log_error(f"Could not pickle state for {job_id} - {e}")
-                        raise_run_failed_internally = (job_id, e)
-        if raise_run_failed_internally:
-            job_id, exc = raise_run_failed_internally
-            raise exceptions.RunFailedInternally(
-                f"Pickling of {job_id} inputs/outputs failed.", exc
-            )
+                except KeyboardInterrupt:
+                    raise_keyboard_interrupt = True
         if raise_keyboard_interrupt:
-            log_error("Keyboard interrupt")
+            log_error("Keyboard interrupt during history dumping")
             raise KeyboardInterrupt()
 
     def _resolve_dependency_callbacks(self):
@@ -519,10 +427,6 @@ class PyPipeGraph:
                 j.depends_on(c())
         self._resolve_dependency_callbacks()  # nested?
 
-    def _print_failures(self):
-        log_trace("print_failures")
-        # TODO - actually, we kind of already do that inline, don't we.
-
     def _install_signals(self):
         """make sure we don't crash just because the user logged of.
         Also blocks CTRl-c in console, and transaltes into save shutdown otherwise.
@@ -534,18 +438,18 @@ class PyPipeGraph:
 
         def sigint(*args, **kwargs):
             if self.run_mode is (RunMode.CONSOLE):
-                if self._debug_allow_ctrl_c == "abort": # pragma: no cover
+                if self._debug_allow_ctrl_c == "abort":  # pragma: no cover
                     log_info("CTRL-C from debug - calling interactive abort")
                     self.runner.interactive._cmd_abort(
                         None
                     )  # for testing the abort facility.
-                elif self._debug_allow_ctrl_c == "stop": # pragma: no cover
+                elif self._debug_allow_ctrl_c == "stop":  # pragma: no cover
                     log_info("CTRL-C from debug - calling interactive stop")
                     self.runner.interactive._cmd_default()
                     self.runner.interactive._cmd_stop(
                         None
                     )  # for testing the abort facility.
-                elif self._debug_allow_ctrl_c == "stop&abort": # pragma: no cover
+                elif self._debug_allow_ctrl_c == "stop&abort":  # pragma: no cover
                     log_info("CTRL-C from debug - calling interactive stop")
                     self.runner.interactive._cmd_stop(
                         None
@@ -597,16 +501,15 @@ class PyPipeGraph:
         # we use job numbers during run
         # to keep output files unique etc.
 
-
         # this does not happen - jobs are deduped by job_id, and it's up to the job
         # to verify that it's not an invalid redefinition
-        #if job.job_id in self.jobs and self.jobs[job.job_id] is not job:
-            #if self.run_mode.is_strict():
-                #raise ValueError(
-                    #"Added new job in place of old not supported in run_mode == strict"
-                    #f"new job: {job} id: {id(job)}",
-                    #f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
-                #)
+        # if job.job_id in self.jobs and self.jobs[job.job_id] is not job:
+        # if self.run_mode.is_strict():
+        # raise ValueError(
+        # "Added new job in place of old not supported in run_mode == strict"
+        # f"new job: {job} id: {id(job)}",
+        # f"old job: {self.jobs[job.job_id]} id: {id(self.jobs[job.job_id])}",
+        # )
         if not self.running:  # one core., no locking
             job.job_number = self.next_job_number
             self.next_job_number += 1
@@ -653,7 +556,7 @@ class PyPipeGraph:
         """
         self._restart_afterwards = True  # pragma: no cover - todo: interactive
 
-    def dump_subgraph_for_debug(self, jobs): # pragma: no cover
+    def dump_subgraph_for_debug(self, jobs):  # pragma: no cover
         """Write a subgraph_debug.py
         with a faked-out version of this graph.
         See Job.dump_subgraph_for_debug for details"""
@@ -664,7 +567,7 @@ class PyPipeGraph:
         j1 = self.jobs[jall[0]]
         j1.dump_subgraph_for_debug(jall)
 
-    def dump_subgraph_for_debug_at_run(self, job_ids): # pragma: no cover
+    def dump_subgraph_for_debug_at_run(self, job_ids):  # pragma: no cover
         """Write a subgraph_debug.py
         with a faked-out version of this graph.
         See Job.dump_subgraph_for_debug for details.

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 
-export CARGO_TARGET_DIR=target
-cargo build
-cp target/debug/libpypipegraph2.so python/pypipegraph2/pypipegraph2.cpython-39-x86_64-linux-gnu.so
+./prep_for_tests.sh
 echo "cargo test"
 cargo test
 echo "pytest"
