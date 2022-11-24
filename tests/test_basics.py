@@ -148,6 +148,7 @@ class TestPypipegraph2:
         jobB = ppg.FileGeneratingJob(
             "B", lambda of: of.write_text("BBB" + Path("A").read_text())
         )
+        jobB.depends_on(jobA) # so that the changed A output actually get's registered
         ppg.run()
         assert Path("a").read_text() == "2"
         assert Path("B").read_text() == "BBBAAAA"  # correctly rerun

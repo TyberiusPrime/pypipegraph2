@@ -72,3 +72,7 @@ docs/_build/
 
 # Pyenv
 .python-version
+
+/.ppg/
+examples/simplest/
+tests/run

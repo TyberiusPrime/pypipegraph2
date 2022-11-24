@@ -190,8 +190,7 @@ def unreplace_ppg1():
 
 
 from .util import assert_uniqueness_of_object
-
-from .pypipegraph2 import sum_as_string
+from .pypipegraph2 import enable_logging as enable_rust_logging
 
 
 __all__ = [
@@ -233,5 +232,5 @@ __all__ = [
     "unreplace_ppg1",
     "inside_ppg",
     "assert_uniqueness_of_object",
-    "sum_as_string",
+    "enable_rust_logging"
 ]

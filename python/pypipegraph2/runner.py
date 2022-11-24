@@ -249,7 +249,7 @@ class Runner:
         self.stopped = False
         self.print_failures = print_failures
         self.output_hashes = {}
-        self.history = history # so teh jobs can peak at it and avoid reprocessing
+        self.history = history  # so teh jobs can peak at it and avoid reprocessing
         children_before_run = self.get_children_processes()
 
         self.evaluator = self.build_evaluator(history)
@@ -268,9 +268,9 @@ class Runner:
         try:
             self._interactive_start()
             while True:
-                #ljt("Waiting for evaluation done")
+                # ljt("Waiting for evaluation done")
                 if self.evaluation_done.wait(5):  # todo: timeout, sanity checks.
-                    #ljt(f"evaluation done happend? {self.stopped}")
+                    # ljt(f"evaluation done happend? {self.stopped}")
                     break
                 else:  # periodic timeout
                     if self.aborted:
@@ -307,7 +307,6 @@ class Runner:
                 self._status.stop()
             # log_info("interactive stop")
             self._interactive_stop()
-
 
         for job_id in self.pruned:
             if job_id in self.job_outcomes:
@@ -425,7 +424,7 @@ class Runner:
             log = log_error
         else:
             log = log_job_trace
-        if True: # not self._job_failed_last_time(job_id): # Todo
+        if True:  # not self._job_failed_last_time(job_id): # Todo
             try:
                 job = self.jobs[job_id]
                 # mock failure in case of abort/stop
@@ -508,7 +507,6 @@ class Runner:
         else:
             raise ValueError("Did not expect this")
 
-
     def _executing_thread(self):
         """The inner function of the threads actually executing the jobs"""
         cwd = (
@@ -518,9 +516,16 @@ class Runner:
             try:
                 while not (self.stopped or self.aborted):
                     job_id = None
+                    error = None
                     try:
                         do_sleep = False
                         with self.evaluator_lock:
+                            cleanups = self.evaluator.jobs_ready_for_cleanup()
+
+                            for cleanup_job_id in cleanups:
+                                self.jobs[cleanup_job_id].cleanup()
+                                self.evaluator.event_job_cleanup_done(cleanup_job_id)
+
                             rr = self.evaluator.jobs_ready_to_run()
                             if not rr:
                                 if self.evaluator.is_finished():
@@ -571,6 +576,7 @@ class Runner:
                                             "All threads blocked by Multi core jobs - starting another one"
                                         )
                                         self._start_another_thread()
+                        # letting go of evaluator lock
                         if do_sleep:
                             self.check_for_new_jobs.wait(5)
                             self.check_for_new_jobs.clear()
@@ -592,9 +598,13 @@ class Runner:
 
                             try:
                                 # that's history-output
-                                old_history_for_this_job = self.history.get(job_id, None)
+                                old_history_for_this_job = self.history.get(
+                                    job_id, None
+                                )
                                 if old_history_for_this_job is not None:
-                                    old_history_for_this_job = json.loads(old_history_for_this_job)
+                                    old_history_for_this_job = json.loads(
+                                        old_history_for_this_job
+                                    )
                                 else:
                                     old_history_for_this_job = {}
                                 outputs = job.run(
@@ -640,7 +650,7 @@ class Runner:
                         if job_id is not None:
                             job.stop_time = time.time()
                             job.run_time = job.stop_time - job.start_time
-                            #ljt(f"end {job_id} {self.jobs_in_flight}")
+                            # ljt(f"end {job_id} {self.jobs_in_flight}")
                             self.jobs_in_flight.remove(job_id)
                             if c > 1:
                                 self.jobs_all_cores_in_flight -= 1
@@ -652,9 +662,13 @@ class Runner:
                                     self.job_outcomes[job_id] = RecordedJobOutcome(
                                         job_id, JobOutcome.Success, outputs
                                     )
-                                    str_history = json.dumps(outputs, sort_keys=True, indent=1)
+                                    str_history = json.dumps(
+                                        outputs, sort_keys=True, indent=1
+                                    )
                                     ljt(f"success {job_id} str_history {str_history}")
-                                    self.evaluator.event_job_success(job_id, str_history)
+                                    self.evaluator.event_job_success(
+                                        job_id, str_history
+                                    )
                                 else:
                                     ljt(f"failure {job_id}")
                                     self.job_outcomes[job_id] = RecordedJobOutcome(
@@ -664,9 +678,13 @@ class Runner:
                                     try:
                                         self.log_failed_job(job_id, error)
                                     except Exception as e:
-                                        log_error(f"logging job failure failed {job_id} {e}")
+                                        log_error(
+                                            f"logging job failure failed {job_id} {e}"
+                                        )
 
                             self.job_outcomes[job_id].run_time = job.run_time
+                        elif error:
+                            raise error
                         self.check_for_new_jobs.set()
 
             except (KeyboardInterrupt, SystemExit):  # happens on abort
@@ -682,12 +700,12 @@ class Runner:
                 captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
                 self.abort()
                 raise
-            except BaseException as  e:
+            except BaseException as e:
                 log_error(f"panic from the rust side {e}. Killing process")
                 os.kill(os.getpid(), signal.SIGTERM)
                 sys.exit(1)
         finally:
-            #log_job_trace(f"left thread {len(self.threads)} {job_id}")
+            # log_job_trace(f"left thread {len(self.threads)} {job_id}")
             ...
 
 
