@@ -1,10 +1,6 @@
 #![allow(unused_macros)]
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
-use std::sync::Once;
 use std::{cell::RefCell, rc::Rc};
-
-static LOGGER_INIT: Once = Once::new();
 
 use crate::*;
 
@@ -90,8 +86,10 @@ pub fn test_failure() {
 #[test]
 pub fn test_job_already_done() {
     let strat = StrategyForTesting::new();
+    let mut his = HashMap::new();
     strat.already_done.borrow_mut().insert("out".to_string());
-    let mut g = PPGEvaluator::new(strat);
+    his.insert("out".to_string(), "out".to_string());
+    let mut g = PPGEvaluator::new_with_history(his, strat);
     g.add_node("out", JobKind::Output);
     g.event_startup().unwrap();
     assert!(g.is_finished());
@@ -124,6 +122,8 @@ pub fn simplest_ephmeral() {
 pub fn ephmeral_output_already_done() {
     let mut his = HashMap::new();
     his.insert("in!!!out".to_string(), "".to_string());
+    his.insert("in".to_string(), "".to_string());
+    his.insert("out".to_string(), "".to_string());
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("out".to_string());
     let mut g = PPGEvaluator::new_with_history(his, strat);
@@ -180,7 +180,15 @@ pub fn ephemeral_nested() {
 pub fn ephemeral_nested_first_already_present() {
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("A".to_string());
-    let mut g = PPGEvaluator::new(strat);
+    let mut g = PPGEvaluator::new_with_history(
+        mk_history(&[
+            (("E", "D"), ""),
+            (("D", "C"), ""),
+            (("C", "B"), ""),
+            (("B", "A"), ""),
+        ]),
+        strat,
+    );
     g.add_node("A", JobKind::Output);
     g.add_node("B", JobKind::Ephemeral);
     g.add_node("C", JobKind::Output);
@@ -249,10 +257,16 @@ pub fn ephemeral_nested_last() {
 }
 
 fn mk_history(input: &[((&str, &str), &str)]) -> HashMap<String, String> {
-    input
+    let mut res: HashMap<String, String> = input
         .iter()
         .map(|((a, b), c)| (format!("{}!!!{}", a, b), c.to_string()))
-        .collect()
+        .collect();
+    res.extend(
+        input
+            .iter()
+            .map(|((a, b), c)| (b.to_string(), c.to_string())),
+    );
+    res
 }
 
 #[test]
@@ -319,39 +333,6 @@ pub fn ephemeral_nested_upstream_failuer() {
 
     assert_eq!(g.failed_jobs(), set!["A"]);
     assert_eq!(g.upstream_failed_jobs(), set!["B", "C", "D", "E"]);
-}
-
-fn start_logging() {
-    let start_time = chrono::Utc::now();
-    LOGGER_INIT.call_once(move || {
-        use colored::Colorize;
-        let start_time2 = start_time.clone();
-        env_logger::builder()
-            .format(move |buf, record| {
-                let filename = record
-                    .file()
-                    .unwrap_or("unknown")
-                    .trim_start_matches("src/");
-                let ff = format!("{}:{}", filename, record.line().unwrap_or(0));
-                let ff = match record.level() {
-                    log::Level::Error => ff.red(),
-                    log::Level::Warn => ff.yellow(),
-                    log::Level::Info => ff.blue(),
-                    log::Level::Debug => ff.green(),
-                    log::Level::Trace => ff.normal(),
-                };
-
-                writeln!(
-                    buf,
-                    "{}\t{:.4} | {}",
-                    ff,
-                    (chrono::Utc::now() - start_time2).num_milliseconds(),
-                    //chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
-                    record.args()
-                )
-            })
-            .init()
-    });
 }
 
 #[test]
@@ -523,6 +504,7 @@ fn test_run_then_add_jobs() {
 
 #[test]
 fn test_issue_20210726a() {
+    start_logging();
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("J0", JobKind::Output);
     g.add_node("J2", JobKind::Ephemeral);
@@ -661,11 +643,55 @@ fn test_nested_too_deply_detection() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     ro.allowed_nesting = MAX_NEST;
-    let g = ro.run(&Vec::new());
+    let g = ro.run(&Vec::new()).unwrap();
 }
 
 #[test]
 fn test_bigish_linear_graph() {
     crate::test_big_linear_graph(1000);
     crate::test_big_linear_graph_half_ephemeral(1000);
+}
+
+
+#[test]
+fn test_ephemeral_leaf_invalidated() {
+    start_logging();
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("TB", JobKind::Ephemeral);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("C", "TB");
+        g.depends_on("TB", "TA");
+    }
+    fn create_graph2(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("TB", JobKind::Ephemeral);
+        g.add_node("C", JobKind::Output);
+        g.add_node("FI52", JobKind::Always);
+        g.depends_on("C", "FI52");
+        g.depends_on("C", "TB");
+        g.depends_on("TB", "TA");
+
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(new_history.contains_key("TA"));
+    assert!(new_history.contains_key("TB"));
+    assert!(new_history.contains_key("C"));
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+    error!("Part2");
+
+    ro.setup_graph = Box::new(create_graph2);
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(new_history.contains_key("FI52"));
+    dbg!(&ro.run_counters);
+    assert!(ro.run_counters.get("TA") == Some(&2));
+    assert!(ro.run_counters.get("TB") == Some(&2));
+    assert!(ro.run_counters.get("C") == Some(&2));
+    assert!(ro.run_counters.get("FI52") == Some(&1));
+
 }
