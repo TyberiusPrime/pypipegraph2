@@ -6,7 +6,9 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::types::{PyDict, PyFunction};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::rc::Rc;
+use std::sync::Once;
 use std::thread::current; // Use log crate when building application
 
 use petgraph::{graphmap::GraphMap, Directed, Direction};
@@ -16,6 +18,8 @@ use pyo3::prelude::*;
 
 #[cfg(test)]
 mod tests;
+
+static LOGGER_INIT: Once = Once::new();
 
 #[derive(Error, Debug)]
 pub enum PPGEvaluatorError {
@@ -190,8 +194,17 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             .get(upstream)
             .expect("Invalid upstream id");
         assert_ne!(downstream_id, upstream_id, "can't depend on self");
-        self.dag
-            .add_edge(*upstream_id, *downstream_id, InvalidationStatus::Unknown);
+        let key = format!("{}!!!{}", upstream, downstream);
+        self.dag.add_edge(
+            *upstream_id,
+            *downstream_id,
+            //now if we don'h have history for this edge, it's obviously invalidated, right?
+            if self.history.contains_key(&key) {
+                InvalidationStatus::Unknown
+            } else {
+                InvalidationStatus::Invalidated
+            },
+        );
     }
 
     pub fn is_finished(&self) -> bool {
@@ -258,7 +271,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
 
     fn job_finished(&mut self, idx: u32, outcome: Finished) {
-        debug!("job finished {:?}", self.jobs[idx as usize]);
+        debug!(
+            "job finished {:?} -> outcome: {:?}",
+            self.jobs[idx as usize], outcome
+        );
         self.jobs_ready_to_run.remove(&self.jobs[idx as usize].0);
         self.job_finished_handle_downstream(idx, outcome);
         self.job_finished_handle_upstream(idx, outcome);
@@ -286,11 +302,15 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
     /// update runstates with the new outcome
     fn job_finished_handle_downstream(&mut self, idx: u32, outcome: Finished) {
+        debug!("Job finished {}", self.jobs[idx as usize].0);
         let downstreams: Vec<_> = self
             .dag
             .neighbors_directed(idx, Direction::Outgoing)
             .collect();
-        match (self.jobs[idx as usize].1.ran, outcome) {
+
+        let old_ran_state = self.jobs[idx as usize].1.ran;
+        self.jobs[idx as usize].1.ran = RunStatus::Ran(outcome);
+        match (old_ran_state, outcome) {
             (RunStatus::Ran(_), _) => panic!("job_finished on an already ran job"),
 
             (RunStatus::ReadyToRun, _) => panic!("Going from ReadyToRun to finished?"),
@@ -371,7 +391,6 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 );
             }
         };
-        self.jobs[idx as usize].1.ran = RunStatus::Ran(outcome);
     }
 
     fn check_ready_to_run(&mut self, idx: u32) {
@@ -384,11 +403,20 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             ),
             RunStatus::ReadyToRun => {}
             RunStatus::RunThis | RunStatus::Undetermined => {
-                for (_a, _b, edge) in self.dag.edges_directed(idx, Direction::Incoming) {
+                for (upstream_id, _b, edge) in self.dag.edges_directed(idx, Direction::Incoming) {
+                    debug!(
+                        "upstream {}, edge val status: {:?}",
+                        self.jobs[upstream_id as usize].0, edge
+                    );
                     match edge {
                         InvalidationStatus::Unknown => return,
                         InvalidationStatus::Invalidated => {
-                            self.jobs[idx as usize].1.ran = RunStatus::RunThis
+                            match self.jobs[upstream_id as usize].1.ran {
+                                RunStatus::Ran(_) => {
+                                    self.jobs[idx as usize].1.ran = RunStatus::RunThis
+                                }
+                                _ => return,
+                            };
                         }
                         _ => {}
                     }
@@ -399,14 +427,20 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         !self.strategy.output_already_present(&self.jobs[idx as usize].0)
                         )
                 {
-                    debug!("setting ready to run");
+                    debug!("setting ready to run {}", self.jobs[idx as usize].0);
                     self.jobs[idx as usize].1.ran = RunStatus::ReadyToRun;
                     self.jobs_ready_to_run
                         .insert(self.jobs[idx as usize].0.clone());
                 } else {
                     // this job has been validated, and RunStatus is Undetermined
                     //if self.output_present.contains(&self.jobs[idx as usize].0) {
-                    self.job_finished(idx, Finished::Skipped)
+                    match self.jobs[idx as usize].1.kind {
+                        JobKind::Always => panic!("unexpected"),
+                        JobKind::Output => self.job_finished(idx, Finished::Skipped),
+                        JobKind::Ephemeral => {
+                            self.jobs[idx as usize].1.ran = RunStatus::ReadyToRun;
+                        }
+                    };
                     /* } else {
                         self.jobs[idx as usize].1.ran = RunStatus::ReadyToRun;
                     } */
@@ -430,7 +464,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             debug!("topo {:?} {:?}", idx, &self.jobs[idx]);
             if self.jobs[idx].1.kind == JobKind::Ephemeral {
                 //this jobs not_needed_counters is up to date..
-                debug!("\t not_needed_counters {}", not_needed_counters[idx]);
+                debug!(
+                    "\t not_needed_counters {} {}",
+                    self.jobs[idx].0, not_needed_counters[idx]
+                );
                 if not_needed_counters[idx] < 0 {
                     // i64::min + whatever... -> this is needed.
                     //
@@ -443,6 +480,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         .neighbors_directed(idx as u32, Direction::Outgoing)
                         .count();
                     if total == not_needed_counters[idx] as usize {
+                        debug!("\t We need to downstream needs {}", self.jobs[idx].0);
                         //we know no downstream needs this
                         self.check_ready_to_run(idx as u32);
                         debug!("now setting to skipped possible {:?}", self.jobs[idx].1);
@@ -479,10 +517,31 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         for upstream_id in
                             self.dag.neighbors_directed(idx as u32, Direction::Incoming)
                         {
+                            let iv_status = self
+                                .dag
+                                .edge_weight(upstream_id, idx as u32)
+                                .expect("missing edge?");
+                            match iv_status {
+                                InvalidationStatus::Invalidated => {
+                                    not_needed_counters[upstream_id as usize] = i64::MIN;
+                                    break;
+                                }
+                                InvalidationStatus::Validated => {
+                                    not_needed_counters[upstream_id as usize] += 1;
+                                }
+                                InvalidationStatus::Unknown => {
+                                    not_needed_counters[upstream_id as usize] += 1;
+                                }
+                            }
+                            //todo invalidation
+                            //let key = format!("{}!!!{}", self.jobs[upstream_id].0, self.jobs[idx].0);
+                            //match self.history.get(key) {
+                            //Some(last_output) => ,
+
+                            //}
                             not_needed_counters[upstream_id as usize] += 1;
                         }
                     }
-                    //todo invalidation
                 }
                 JobKind::Ephemeral => match self.jobs[idx].1.ran {
                     RunStatus::RunThis => {
@@ -553,6 +612,20 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             _ => Err(PPGEvaluatorError::APIError(format!(
                 "Signaled job finished/failure on a job that was not running{:?}",
                 j
+            ))),
+        }
+    }
+    pub fn event_job_cleanup_done(&mut self, job_id: &str) -> Result<(), PPGEvaluatorError> {
+        let idx = *self.node_to_index.get(job_id).expect("Unknown job id");
+        let j = &mut self.jobs[idx as usize];
+        match j.1.unfinished_downstreams {
+            UnfinishedDownstreams::Count(0) => {
+                j.1.unfinished_downstreams = UnfinishedDownstreams::CleanupAlreadyHandled;
+                Ok(())
+            }
+            _ => Err(PPGEvaluatorError::APIError(format!(
+                "Cleanup on a job that either was not ready for cleanup, or already cleaned up {} {:?}",
+                job_id, j.1.unfinished_downstreams
             ))),
         }
     }
@@ -697,6 +770,41 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
 
         out
+    }
+}
+
+fn start_logging() {
+    let start_time = chrono::Utc::now();
+    if !LOGGER_INIT.is_completed() {
+        LOGGER_INIT.call_once(move || {
+            use colored::Colorize;
+            let start_time2 = start_time.clone();
+            env_logger::builder()
+                .format(move |buf, record| {
+                    let filename = record
+                        .file()
+                        .unwrap_or("unknown")
+                        .trim_start_matches("src/");
+                    let ff = format!("{}:{}", filename, record.line().unwrap_or(0));
+                    let ff = match record.level() {
+                        log::Level::Error => ff.red(),
+                        log::Level::Warn => ff.yellow(),
+                        log::Level::Info => ff.blue(),
+                        log::Level::Debug => ff.green(),
+                        log::Level::Trace => ff.normal(),
+                    };
+
+                    writeln!(
+                        buf,
+                        "{}\t{:.4} | {}",
+                        ff,
+                        (chrono::Utc::now() - start_time2).num_milliseconds(),
+                        //chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
+                        record.args()
+                    )
+                })
+                .init()
+        });
     }
 }
 
@@ -931,6 +1039,14 @@ impl PyPPG2Evaluator {
         self.evaluator.ready_to_runs().into_iter().collect()
     }
 
+    pub fn jobs_ready_for_cleanup(&self) -> Vec<String> {
+        self.evaluator.ready_to_cleanup().into_iter().collect()
+    }
+
+    pub fn event_job_cleanup_done(&mut self, job_id: &str) -> Result<(), PyErr> {
+        Ok(self.evaluator.event_job_cleanup_done(job_id)?)
+    }
+
     pub fn is_finished(&self) -> bool {
         self.evaluator.is_finished()
     }
@@ -942,14 +1058,16 @@ impl PyPPG2Evaluator {
 
 /// Formats the sum of two numbers as string.
 #[pyfunction]
-fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-    Ok((a + b).to_string())
+fn enable_logging() -> PyResult<()> {
+    start_logging();
+    error!("hello from rust");
+    Ok(())
 }
 
 /// A Python module implemented in Rust.
 #[pymodule]
 fn pypipegraph2(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
+    m.add_function(wrap_pyfunction!(enable_logging, m)?)?;
     m.add_class::<PyPPG2Evaluator>()?;
     Ok(())
 }
