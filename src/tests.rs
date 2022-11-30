@@ -15,6 +15,21 @@ macro_rules! set {
         }
     };
 }
+#[test]
+fn test_one_output() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Output);
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    dbg!(&new_history);
+    assert!(new_history.contains_key("A"));
+    assert!(ro.run_counters.get("A") == Some(&1));
+    error!("Run again");
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&1));
+}
 
 #[test]
 pub fn test_three_outputs() {
@@ -42,6 +57,7 @@ pub fn test_three_outputs() {
         .unwrap();
     assert!(g.is_finished());
     let history = g.new_history();
+    dbg!(&history);
     assert!(history.get(&("out!!!out2".to_string())).unwrap() == "outAResult");
     assert!(history.get(&("out!!!out3".to_string())).unwrap() == "outAResult");
     dbg!(&history);
@@ -96,7 +112,6 @@ pub fn test_job_already_done() {
 }
 #[test]
 pub fn simplest_ephmeral() {
-    start_logging();
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("out", JobKind::Output);
     g.add_node("in", JobKind::Ephemeral);
@@ -121,6 +136,7 @@ pub fn simplest_ephmeral() {
 
 #[test]
 pub fn ephmeral_output_already_done() {
+    start_logging();
     let mut his = HashMap::new();
     his.insert("in!!!out".to_string(), "".to_string());
     his.insert("in".to_string(), "".to_string());
@@ -447,7 +463,6 @@ fn terminal_ephemeral_singleton() {
 
 #[test]
 fn terminal_ephemeral_24() {
-    start_logging();
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("A", JobKind::Output);
     g.add_node("B", JobKind::Ephemeral);
@@ -507,7 +522,6 @@ fn test_run_then_add_jobs() {
 
 #[test]
 fn test_issue_20210726a() {
-    start_logging();
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("J0", JobKind::Output);
     g.add_node("J2", JobKind::Ephemeral);
@@ -651,8 +665,8 @@ fn test_nested_too_deply_detection() {
 
 #[test]
 fn test_bigish_linear_graph() {
-    crate::test_big_linear_graph(1000);
-    crate::test_big_linear_graph_half_ephemeral(1000);
+    crate::test_big_linear_graph(100);
+    crate::test_big_linear_graph_half_ephemeral(100);
 }
 
 #[test]
@@ -681,7 +695,6 @@ fn test_ephemeral_diamond() {
 }
 #[test]
 fn test_ephemeral_downstream_invalidated() {
-    start_logging();
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("TA", JobKind::Ephemeral);
         g.add_node("B", JobKind::Output);
@@ -702,6 +715,7 @@ fn test_ephemeral_downstream_invalidated() {
     assert!(new_history.contains_key("B"));
     assert!(ro.run_counters.get("TA") == Some(&1));
     assert!(ro.run_counters.get("B") == Some(&1));
+    start_logging();
     error!("Part2");
 
     ro.setup_graph = Box::new(create_graph2);
@@ -710,12 +724,12 @@ fn test_ephemeral_downstream_invalidated() {
     assert!(new_history.contains_key("FI52"));
     dbg!(&ro.run_counters);
     assert!(ro.run_counters.get("FI52") == Some(&1));
-    assert!(ro.run_counters.get("C") == Some(&2));
+    assert!(ro.run_counters.get("TA") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&2));
 }
+
 #[test]
 fn test_ephemeral_leaf_invalidated() {
-    start_logging();
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("TA", JobKind::Ephemeral);
         g.add_node("TB", JobKind::Ephemeral);
