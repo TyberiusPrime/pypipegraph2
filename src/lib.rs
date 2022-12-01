@@ -83,12 +83,19 @@ struct Job {
     ran: RunStatus,
     history_output: Option<String>,
     cleanup_status: CleanupStatus, // -1 = not calculated, -2: cleanup handled
+    no_of_input_changed: bool,
 }
 
 enum StartStatus {
     NotStarted,
     Running,
     Finished,
+}
+
+enum EphmerealNeeded {
+    Yes,
+    No,
+    Maybe,
 }
 
 pub trait PPGEvaluatorStrategy {
@@ -150,7 +157,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
     #[allow(clippy::type_complexity)]
     pub fn new_with_history(history: HashMap<String, String>, strategy: T) -> Self {
-        let mut res = PPGEvaluator {
+        let res = PPGEvaluator {
             dag: GraphMap::new(),
             jobs: Vec::new(),
             node_to_index: HashMap::new(),
@@ -172,6 +179,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             ran: RunStatus::Undetermined,
             history_output: None,
             cleanup_status: CleanupStatus::NotYet,
+            no_of_input_changed: false,
         };
         let idx = self.jobs.len() as u32;
         if self.node_to_index.insert(job_id.to_string(), idx).is_some() {
@@ -225,6 +233,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
     pub fn event_startup(&mut self) -> Result<(), PPGEvaluatorError> {
         // this is not particulary fast.
+        error!("event_startup");
         match self.already_started {
             StartStatus::Running | StartStatus::Finished => {
                 return Err(PPGEvaluatorError::APIError("Can't start twice".to_string()));
@@ -241,9 +250,55 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         //the edges are already either Unknown or Invalidated (if we had no historymissing)
         self.topo =
             Some(petgraph::algo::toposort(petgraph::visit::Reversed(&self.dag), None).unwrap());
+        self.count_historic_inputs();
 
         self.evaluate_next_steps();
         Ok(())
+    }
+
+    pub fn count_historic_inputs(&mut self) {
+        let mut historic_count: HashMap<String, i32> = HashMap::new();
+        for key in self.history.keys() {
+            match key.split_once("!!!") {
+                Some((upstream_job_id, downstream_job_id)) => {
+                    *historic_count
+                        .entry(downstream_job_id.to_string())
+                        .or_insert(0) += 1;
+                }
+                None => {}
+            }
+        }
+        let mut current_counts = HashMap::new();
+        for job_id in self.node_to_index.keys() {
+            current_counts.insert(job_id.clone(), 0);
+        }
+
+        for (_upstream_idx, downstream_idx, _weight) in self.dag.all_edges() {
+            let downstream_job_id = &self.jobs[downstream_idx as usize].0;
+            *current_counts.get_mut(downstream_job_id).unwrap() += 1;
+        }
+        debug!("current counts: {:?}", current_counts);
+        debug!("historic counts: {:?}", &historic_count);
+
+        for (job_id, current_count) in current_counts.iter() {
+            let hist_count = match historic_count.get(job_id) {
+                Some(hc) => *hc,
+                None => 0,
+            };
+            if *current_count != hist_count {
+                debug!(
+                    "No of inputs changed {} current: {} historic: {}",
+                    job_id, *current_count, hist_count
+                );
+                let job_idx = *self.node_to_index.get(job_id).unwrap();
+                self.jobs[job_idx as usize].1.no_of_input_changed = true;
+            } else {
+                debug!(
+                    "No of inputs unchanged {} {} {}",
+                    job_id, hist_count, *current_count
+                );
+            }
+        }
     }
 
     fn job_finished(&mut self, idx: u32, outcome: Finished) {
@@ -293,6 +348,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 RunStatus::Undetermined => {
                     //now all I need to do is catch all the combinations...
                     let all_upstreams_done: bool = self.all_upstreams_done(idx as u32);
+                    let no_of_input_changed = job.no_of_input_changed;
                     if all_upstreams_done {
                         debug!("\tall upstreams done");
                         match job.kind {
@@ -304,46 +360,65 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 let output_present = self.strategy.output_already_present(job_id);
                                 let any_incoming_edge_invalidated =
                                     self.any_incoming_edge_invalidated(idx as u32);
-                                if !output_present || any_incoming_edge_invalidated {
+                                if !output_present
+                                    || any_incoming_edge_invalidated
+                                    || no_of_input_changed
+                                {
                                     debug!(
-                                        "\t decided to run {} {}",
-                                        output_present, any_incoming_edge_invalidated
+                                        "\t decided to run {} {} {}",
+                                        output_present,
+                                        any_incoming_edge_invalidated,
+                                        no_of_input_changed
                                     );
                                     self.jobs[idx].1.ran = RunStatus::ReadyToRun;
                                     continue;
                                 } else {
                                     //if output_present
-                                    debug!("\t decided to skip, output was present, not invalidated {} {}", output_present, any_incoming_edge_invalidated);
+                                    debug!("\t decided to skip, output was present, not invalidated {} {} {}", output_present, any_incoming_edge_invalidated, no_of_input_changed);
                                     self.job_finished(idx as u32, Finished::Skipped);
                                 }
                             }
-                            JobKind::Ephemeral => {
-                                let (any_downstream_necessary, any_outgoing_invalidated) =
-                                    self.examine_ephmeral_downstream(idx as u32);
-                                if any_downstream_necessary | any_outgoing_invalidated {
-                                    debug!(
-                                        "\t decided to run {} {}",
-                                        any_downstream_necessary, any_outgoing_invalidated
-                                    );
+                            JobKind::Ephemeral => match self.is_ephemeral_needed(idx as u32) {
+                                EphmerealNeeded::Yes => {
+                                    debug!("\t decided to run, ephemeral was needed",);
                                     self.jobs[idx].1.ran = RunStatus::ReadyToRun;
                                     continue;
-                                } else {
-                                    /* let downstreams_validated =
-                                        self.all_downstreams_validated(idx as u32);
-                                    if any_downstream_necessary {
-                                        debug!(
-                                        "\t decided to skip any_downstream_necessary, {} any_outgoing_invalidated {}",
-                                        any_downstream_necessary, any_outgoing_invalidated
-                                    ); */
-                                        self.job_finished(idx as u32, Finished::Skipped);
-                                    /* } else {
-                                        self.debug_edges();
-                                    } */
                                 }
-                            }
+                                EphmerealNeeded::No => {
+                                    debug!("\t decided to skip, ephemeral was not needed",);
+                                    self.job_finished(idx as u32, Finished::Skipped);
+                                }
+                                EphmerealNeeded::Maybe => {}
+                            },
                         }
                     } else {
                         debug!("\t Not all upstreams done");
+                        if job.kind == JobKind::Ephemeral {
+                            match self.is_ephemeral_needed(idx as u32) {
+                                EphmerealNeeded::No => {
+                                    debug!(
+                                        "Ephemeral classified as wont't run, setting to skipped {}",
+                                        &self.jobs[idx].0
+                                    );
+                                    self.job_finished(idx as u32, Finished::Skipped);
+                                }
+                                EphmerealNeeded::Yes => {}, //todo: cache?
+                                EphmerealNeeded::Maybe => {}
+                            }
+
+                            /*
+                            let (any_downstream_necessary, any_outgoing_invalidated) =
+                                self.examine_ephmeral_downstream(idx as u32);
+                            if any_downstream_necessary | any_outgoing_invalidated {
+                            } else {
+                                debug!(
+                                    "Ephemeral classified as wont't run, setting to skipped {}",
+                                    &self.jobs[idx].0
+                                );
+                                self.job_finished(idx as u32, Finished::Skipped);
+                            }
+                            */
+                        }
                         //can't progress this node.
                     }
                 }
@@ -414,41 +489,134 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         return true;
     }
 
-    fn examine_ephmeral_downstream(&mut self, idx: u32) -> (bool, bool) {
+    fn is_ephemeral_needed(&mut self, idx: u32) -> EphmerealNeeded {
         let downstreams: Vec<_> = self
             .dag
             .neighbors_directed(idx, Direction::Outgoing)
             .collect();
-        let job_id = &self.jobs[idx as usize].0;
+        if downstreams.is_empty() {
+            return EphmerealNeeded::No;
+        }
+        let mut any_unknown = false;
         for downstream_idx in downstreams {
             let (downstream_id, downstream_job) = &self.jobs[downstream_idx as usize];
-
-            match downstream_job.kind {
-                JobKind::Always => return (true, true),
-                JobKind::Output => {
-                    if !self.strategy.output_already_present(downstream_id) {
-                        return (true, true);
+            if downstream_job.kind == JobKind::Always {
+                debug!(
+                    "\t\t ephemeral was needed because of {} being always",
+                    downstream_id
+                );
+                return EphmerealNeeded::Yes;
+            } else if downstream_job.kind == JobKind::Output
+                && !self.strategy.output_already_present(downstream_id)
+            {
+                debug!(
+                    "\t\t ephemeral was needed because of {} missing output",
+                    downstream_id
+                );
+                return EphmerealNeeded::Yes;
+            } else {
+                /* debug!(
+                    "\t\tooking at downstream {} {:?}",
+                    downstream_id.clone(),
+                    self.job_invalidation_status_ignoring_ephemerals(downstream_idx)
+                ); */
+                let downstream_kind = downstream_job.kind; 
+                match self.job_invalidation_status_ignoring_ephemerals(downstream_idx) {
+                    InvalidationStatus::Invalidated => return EphmerealNeeded::Yes,
+                    InvalidationStatus::Validated => {
+                        if downstream_kind == JobKind::Ephemeral {
+                            match self.is_ephemeral_needed(downstream_idx) {
+                                EphmerealNeeded::Yes => return EphmerealNeeded::Yes,
+                                EphmerealNeeded::No => {}
+                                EphmerealNeeded::Maybe => any_unknown = true,
+                            }
+                        }
+                    }
+                    InvalidationStatus::Unknown => {
+                        any_unknown = true;
                     }
                 }
-                JobKind::Ephemeral => return self.examine_ephmeral_downstream(downstream_idx),
-            };
-            debug!("\t\t past kind {}", self.jobs[downstream_idx as usize].0);
-            match self.dag.edge_weight(idx, downstream_idx) {
-                Some(invalidation_status) => match invalidation_status {
-                    InvalidationStatus::Invalidated => return (false, true),
-                    InvalidationStatus::Validated | InvalidationStatus::Unknown => {}
-                },
-                None => panic!("No edge, but it downstreams??!"),
-            };
-            debug!("\t\t past edges {}", self.jobs[downstream_idx as usize].0);
-            if self.any_incoming_edge_invalidated(downstream_idx) {
-                debug!("\t\t case 1");
-                return (true, false);
-            } else {
-                debug!("\t\t case 2");
             }
         }
-        (false, false)
+        if any_unknown {
+            EphmerealNeeded::Maybe
+        } else {
+            EphmerealNeeded::No
+        }
+    }
+
+    fn job_invalidation_status_ignoring_ephemerals(&mut self, idx: u32) -> InvalidationStatus {
+        let upstreams: Vec<_> = self
+            .dag
+            .neighbors_directed(idx, Direction::Incoming)
+            .collect(); // todo: borrow checker...
+        let job_id = &self.jobs[idx as usize].0;
+        for upstream_idx in upstreams {
+            if self.jobs[upstream_idx as usize].1.kind == JobKind::Ephemeral {
+                continue;
+            }
+            match self.dag.edge_weight(upstream_idx, idx).unwrap() {
+                InvalidationStatus::Invalidated => return InvalidationStatus::Invalidated,
+                InvalidationStatus::Validated => {}
+                InvalidationStatus::Unknown => {
+                    self.update_invalidation_status(upstream_idx, idx);
+                    match self.dag.edge_weight(upstream_idx, idx).unwrap() {
+                        InvalidationStatus::Invalidated => return InvalidationStatus::Invalidated,
+                        InvalidationStatus::Validated => {}
+                        InvalidationStatus::Unknown => {
+                            return InvalidationStatus::Unknown;
+                        }
+                    }
+                }
+            }
+        }
+        InvalidationStatus::Validated
+    }
+
+    fn update_invalidation_status(&mut self, upstream_idx: u32, downstream_idx: u32) {
+        let upstream_id = &self.jobs[upstream_idx as usize].0;
+        let downstream_id = &self.jobs[downstream_idx as usize].0;
+        let key = format!("{}!!!{}", upstream_id, downstream_id);
+        match self.history.get(&key) {
+            Some(recorded_value) => {
+                match self.jobs[upstream_idx as usize].1.history_output.as_ref() {
+                    Some(new_value) => {
+                        if self.strategy.is_history_altered(
+                            upstream_id,
+                            downstream_id,
+                            recorded_value,
+                            new_value,
+                        ) {
+                            *self
+                                .dag
+                                .edge_weight_mut(upstream_idx, downstream_idx)
+                                .unwrap() = InvalidationStatus::Invalidated;
+                        } else {
+                        }
+                        *self
+                            .dag
+                            .edge_weight_mut(upstream_idx, downstream_idx)
+                            .unwrap() = InvalidationStatus::Validated;
+                    }
+                    None => {}
+                }
+            }
+
+            None => {
+                *self
+                    .dag
+                    .edge_weight_mut(upstream_idx, downstream_idx)
+                    .unwrap() = InvalidationStatus::Invalidated;
+            }
+        }
+    }
+
+    fn has_no_downstreams(&self, idx: u32) -> bool {
+        let mut downstreams = self.dag.neighbors_directed(idx, Direction::Outgoing);
+        match downstreams.next() {
+            Some(_) => false,
+            None => true,
+        }
     }
 
     fn any_incoming_edge_invalidated(&mut self, idx: u32) -> bool {

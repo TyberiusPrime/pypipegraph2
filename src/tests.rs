@@ -136,7 +136,6 @@ pub fn simplest_ephmeral() {
 
 #[test]
 pub fn ephmeral_output_already_done() {
-    start_logging();
     let mut his = HashMap::new();
     his.insert("in!!!out".to_string(), "".to_string());
     his.insert("in".to_string(), "".to_string());
@@ -206,6 +205,7 @@ pub fn ephemeral_nested_first_already_present() {
         ]),
         strat,
     );
+    dbg!(&g.history);
     g.add_node("A", JobKind::Output);
     g.add_node("B", JobKind::Ephemeral);
     g.add_node("C", JobKind::Output);
@@ -246,11 +246,11 @@ pub fn ephemeral_nested_last() {
     strat.already_done.borrow_mut().insert("C".to_string());
     let mut g = PPGEvaluator::new_with_history(
         mk_history(&[
-            (("A", "B"), ""),
-            (("B", "C"), ""),
-            (("C", "D"), ""),
-            (("D", "E"), ""),
-            (("E", "F"), ""),
+            (("B", "A"), ""),
+            (("C", "B"), ""),
+            (("D", "C"), ""),
+            (("E", "D"), ""),
+            (("F", "E"), ""),
         ]),
         strat,
     );
@@ -276,7 +276,7 @@ pub fn ephemeral_nested_last() {
 fn mk_history(input: &[((&str, &str), &str)]) -> HashMap<String, String> {
     let mut res: HashMap<String, String> = input
         .iter()
-        .map(|((a, b), c)| (format!("{}!!!{}", a, b), c.to_string()))
+        .map(|((downstream, upstream), c)| (format!("{}!!!{}", upstream, downstream), c.to_string()))
         .collect();
     res.extend(
         input
@@ -292,10 +292,10 @@ pub fn ephemeral_nested_inner() {
     strat.already_done.borrow_mut().insert("C".to_string());
     let mut g = PPGEvaluator::new_with_history(
         mk_history(&[
-            (("A", "B"), ""),
-            (("B", "C"), ""),
-            (("C", "D"), ""),
-            (("D", "E"), ""),
+            (("B", "A"), ""),
+            (("D", "C"), ""),
+            (("C", "B"), ""),
+            (("B", "A"), ""),
         ]),
         strat,
     );
@@ -309,7 +309,7 @@ pub fn ephemeral_nested_inner() {
     g.depends_on("C", "B");
     g.depends_on("B", "A");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["A"]);
+    assert_eq!(g.ready_to_runs(), set!["A","D"]); // this changes with teh 'ephemerals cant invalidate' rule
     assert!(!g.is_finished());
 
     g.event_now_running("A").unwrap();
@@ -587,7 +587,7 @@ fn test_ephemeral_not_running_without_downstreams() {
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("J3", JobKind::Ephemeral);
     g.event_startup().unwrap();
-    assert!(g.is_finished());
+    assert!(g.is_finished()); // it's not running...
 
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("J3", JobKind::Ephemeral);
@@ -604,6 +604,10 @@ fn test_ephemeral_not_running_without_downstreams() {
     g.event_job_finished_failure("A1").unwrap();
     assert!(g.is_finished());
     assert_eq!(g.new_history().len(), 0); //since nothing succeeded
+                                          //
+    //problem: evaluate_next_steps leads to changes
+    //which will change in the next run, but we would need 
+    //it to run multiple times to uppropagate when ja ephemeral decides *not* to run...
 }
 
 #[test]
@@ -715,7 +719,6 @@ fn test_ephemeral_downstream_invalidated() {
     assert!(new_history.contains_key("B"));
     assert!(ro.run_counters.get("TA") == Some(&1));
     assert!(ro.run_counters.get("B") == Some(&1));
-    start_logging();
     error!("Part2");
 
     ro.setup_graph = Box::new(create_graph2);
@@ -730,6 +733,7 @@ fn test_ephemeral_downstream_invalidated() {
 
 #[test]
 fn test_ephemeral_leaf_invalidated() {
+    start_logging();
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("TA", JobKind::Ephemeral);
         g.add_node("TB", JobKind::Ephemeral);
@@ -766,4 +770,33 @@ fn test_ephemeral_leaf_invalidated() {
     assert!(ro.run_counters.get("C") == Some(&2));
     assert!(ro.run_counters.get("TA") == Some(&2));
     assert!(ro.run_counters.get("TB") == Some(&2));
+}
+
+#[test]
+
+fn test_loosing_an_input_is_invalidating() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Always);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("C", "A");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+
+    fn create_graph2(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("C", JobKind::Output);
+    }
+    error!("part2");
+    ro.setup_graph = Box::new(create_graph2);
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(new_history.contains_key("C"));
+    assert!(new_history.contains_key("A"));
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&2));
+
+
 }

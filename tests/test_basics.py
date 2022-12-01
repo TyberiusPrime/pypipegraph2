@@ -627,7 +627,7 @@ class TestPypipegraph2:
             "TB", lambda of: counter("b") and True and of.write_text("B")
         )
         ppg.run()
-        assert Path("b").read_text() == "2"  # we trigger that one
+        assert Path("b").read_text() == "1"  # we trigger that one
         assert (
             Path("a").read_text() == "1"
         )  # the FunctionInvariant:TB was pulled into TA's upstream by the rewrite
