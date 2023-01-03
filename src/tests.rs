@@ -276,7 +276,9 @@ pub fn ephemeral_nested_last() {
 fn mk_history(input: &[((&str, &str), &str)]) -> HashMap<String, String> {
     let mut res: HashMap<String, String> = input
         .iter()
-        .map(|((downstream, upstream), c)| (format!("{}!!!{}", upstream, downstream), c.to_string()))
+        .map(|((downstream, upstream), c)| {
+            (format!("{}!!!{}", upstream, downstream), c.to_string())
+        })
         .collect();
     res.extend(
         input
@@ -309,7 +311,7 @@ pub fn ephemeral_nested_inner() {
     g.depends_on("C", "B");
     g.depends_on("B", "A");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["A","D"]); // this changes with teh 'ephemerals cant invalidate' rule
+    assert_eq!(g.ready_to_runs(), set!["A", "D"]); // this changes with teh 'ephemerals cant invalidate' rule
     assert!(!g.is_finished());
 
     g.event_now_running("A").unwrap();
@@ -584,11 +586,13 @@ fn test_adding_node_twice() {
 }
 #[test]
 fn test_ephemeral_not_running_without_downstreams() {
+    start_logging();
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("J3", JobKind::Ephemeral);
     g.event_startup().unwrap();
     assert!(g.is_finished()); // it's not running...
 
+    debug!("part 2");
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("J3", JobKind::Ephemeral);
     g.add_node("J4", JobKind::Ephemeral);
@@ -605,9 +609,9 @@ fn test_ephemeral_not_running_without_downstreams() {
     assert!(g.is_finished());
     assert_eq!(g.new_history().len(), 0); //since nothing succeeded
                                           //
-    //problem: evaluate_next_steps leads to changes
-    //which will change in the next run, but we would need 
-    //it to run multiple times to uppropagate when ja ephemeral decides *not* to run...
+                                          //problem: evaluate_next_steps leads to changes
+                                          //which will change in the next run, but we would need
+                                          //it to run multiple times to uppropagate when ja ephemeral decides *not* to run...
 }
 
 #[test]
@@ -733,7 +737,6 @@ fn test_ephemeral_downstream_invalidated() {
 
 #[test]
 fn test_ephemeral_leaf_invalidated() {
-    start_logging();
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("TA", JobKind::Ephemeral);
         g.add_node("TB", JobKind::Ephemeral);
@@ -797,6 +800,99 @@ fn test_loosing_an_input_is_invalidating() {
     assert!(new_history.contains_key("A"));
     assert!(ro.run_counters.get("A") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&2));
+}
+
+#[test]
+fn test_changing_inputs_when_leaf_was_missing() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Always);
+        g.add_node("B", JobKind::Output);
+        g.depends_on("B", "A");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+
+    fn create_graph2(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Output);
+        g.add_node("C", JobKind::Always);
+        g.depends_on("A", "C")
+    }
+    ro.setup_graph = Box::new(create_graph2);
+
+    ro.outputs.insert("A".to_string(), "new".to_string());
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(new_history.contains_key("B"));
+    assert!(new_history.contains_key("A"));
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+
+    fn create_graph3(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Output);
+        g.add_node("C", JobKind::Always);
+        g.depends_on("A", "C");
+        g.add_node("B", JobKind::Output);
+        g.depends_on("B", "A");
+    }
+    error!("part3");
+    ro.setup_graph = Box::new(create_graph3);
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&2));
+    assert!(ro.run_counters.get("C") == Some(&2));
+}
+
+#[test]
+fn test_epheremal_chained_invalidate_intermediate() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Ephemeral);
+        g.add_node("B", JobKind::Ephemeral);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("B", "A");
+        g.depends_on("C", "B");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    //    let new_history = g.new_history();
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+
+    fn create_graph2(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Ephemeral);
+        g.add_node("B", JobKind::Ephemeral);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("B", "A");
+        g.depends_on("C", "B");
+
+        g.add_node("D", JobKind::Always);
+        g.depends_on("B","D");
+    }
+
+    ro.setup_graph = Box::new(create_graph2);
+
+    start_logging();
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("D") == Some(&1));
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&2));
+    assert!(ro.run_counters.get("C") == Some(&2));
+
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("D") == Some(&2));
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&2));
+    assert!(ro.run_counters.get("C") == Some(&2));
+
+
 
 
 }
