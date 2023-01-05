@@ -40,12 +40,12 @@ pub fn test_three_outputs() {
     g.depends_on("out2", "out");
     g.depends_on("out3", "out");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["out"]);
+    assert_eq!(g.query_ready_to_run(), set!["out"]);
     g.event_now_running("out").unwrap();
-    assert!(g.ready_to_runs().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
     g.event_job_finished_success("out", "outAResult".to_string())
         .unwrap();
-    assert_eq!(g.ready_to_runs(), set!["out2", "out3"]);
+    assert_eq!(g.query_ready_to_run(), set!["out2", "out3"]);
     assert!(!g.is_finished());
     g.event_now_running("out2").unwrap();
     g.event_now_running("out3").unwrap();
@@ -88,11 +88,11 @@ pub fn test_failure() {
     g.depends_on("out2", "out");
     g.depends_on("out3", "out2");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["out"]);
+    assert_eq!(g.query_ready_to_run(), set!["out"]);
     g.event_now_running("out").unwrap();
-    assert!(g.ready_to_runs().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
     g.event_job_finished_failure("out").unwrap();
-    assert!(g.ready_to_runs().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
     assert!(g.is_finished());
     //we keep history that for jobs tha are currently not present
     assert!(g.new_history().len() == 1);
@@ -110,6 +110,7 @@ pub fn test_job_already_done() {
     g.event_startup().unwrap();
     assert!(g.is_finished());
 }
+
 #[test]
 pub fn simplest_ephmeral() {
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
@@ -118,20 +119,20 @@ pub fn simplest_ephmeral() {
     g.depends_on("out", "in");
     g.event_startup().unwrap();
     assert!(!g.is_finished());
-    assert_eq!(g.ready_to_runs(), set!["in"]);
+    assert_eq!(g.query_ready_to_run(), set!["in"]);
     g.event_now_running("in").unwrap();
     g.event_job_finished_success("in", "".to_string()).unwrap();
 
     assert!(!g.is_finished());
-    assert_eq!(g.ready_to_runs(), set!["out"]);
-    dbg!(g.ready_to_cleanup());
-    assert!(g.ready_to_cleanup().is_empty());
+    assert_eq!(g.query_ready_to_run(), set!["out"]);
+    dbg!(g.query_ready_for_cleanup());
+    assert!(g.query_ready_for_cleanup().is_empty());
 
     g.event_now_running("out").unwrap();
     g.event_job_finished_success("out", "".to_string()).unwrap();
     assert!(g.is_finished());
-    assert_eq!(g.ready_to_cleanup(), set!["in"]);
-    assert!(g.ready_to_runs().is_empty())
+    assert_eq!(g.query_ready_for_cleanup(), set!["in"]);
+    assert!(g.query_ready_to_run().is_empty())
 }
 
 #[test]
@@ -147,7 +148,7 @@ pub fn ephmeral_output_already_done() {
     g.add_node("in", JobKind::Ephemeral);
     g.depends_on("out", "in");
     g.event_startup().unwrap();
-    assert!(g.ready_to_runs().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
     assert!(g.is_finished());
 }
 #[test]
@@ -163,32 +164,32 @@ pub fn ephemeral_nested() {
     g.depends_on("C", "B");
     g.depends_on("B", "A");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["A"]);
+    assert_eq!(g.query_ready_to_run(), set!["A"]);
     assert!(!g.is_finished());
 
     g.event_now_running("A").unwrap();
     g.event_job_finished_success("A", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["B"]);
+    assert_eq!(g.query_ready_to_run(), set!["B"]);
     assert!(!g.is_finished());
 
     g.event_now_running("B").unwrap();
     g.event_job_finished_success("B", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["C"]);
+    assert_eq!(g.query_ready_to_run(), set!["C"]);
     assert!(!g.is_finished());
 
     g.event_now_running("C").unwrap();
     g.event_job_finished_success("C", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["D"]);
+    assert_eq!(g.query_ready_to_run(), set!["D"]);
     assert!(!g.is_finished());
 
     g.event_now_running("D").unwrap();
     g.event_job_finished_success("D", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["E"]);
+    assert_eq!(g.query_ready_to_run(), set!["E"]);
     assert!(!g.is_finished());
 
     g.event_now_running("E").unwrap();
     g.event_job_finished_success("E", "".to_string()).unwrap();
-    assert!(g.ready_to_runs().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
     assert!(g.is_finished());
 }
 
@@ -205,7 +206,7 @@ pub fn ephemeral_nested_first_already_present() {
         ]),
         strat,
     );
-    dbg!(&g.history);
+    //dbg!(&g.history);
     g.add_node("A", JobKind::Output);
     g.add_node("B", JobKind::Ephemeral);
     g.add_node("C", JobKind::Output);
@@ -216,27 +217,27 @@ pub fn ephemeral_nested_first_already_present() {
     g.depends_on("C", "B");
     g.depends_on("B", "A");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["B"]);
+    assert_eq!(g.query_ready_to_run(), set!["B"]);
     assert!(!g.is_finished());
 
     g.event_now_running("B").unwrap();
     g.event_job_finished_success("B", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["C"]);
+    assert_eq!(g.query_ready_to_run(), set!["C"]);
     assert!(!g.is_finished());
 
     g.event_now_running("C").unwrap();
     g.event_job_finished_success("C", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["D"]);
+    assert_eq!(g.query_ready_to_run(), set!["D"]);
     assert!(!g.is_finished());
 
     g.event_now_running("D").unwrap();
     g.event_job_finished_success("D", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["E"]);
+    assert_eq!(g.query_ready_to_run(), set!["E"]);
     assert!(!g.is_finished());
 
     g.event_now_running("E").unwrap();
     g.event_job_finished_success("E", "".to_string()).unwrap();
-    assert!(g.ready_to_runs().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
     assert!(g.is_finished());
 }
 #[test]
@@ -264,12 +265,12 @@ pub fn ephemeral_nested_last() {
     g.depends_on("C", "B");
     g.depends_on("B", "A");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["A"]);
+    assert_eq!(g.query_ready_to_run(), set!["A"]);
     assert!(!g.is_finished());
 
     g.event_now_running("A").unwrap();
     g.event_job_finished_success("A", "".to_string()).unwrap();
-    assert!(g.ready_to_runs().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
     assert!(g.is_finished());
 }
 
@@ -290,6 +291,7 @@ fn mk_history(input: &[((&str, &str), &str)]) -> HashMap<String, String> {
 
 #[test]
 pub fn ephemeral_nested_inner() {
+    start_logging();
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("C".to_string());
     let mut g = PPGEvaluator::new_with_history(
@@ -311,13 +313,17 @@ pub fn ephemeral_nested_inner() {
     g.depends_on("C", "B");
     g.depends_on("B", "A");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["A", "D"]); // this changes with teh 'ephemerals cant invalidate' rule
+    assert_eq!(g.query_ready_to_run(), set!["A"]); // this changes with the 'ephemerals cant invalidate' rule. Case can invalidate, I presume
     assert!(!g.is_finished());
 
     g.event_now_running("A").unwrap();
     g.event_job_finished_success("A", "".to_string()).unwrap();
     assert!(!g.is_finished());
-    assert_eq!(g.ready_to_runs(), set!["D"]);
+    // C was done. B only runs if C needs to be made, or if B is invalidated
+    // but A's output didn't change, B did not get invalidated, and therefore,
+    // B can not invalidate C.
+    // But D is needed by E, which is a missing output.
+    assert_eq!(g.query_ready_to_run(), set!["D"]);
 
     g.event_now_running("D").unwrap();
     g.event_job_finished_success("D", "".to_string()).unwrap();
@@ -326,12 +332,12 @@ pub fn ephemeral_nested_inner() {
     g.event_now_running("E").unwrap();
     g.event_job_finished_failure("E").unwrap();
 
-    assert!(g.ready_to_runs().is_empty());
-    assert_eq!(g.failed_jobs(), set!["E"]);
-    assert!(g.upstream_failed_jobs().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
+    assert_eq!(g.query_failed(), set!["E"]);
+    assert!(g.query_upstream_failed().is_empty());
 }
 #[test]
-pub fn ephemeral_nested_upstream_failuer() {
+pub fn ephemeral_nested_upstream_failure() {
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("B", JobKind::Ephemeral);
     g.add_node("D", JobKind::Ephemeral);
@@ -343,15 +349,15 @@ pub fn ephemeral_nested_upstream_failuer() {
     g.depends_on("D", "C");
     g.depends_on("C", "B");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["A"]);
+    assert_eq!(g.query_ready_to_run(), set!["A"]);
     assert!(!g.is_finished());
 
     g.event_now_running("A").unwrap();
     g.event_job_finished_failure("A").unwrap();
     assert!(g.is_finished());
 
-    assert_eq!(g.failed_jobs(), set!["A"]);
-    assert_eq!(g.upstream_failed_jobs(), set!["B", "C", "D", "E"]);
+    assert_eq!(g.query_failed(), set!["A"]);
+    assert_eq!(g.query_upstream_failed(), set!["B", "C", "D", "E"]);
 }
 
 #[test]
@@ -372,41 +378,43 @@ pub fn disjoint_and_twice() {
         g
     };
 
+    error!("part 1");
     let mut g = init(HashMap::new());
 
     let history = {
         g.event_startup().unwrap();
-        assert_eq!(g.ready_to_runs(), set!["A", "e"]);
+        assert_eq!(g.query_ready_to_run(), set!["A", "e"]);
         g.event_now_running("A").unwrap();
-        assert_eq!(g.ready_to_runs(), set!["e"]);
+        assert_eq!(g.query_ready_to_run(), set!["e"]);
         g.event_now_running("e").unwrap();
-        assert!(g.ready_to_runs().is_empty());
+        assert!(g.query_ready_to_run().is_empty());
         g.event_job_finished_success("e", "histe".to_string())
             .unwrap();
         already_done.borrow_mut().insert("e".to_string());
-        assert_eq!(g.ready_to_runs(), set!["d"]);
+        assert_eq!(g.query_ready_to_run(), set!["d"]);
         g.event_now_running("d").unwrap();
         g.event_job_finished_success("d", "histd".to_string())
             .unwrap();
         already_done.borrow_mut().insert("d".to_string());
-        assert!(g.ready_to_runs().is_empty());
+        assert!(g.query_ready_to_run().is_empty());
         g.event_job_finished_success("A", "histA".to_string())
             .unwrap();
         already_done.borrow_mut().insert("A".to_string());
-        assert_eq!(g.ready_to_runs(), set!["B"]);
+        assert_eq!(g.query_ready_to_run(), set!["B"]);
         g.event_now_running("B").unwrap();
-        assert!(g.ready_to_runs().is_empty());
+        assert!(g.query_ready_to_run().is_empty());
         g.event_job_finished_success("B", "histB".to_string())
             .unwrap();
         already_done.borrow_mut().insert("B".to_string());
-        assert_eq!(g.ready_to_runs(), set!["C"]);
+        assert_eq!(g.query_ready_to_run(), set!["C"]);
         g.event_now_running("C").unwrap();
-        assert!(g.ready_to_runs().is_empty());
+        assert!(g.query_ready_to_run().is_empty());
         g.event_job_finished_success("C", "histC".to_string())
             .unwrap();
         already_done.borrow_mut().insert("C".to_string());
         g.new_history()
     };
+    error!("part 2");
 
     {
         let mut g2 = init(history.clone());
@@ -414,13 +422,13 @@ pub fn disjoint_and_twice() {
         assert!(g2.is_finished());
     }
 
-    debug!("part 3");
+    error!("part 3");
     {
         already_done.borrow_mut().remove("C");
         let mut g2 = init(history.clone());
         g2.event_startup().unwrap();
         assert!(!g2.is_finished());
-        assert_eq!(g2.ready_to_runs(), set!["C"]);
+        assert_eq!(g2.query_ready_to_run(), set!["C"]);
         g2.event_now_running("C").unwrap();
         g2.event_job_finished_success("C", "histC".to_string())
             .unwrap();
@@ -433,11 +441,11 @@ pub fn disjoint_and_twice() {
         let mut g2 = init(history.clone());
         g2.event_startup().unwrap();
         assert!(!g2.is_finished());
-        assert_eq!(g2.ready_to_runs(), set!["A"]);
+        assert_eq!(g2.query_ready_to_run(), set!["A"]);
         g2.event_now_running("A").unwrap();
         g2.event_job_finished_success("A", "histA2".to_string())
             .unwrap();
-        assert_eq!(g2.ready_to_runs(), set!["B"]); // A history changed
+        assert_eq!(g2.query_ready_to_run(), set!["B"]); // A history changed
         g2.event_now_running("B").unwrap();
         g2.event_job_finished_success("B", "histB".to_string())
             .unwrap(); // but b not changed
@@ -458,8 +466,8 @@ fn terminal_ephemeral_singleton() {
     g.add_node("B", JobKind::Ephemeral);
 
     g.event_startup().unwrap();
-    assert!(g.ready_to_runs().is_empty());
-    assert!(g.ready_to_cleanup().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
+    assert!(g.query_ready_for_cleanup().is_empty());
     assert!(g.is_finished());
 }
 
@@ -471,12 +479,12 @@ fn terminal_ephemeral_24() {
     g.depends_on("B", "A");
     info!("now startup");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["A"]);
+    assert_eq!(g.query_ready_to_run(), set!["A"]);
     g.event_now_running("A").unwrap();
     g.event_job_finished_success("A", "histA2".to_string())
         .unwrap();
-    assert!(g.ready_to_runs().is_empty());
-    assert!(g.ready_to_cleanup().is_empty());
+    assert!(g.query_ready_to_run().is_empty());
+    assert!(g.query_ready_for_cleanup().is_empty());
     assert!(g.is_finished());
 }
 
@@ -486,7 +494,7 @@ fn run_graph(
 ) -> HashMap<String, String> {
     g.event_startup().unwrap();
     while !g.is_finished() {
-        for job_id in g.ready_to_runs().iter() {
+        for job_id in g.query_ready_to_run().iter() {
             g.event_now_running(job_id).unwrap();
             g.event_job_finished_success(job_id, format!("history_{}", job_id))
                 .unwrap();
@@ -508,11 +516,12 @@ fn test_run_then_add_jobs() {
     let g = init(HashMap::new());
     let history = run_graph(g, strat.already_done.clone());
 
+    error!("part2");
     let mut g = init(history);
     g.add_node("B", JobKind::Output);
     g.depends_on("B", "A");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["B"]);
+    assert_eq!(g.query_ready_to_run(), set!["B"]);
     g.event_now_running("B").unwrap();
     g.event_job_finished_success("B", "history_b".to_string())
         .unwrap();
@@ -535,17 +544,17 @@ fn test_issue_20210726a() {
     g.depends_on("J2", "J76");
     g.depends_on("J76", "J3");
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["J3"]);
+    assert_eq!(g.query_ready_to_run(), set!["J3"]);
     g.event_now_running("J3").unwrap();
     g.event_job_finished_success("J3", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["J76"]);
+    assert_eq!(g.query_ready_to_run(), set!["J76"]);
     g.event_now_running("J76").unwrap();
     g.event_job_finished_success("J76", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["J2"]);
+    assert_eq!(g.query_ready_to_run(), set!["J2"]);
 
     g.event_now_running("J2").unwrap();
     g.event_job_finished_success("J2", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["J0"]);
+    assert_eq!(g.query_ready_to_run(), set!["J0"]);
     g.event_now_running("J0").unwrap();
     g.event_job_finished_success("J0", "".to_string()).unwrap();
     assert!(g.is_finished())
@@ -563,13 +572,13 @@ fn test_issue_20211001() {
     g.depends_on("J61", "J3");
 
     g.event_startup().unwrap();
-    assert_eq!(g.ready_to_runs(), set!["J3", "J48"]);
+    assert_eq!(g.query_ready_to_run(), set!["J3", "J48"]);
     g.event_now_running("J3").unwrap();
     g.event_job_finished_success("J3", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["J48"]);
+    assert_eq!(g.query_ready_to_run(), set!["J48"]);
     g.event_now_running("J48").unwrap();
     g.event_job_finished_success("J48", "".to_string()).unwrap();
-    assert_eq!(g.ready_to_runs(), set!["J61", "J67"]);
+    assert_eq!(g.query_ready_to_run(), set!["J61", "J67"]);
     g.event_now_running("J67").unwrap();
     g.event_job_finished_success("J67", "".to_string()).unwrap();
     g.event_now_running("J61").unwrap();
@@ -586,7 +595,6 @@ fn test_adding_node_twice() {
 }
 #[test]
 fn test_ephemeral_not_running_without_downstreams() {
-    start_logging();
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
     g.add_node("J3", JobKind::Ephemeral);
     g.event_startup().unwrap();
@@ -622,9 +630,11 @@ fn test_simple_graph_runner() {
     let g = ro.run(&Vec::new());
     assert_eq!(*ro.run_counters.get("A").unwrap(), 1);
     //does not get rerun
+    error!("part2");
     let g = ro.run(&Vec::new());
     assert_eq!(*ro.run_counters.get("A").unwrap(), 1);
     ro.already_done.remove("A");
+    error!("part3");
     let g = ro.run(&Vec::new());
     assert_eq!(*ro.run_counters.get("A").unwrap(), 2);
 
@@ -633,15 +643,18 @@ fn test_simple_graph_runner() {
         g.add_node("B", JobKind::Output);
         g.depends_on("B", "A");
     });
+    error!("part4");
     let g = ro.run(&Vec::new());
     assert_eq!(*ro.run_counters.get("A").unwrap(), 2);
     assert_eq!(*ro.run_counters.get("B").unwrap(), 1);
 
+    error!("part5");
     let g = ro.run(&Vec::new());
     assert_eq!(*ro.run_counters.get("A").unwrap(), 2);
     assert_eq!(*ro.run_counters.get("B").unwrap(), 1);
     ro.already_done.remove("A"); //which then gives a different history
 
+    error!("part6");
     let g = ro.run(&Vec::new());
     assert_eq!(*ro.run_counters.get("A").unwrap(), 3);
     assert_eq!(*ro.run_counters.get("B").unwrap(), 1); //b has some a->b history, no trigger
@@ -649,6 +662,7 @@ fn test_simple_graph_runner() {
     ro.history
         .insert("A!!!B".to_string(), "changedA".to_string());
     ro.already_done.remove("A"); //which then gives a different history
+    error!("final part");
     let g = ro.run(&Vec::new());
     assert_eq!(*ro.run_counters.get("A").unwrap(), 4);
     assert_eq!(*ro.run_counters.get("B").unwrap(), 2); // now we trigger
@@ -703,6 +717,7 @@ fn test_ephemeral_diamond() {
 }
 #[test]
 fn test_ephemeral_downstream_invalidated() {
+    start_logging();
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("TA", JobKind::Ephemeral);
         g.add_node("B", JobKind::Output);
@@ -831,6 +846,15 @@ fn test_changing_inputs_when_leaf_was_missing() {
     assert!(ro.run_counters.get("B") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
 
+    // running it again doesn't run anything but the always job.
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(new_history.contains_key("B"));
+    assert!(new_history.contains_key("A"));
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&2));
+
     fn create_graph3(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("A", JobKind::Output);
         g.add_node("C", JobKind::Always);
@@ -842,8 +866,82 @@ fn test_changing_inputs_when_leaf_was_missing() {
     ro.setup_graph = Box::new(create_graph3);
     let g = ro.run(&Vec::new()).unwrap();
     assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&1)); // output is still around, input to B is
+                                                   // unchanged, so all good
+                                                   // kept the history. A is not being invalidated
+    assert!(ro.run_counters.get("C") == Some(&3));
+}
+#[test]
+fn test_replacing_an_input_then_restoring() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Always);
+        g.add_node("B", JobKind::Output);
+        g.depends_on("B", "A");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&1));
+
+    fn create_graph2(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("B", JobKind::Output);
+        g.add_node("C", JobKind::Always);
+        g.depends_on("B", "C")
+    }
+    ro.setup_graph = Box::new(create_graph2);
+
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(new_history.contains_key("C"));
+    assert!(new_history.contains_key("B"));
+    assert!(new_history.contains_key("A"));
+    assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&2));
+    assert!(ro.run_counters.get("C") == Some(&1));
+
+
+    let g = ro.run(&Vec::new()).unwrap();
+    dbg!(&ro.run_counters);
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&2)); // is this
     assert!(ro.run_counters.get("C") == Some(&2));
+
+    ro.setup_graph = Box::new(create_graph); // back to the original one.
+
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&3));
+    assert!(ro.run_counters.get("B") == Some(&3));
+    assert!(ro.run_counters.get("C") == Some(&2));
+}
+
+#[test]
+fn test_tf_tf_output_example() {
+    start_logging();
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Ephemeral);
+        g.add_node("B", JobKind::Ephemeral);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("C", "A");
+        g.depends_on("C", "B");
+        g.depends_on("B", "A");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+
+    error!("part2");
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
 }
 
 #[test]
@@ -861,6 +959,7 @@ fn test_epheremal_chained_invalidate_intermediate() {
     assert!(ro.run_counters.get("A") == Some(&1));
     assert!(ro.run_counters.get("B") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
+    error!("part2");
     let g = ro.run(&Vec::new()).unwrap();
     assert!(ro.run_counters.get("A") == Some(&1));
     assert!(ro.run_counters.get("B") == Some(&1));
@@ -874,13 +973,15 @@ fn test_epheremal_chained_invalidate_intermediate() {
         g.depends_on("C", "B");
 
         g.add_node("D", JobKind::Always);
-        g.depends_on("B","D");
+        g.depends_on("B", "D");
     }
 
     ro.setup_graph = Box::new(create_graph2);
 
-    start_logging();
+    error!("part 3");
+
     let g = ro.run(&Vec::new()).unwrap();
+    debug!("{:?}", &ro.run_counters);
     assert!(ro.run_counters.get("D") == Some(&1));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&2));
@@ -891,8 +992,4 @@ fn test_epheremal_chained_invalidate_intermediate() {
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&2));
     assert!(ro.run_counters.get("C") == Some(&2));
-
-
-
-
 }
