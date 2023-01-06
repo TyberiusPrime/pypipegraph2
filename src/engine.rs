@@ -5,6 +5,7 @@
 use log::{debug, error, info, warn};
 use petgraph::visit::{IntoNeighbors, IntoNeighborsDirected};
 use petgraph::{graphmap::GraphMap, Directed, Direction};
+use pyo3::exceptions::asyncio::InvalidStateError;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
@@ -365,6 +366,32 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         out
     }
 
+    pub fn verify_order_was_topological(&self, order: &Vec<String>) -> bool {
+        /*
+        Iterate through the edges in G. For each edge, retrieve the index of each of its vertices
+            in the ordering. Compared the indices. If the origin vertex isn't earlier than the
+            destination vertex, return false. If you iterate through all of the edges without
+            returning false, return true.
+            */
+        for (upstream_idx, downstream_idx, _) in self.dag.all_edges() {
+            let upstream_id = &self.jobs[upstream_idx as usize].job_id;
+            let downstream_id = &self.jobs[downstream_idx as usize].job_id;
+            let upstream_in_order = order.iter().position(|x| x == upstream_id);
+            let downstream_in_order = order.iter().position(|x| x == downstream_id);
+            match (upstream_in_order, downstream_in_order) {
+                (None, None) => {}
+                (None, Some(_)) => {}
+                (Some(_), None) => {}
+                (Some(u), Some(o)) => {
+                    if u > o {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     /// what jobs are ready to run *right now*
     pub fn query_ready_to_run(&self) -> HashSet<String> {
         self.jobs_ready_to_run.clone()
@@ -532,11 +559,11 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             Some(petgraph::algo::toposort(petgraph::visit::Reversed(&self.dag), None).unwrap());
         //self.identify_changed_input_counts();
         self.identify_missing_outputs();
-        self.process_signals(); //or they're not correctly invalidated...
-                                //self.fill_in_unfinished_downstream_counts();
-                                //self.update();
+        self.process_signals(0); //or they're not correctly invalidated...
+                                 //self.fill_in_unfinished_downstream_counts();
+                                 //self.update();
         self.start_on_roots();
-        self.process_signals();
+        self.process_signals(0);
 
         Ok(())
     }
@@ -585,7 +612,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
         j.history_output = Some(history_to_store);
         self.signals.push_back(Signal::JobFinishedSuccess(idx));
-        self.process_signals();
+        self.process_signals(0);
         Ok(())
     }
 
@@ -604,7 +631,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             }
         }
         self.signals.push_back(Signal::JobFinishedFailure(idx));
-        self.process_signals();
+        self.process_signals(0);
         Ok(())
     }
     pub fn event_job_cleanup_done(&mut self, job_id: &str) -> Result<(), PPGEvaluatorError> {
@@ -630,7 +657,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
     }
 
-    fn process_signals(&mut self) {
+    fn process_signals(&mut self, depth: u32) {
+        debug!("Process sinals, depth {}", depth);
         let mut new_signals = Vec::new();
         for signal in self.signals.drain(..) {
             debug!("Handling signal {} {:?}", signal.job_id(&self.jobs), signal);
@@ -698,6 +726,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     }
                     let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
                     for downstream_idx in downstreams {
+                        debug!("ConsiderJob place 1");
                         new_signals.push(Signal::ConsiderJob(downstream_idx));
                     }
                     Self::consider_upstreams_for_cleanup(
@@ -773,6 +802,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         &self.dag,
                         &mut self.jobs,
                         &self.history,
+                        &self.topo.as_ref().unwrap(),
                         node_idx,
                         &mut new_signals,
                     );
@@ -792,11 +822,17 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
         if !new_signals.is_empty() {
             debug!("New signals after process_signals - adding and processing");
-            for s in new_signals.iter() {
+            for s in new_signals.into_iter() {
                 debug!("\t {:?} {}", s, s.job_id(&self.jobs));
+                // we have to preempt the case that two jobs were 'JobFinished'
+                // in the same loop, pushed the same ConsiderJob
+                // and now we make the same conclusion twice
+                self.signals.push_front(s);
             }
-            self.signals.extend(new_signals.drain(..));
-            self.process_signals();
+            //self.signals.extend(new_signals.drain(..));
+        }
+        if !self.signals.is_empty() {
+            self.process_signals(depth + 1);
         }
     }
 
@@ -876,7 +912,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             }
         }
     }
-    fn check_validation_status_ignoring_ready_but_delayed_ephemerals(
+
+    fn update_validation_status_but_delayed_is_validated(
         strategy: &dyn PPGEvaluatorStrategy,
         dag: &GraphType,
         jobs: &mut Vec<NodeInfo>,
@@ -896,11 +933,11 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     //       debug!("\t\tEdge not invalidated {} {}", jobs[upstream_idx].job_id, jobs[node_idx].job_id);
                 }
             } else {
-                match jobs[upstream_idx as usize].state {
-                    JobState::Ephemeral(JobStateEphemeral::ReadyButDelayed) => {}
-                    _ => {
-                        all_done = false;
-                    }
+                if jobs[upstream_idx].state
+                    == JobState::Ephemeral(JobStateEphemeral::ReadyButDelayed)
+                {
+                } else {
+                    all_done = false;
                 }
             }
         }
@@ -919,11 +956,121 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
     }
 
+    fn find_last_ephemeral(
+        dag: &GraphType,
+        topo: &Vec<NodeIndex>,
+        node_idx: NodeIndex,
+    ) -> NodeIndex {
+        //todo: make this fast, maybe?
+        //could store topo index on job?
+        let mut max_topo_index = None;
+        let mut max_topo_element = None;
+        let upstreams = dag.neighbors_directed(node_idx, Direction::Incoming);
+        for upstream_idx in upstreams {
+            let topo_index = topo
+                .iter()
+                .enumerate()
+                .find(|(_topo_idx, x)| **x == upstream_idx)
+                .map(|(topo_idx, _)| topo_idx)
+                .unwrap();
+            if topo_index > max_topo_index.unwrap_or(0) {
+                max_topo_index = Some(topo_index);
+                max_topo_element = Some(upstream_idx);
+            }
+        }
+        max_topo_element.unwrap()
+    }
+    fn check_validation_transitive_ephemerals(
+        strategy: &dyn PPGEvaluatorStrategy,
+        dag: &GraphType,
+        jobs: &mut Vec<NodeInfo>,
+        history: &HashMap<String, String>,
+        topo: &Vec<NodeIndex>,
+        node_idx: NodeIndex,
+    ) -> ValidationStatus {
+        match jobs[node_idx as usize].state {
+            JobState::Ephemeral(_) => {}
+            _ => panic!("should not happen"),
+        }
+
+        // you must assume that node_idx state is
+        // JobStateEphemeral::ReadyButDelayed
+        // even though that's not true for the 'inners'
+        // that we transistively cross
+        let mut all_validated = true;
+        let downstreams = dag.neighbors_directed(node_idx, Direction::Outgoing);
+        for downstream_idx in downstreams {
+            debug!(
+                "\t looking at {} {:?}",
+                jobs[downstream_idx].job_id, jobs[downstream_idx].state
+            );
+            match jobs[downstream_idx].state {
+                JobState::Always(_) => return ValidationStatus::Invalidated,
+                JobState::Output(ds) => match ds {
+                    JobStateOutput::NotReady(ValidationStatus::Invalidated) => {
+                        return ValidationStatus::Invalidated
+                    }
+                    JobStateOutput::NotReady(ValidationStatus::Validated) => continue,
+                    JobStateOutput::NotReady(ValidationStatus::Unknown) => {
+                        let vs = Self::update_validation_status_but_delayed_is_validated(
+                            strategy,
+                            dag,
+                            jobs,
+                            history,
+                            downstream_idx,
+                        );
+                        match vs {
+                            ValidationStatus::Unknown => {
+                                debug!("case last_ephemeral_for_downstream test");
+                                /* if this ephemeral we're looking at is the
+                                last ephemeral before the downstream_idx
+                                in the topological order
+                                and we're only missing ephemerals to decide
+                                on downstream_idx, then we can presume it validated! */
+                                let last_ephemeral_for_downstream =
+                                    Self::find_last_ephemeral(dag, topo, downstream_idx);
+                                if last_ephemeral_for_downstream == node_idx {
+                                    //this is wrong wrong wrong wrong... you're wrong
+                                    //presume validated
+                                } else {
+                                    all_validated = false;
+                                }
+                            }
+                            ValidationStatus::Validated => continue,
+                            ValidationStatus::Invalidated => return ValidationStatus::Invalidated,
+                        };
+                    }
+                    _ => panic!("should not happen"),
+                },
+                JobState::Ephemeral(_) => {
+                    match Self::check_validation_transitive_ephemerals(
+                        strategy,
+                        dag,
+                        jobs,
+                        history,
+                        topo,
+                        downstream_idx,
+                    ) {
+                        ValidationStatus::Unknown => all_validated = false,
+                        ValidationStatus::Validated => {}
+                        ValidationStatus::Invalidated => return ValidationStatus::Invalidated,
+                    }
+                }
+            }
+        }
+        if all_validated {
+            ValidationStatus::Validated
+        } else {
+            ValidationStatus::Unknown
+        }
+    }
+
     fn signal_consider_job(
         strategy: &dyn PPGEvaluatorStrategy,
         dag: &GraphType,
         jobs: &mut Vec<NodeInfo>,
         history: &HashMap<String, String>,
+        topo: &Vec<NodeIndex>,
         node_idx: NodeIndex,
         new_signals: &mut Vec<Signal>,
     ) {
@@ -956,6 +1103,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                         JobStateOutput::NotReady(solid_vs),
                                     ));
                                     // not the most elegant control flow, but ok.
+                                    debug!("ConsiderJob place 2");
                                     new_signals.push(Signal::ConsiderJob(node_idx));
                                 }
                             }
@@ -965,6 +1113,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             // todo remove assert
                             assert!(Self::all_upstreams_done(dag, jobs, node_idx));
                             //if Self::all_upstreams_done(dag, jobs, node_idx) {
+                            debug!("JobFinishedSkip place 1");
                             new_signals.push(Signal::JobFinishedSkip(node_idx))
                             //}
                         }
@@ -988,6 +1137,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 JobStateEphemeral::NotReady(ValidationStatus::Validated) => {
                     jobs[node_idx as usize]
                         .set_state(JobState::Ephemeral(JobStateEphemeral::ReadyButDelayed));
+
+                    debug!("ConsiderJob place 3");
                     new_signals.push(Signal::ConsiderJob(node_idx));
                 }
                 JobStateEphemeral::NotReady(ValidationStatus::Unknown) => {
@@ -1001,6 +1152,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             ));
                             // not the most elegant control flow, but ok.
                             //
+                            debug!("ConsiderJob place 4");
                             new_signals.push(Signal::ConsiderJob(node_idx));
                         }
                     }
@@ -1010,93 +1162,28 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     // and ready to run.
                     // but we are not sure whether it *needs* to run actually
                     // so we examine the downstreams
-                    let mut none_required_us = true;
-                    let mut any_undecided = false;
-                    let downstreams = dag.neighbors_directed(node_idx, Direction::Outgoing);
-                    for downstream_idx in downstreams {
-                        let downstream_state = jobs[downstream_idx as usize].state;
-                        match downstream_state {
-                            JobState::Always(_) => {
-                                none_required_us = false;
-                                break;
-                            }
-                            JobState::Output(ds) => match ds {
-                                JobStateOutput::NotReady(ValidationStatus::Unknown) => {
-                                    let new_vs = Self::check_validation_status_ignoring_ready_but_delayed_ephemerals(strategy, dag,jobs, history, downstream_idx);
-                                    debug!(
-                                        "\t\t any_undecided because of {}. new_vs: {:?}",
-                                        jobs[downstream_idx].job_id, new_vs
-                                    );
-                                    match new_vs {
-                                        ValidationStatus::Unknown => any_undecided = true,
-                                        ValidationStatus::Validated => {}
-                                        ValidationStatus::Invalidated => {}
-                                    };
-                                    //new_signals.push(Signal::ConsiderJob(downstream_idx));
+                    let t_vs = Self::check_validation_transitive_ephemerals(
+                        strategy, dag, jobs, history, topo, node_idx,
+                    );
+                    debug!(
+                        "\t check_validation_transitive_ephemerals {} -> {:?}",
+                        jobs[node_idx as usize].job_id, t_vs
+                    );
 
-                                    //break; //todo test with those in
-                                }
-                                JobStateOutput::NotReady(ValidationStatus::Validated) => {}
-                                JobStateOutput::NotReady(ValidationStatus::Invalidated) => {
-                                    debug!(
-                                        "\t\t none_required_us because of {}",
-                                        jobs[downstream_idx].job_id
-                                    );
-                                    none_required_us = false;
-                                    //break;
-                                }
-                                JobStateOutput::ReadyToRun
-                                | JobStateOutput::Running
-                                | JobStateOutput::FinishedSuccess
-                                | JobStateOutput::FinishedFailure
-                                | JobStateOutput::FinishedUpstreamFailure
-                                | JobStateOutput::FinishedSkipped => panic!("should not happen"),
-                            },
-                            JobState::Ephemeral(ds) => match ds {
-                                JobStateEphemeral::NotReady(ValidationStatus::Unknown) => {
-                                    let new_vs = Self::check_validation_status_ignoring_ready_but_delayed_ephemerals(strategy, dag,jobs, history, downstream_idx);
-                                    debug!(
-                                        "\t\t any_undecided because of {} new_vs {:?}",
-                                        jobs[downstream_idx].job_id, new_vs
-                                    );
-                                    match new_vs {
-                                        ValidationStatus::Unknown => any_undecided = true,
-                                        ValidationStatus::Validated => {}
-                                        ValidationStatus::Invalidated => {}
-                                    };
-                                }
-                                JobStateEphemeral::NotReady(ValidationStatus::Validated) => {}
-                                JobStateEphemeral::NotReady(ValidationStatus::Invalidated) => {
-                                    debug!(
-                                        "\t\t none_required_us because of {}",
-                                        jobs[downstream_idx].job_id
-                                    );
-                                    none_required_us = false;
-                                    //break;
-                                }
-                                JobStateEphemeral::ReadyButDelayed
-                                | JobStateEphemeral::ReadyToRun
-                                | JobStateEphemeral::Running
-                                | JobStateEphemeral::FinishedSuccessNotReadyForCleanup
-                                | JobStateEphemeral::FinishedSuccessReadyForCleanup
-                                | JobStateEphemeral::FinishedSuccessCleanedUp
-                                | JobStateEphemeral::FinishedFailure
-                                | JobStateEphemeral::FinishedUpstreamFailure
-                                | JobStateEphemeral::FinishedSkipped => {
-                                    panic!("should not happen");
-                                }
-                            },
+                    match t_vs {
+                        ValidationStatus::Unknown => {}
+                        ValidationStatus::Validated => {
+                            debug!("JobFinishedSkip place 2");
+                            new_signals.push(Signal::JobFinishedSkip(node_idx))
+                        }
+                        ValidationStatus::Invalidated => {
+                            new_signals.push(Signal::JobReadyToRun(node_idx));
                         }
                     }
-                    debug!(
-                        "\t ReadyButDelayed {} result: none_required_us: {}, any_undecided: {}",
-                        jobs[node_idx as usize].job_id, none_required_us, any_undecided
-                    );
-                    match (none_required_us, any_undecided) {
-                        (_, true) => {} //can,t advance
-                        (true, false) => new_signals.push(Signal::JobFinishedSkip(node_idx)),
-                        (false, false) => new_signals.push(Signal::JobReadyToRun(node_idx)),
-                    }
+                    //what we need to do is check the downstreams,
+                    //politely ignoring an Ephmerals along the way,
+                    //ie take thier downstreams instead...
+                    //and replacing their Unkown with our ReadyToRunButDelayed
                 }
                 _ => {}
             },
@@ -1220,6 +1307,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }) {
             let job = &self.jobs[root_idx as usize];
             debug!("root node '{}'", job.job_id);
+            debug!("ConsiderJob place 5");
             out_signals.push(Signal::ConsiderJob(root_idx));
             /* match job.state {
                 JobState::Always(state) => match state {
@@ -1271,462 +1359,3 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         self.add_signals(out_signals);
     }
 }
-
-/*
-
-fn job_finished(&mut self, idx: u32, outcome: Finished) {
-    debug!(
-        "job finished {:?} -> {:?}",
-        self.jobs[idx as usize], outcome
-    );
-    self.jobs_ready_to_run.remove(&self.jobs[idx as usize].0);
-    self.jobs[idx as usize].1.ran = RunStatus::Ran(outcome);
-    self.job_finished_handle_downstream(idx, outcome);
-    self.job_finished_handle_upstream(idx, outcome);
-    if self.is_finished() {
-        self.already_started = StartStatus::Finished; // todo : find a better way to evaluate this
-    }
-}
-
-fn examine_upstream_edges(&self, node_idx: u32) -> UpstreamStatus {
-    let upstreams = self.dag.neighbors_directed(node_idx, Direction::Incoming);
-    let mut all_validated = true;
-    for upstream_idx in upstreams {
-        let e = self.dag.edge_weight(upstream_idx, node_idx).unwrap();
-        /* debug!("{} -> {} {:?}", self.jobs[upstream_idx as usize].0,
-        self.jobs[node_idx as usize].0,
-        e); */
-        match e.validation_status {
-            InvalidationStatus::Unknown => {
-                return UpstreamStatus::Unfinished;
-            }
-            InvalidationStatus::Invalidated => {
-                all_validated = false;
-            }
-            InvalidationStatus::Validated => {}
-            InvalidationStatus::Skipped => {}
-            InvalidationStatus::Failed => {
-                return UpstreamStatus::Failed;
-            }
-        }
-    }
-    if all_validated {
-        UpstreamStatus::AllValidated
-    } else {
-        UpstreamStatus::AtLeastOneInvalidated
-    }
-}
-
-fn examine_downstream_edges(&self, node_idx: u32) -> DownstreamStatus {
-    let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
-    for downstream_idx in downstreams {
-        let e = self.dag.edge_weight(node_idx, downstream_idx).unwrap();
-        //debug!("examine_downstream_edges for {}, {}: {:?}", self.jobs[node_idx as usize].0, self.jobs[downstream_idx as usize].0, e);
-
-        match e.downstream_required {
-            Some(true) => return DownstreamStatus::Required,
-            None => return DownstreamStatus::Unknown,
-            Some(false) => {}
-        }
-    }
-    DownstreamStatus::CanBeSkipped
-}
-
-fn upstreams_finished_but_for_ephemerals(&self, node_idx: u32) -> bool {
-    let upstreams = self.dag.neighbors_directed(node_idx, Direction::Incoming);
-    for upstream_idx in upstreams {
-        let e = self.dag.edge_weight(upstream_idx, node_idx).unwrap();
-        match e.validation_status {
-            InvalidationStatus::Unknown => {
-                if self.jobs[upstream_idx as usize].1.kind == JobKind::Ephemeral {
-                    match self.examine_downstream_edges(upstream_idx) {
-                        DownstreamStatus::Required => return false,
-                        DownstreamStatus::CanBeSkipped => {}
-                        DownstreamStatus::Unknown => return false,
-                    }
-                } else {
-                    return false;
-                }
-            }
-            InvalidationStatus::Invalidated => {
-                return false;
-            }
-            _ => {}
-        }
-    }
-    true
-}
-
-fn update(&mut self) {
-    let mut jobs_to_ready: Vec<u32> = Vec::new();
-    let mut jobs_to_mark_finished: Vec<u32> = Vec::new();
-    //for (node_idx, (job_id, job)) in self.jobs.iter().enumerate() {
-    for node_idx in self.topo.as_ref().unwrap() {
-        let node_idx = *node_idx;
-        let job_id = &self.jobs[node_idx as usize].0;
-        let job = &self.jobs[node_idx as usize].1;
-        if !job.is_finished() && !job.is_running() {
-            let ee = self.examine_upstream_edges(node_idx as u32);
-            debug!("job: {}, upstream_edges: {:?}", &job_id, ee);
-            match ee {
-                UpstreamStatus::Unfinished => match job.kind {
-                    JobKind::Always => {}
-                    JobKind::Output => {
-                        if self.upstreams_finished_but_for_ephemerals(node_idx)
-                            && self.strategy.output_already_present(job_id)
-                        {
-                            jobs_to_mark_finished.push(node_idx);
-                        }
-                    }
-                    JobKind::Ephemeral => {
-                        let dd = self.examine_downstream_edges(node_idx);
-                        debug!("dd2 {:?}", dd);
-                        match dd {
-                            DownstreamStatus::Required => {}
-                            DownstreamStatus::CanBeSkipped => {
-                                jobs_to_mark_finished.push(node_idx)
-                            }
-                            DownstreamStatus::Unknown => {}
-                        }
-                    }
-                },
-                UpstreamStatus::AllValidated => match job.kind {
-                    JobKind::Always => {
-                        jobs_to_ready.push(node_idx);
-                    }
-                    JobKind::Output => {
-                        if self.strategy.output_already_present(job_id)
-                            && !job.no_of_inputs_changed
-                        {
-                            jobs_to_mark_finished.push(node_idx);
-                        } else {
-                            jobs_to_ready.push(node_idx);
-                        }
-                    }
-                    JobKind::Ephemeral => {
-                        let dd = self.examine_downstream_edges(node_idx);
-                        debug!("dd {:?}", dd);
-                        debug!("{}", self.debug());
-                        match dd {
-                            DownstreamStatus::Required => jobs_to_ready.push(node_idx),
-                            DownstreamStatus::CanBeSkipped => {
-                                jobs_to_mark_finished.push(node_idx)
-                            }
-                            DownstreamStatus::Unknown => {}
-                        }
-                    }
-                },
-                UpstreamStatus::AtLeastOneInvalidated => match job.kind {
-                    JobKind::Always | JobKind::Output => jobs_to_ready.push(node_idx),
-                    JobKind::Ephemeral => {
-                        if self.no_downstreams(node_idx) {
-                            debug!("No downstreams");
-                            jobs_to_mark_finished.push(node_idx)
-                        } else {
-                            debug!("had downstreams");
-                            jobs_to_ready.push(node_idx);
-                        }
-                    }
-                },
-                UpstreamStatus::Failed => {}
-            }
-        }
-    }
-    for node_idx in jobs_to_ready {
-        self.jobs[node_idx as usize].1.ran = RunStatus::ReadyToRun;
-        self.jobs_ready_to_run
-            .insert(self.jobs[node_idx as usize].0.clone());
-    }
-    for node_idx in jobs_to_mark_finished.iter() {
-        self.job_finished(*node_idx, Finished::Skipped);
-    }
-    if !jobs_to_mark_finished.is_empty() {
-        self.update();
-    }
-}
-
-fn no_downstreams(&self, node_idx: u32) -> bool {
-    let mut downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
-    match downstreams.next() {
-        Some(_) => false,
-        None => true,
-    }
-}
-
-fn job_finished_handle_upstream(&mut self, node_idx: u32, outcome: Finished) {
-    match outcome {
-        Finished::Sucessful | Finished::Skipped => {
-            let upstreams: Vec<_> = self
-                .dag
-                .neighbors_directed(node_idx, Direction::Incoming)
-                .collect();
-            for upstream_idx in upstreams {
-                if self.jobs[upstream_idx as usize].1.kind == JobKind::Ephemeral {
-                    self.jobs[upstream_idx as usize].1.unfinished_downstreams =
-                        match self.jobs[upstream_idx as usize].1.unfinished_downstreams {
-                            UnfinishedDownstreams::Count(x) => {
-                                UnfinishedDownstreams::Count(x - 1)
-                            }
-                            UnfinishedDownstreams::Unknown => panic!("Should not happen"),
-                            UnfinishedDownstreams::CleanupAlreadyHandled => {
-                                panic!("Should not happen,")
-                            }
-                        }
-                }
-                self.dag
-                    .edge_weight_mut(upstream_idx, node_idx)
-                    .unwrap()
-                    .downstream_required = Some(false);
-            }
-        }
-        Finished::Failure => {}
-        Finished::UpstreamFailure => {}
-    }
-}
-
-fn job_finished_handle_downstream(&mut self, idx: u32, outcome: Finished) {
-    let downstreams: Vec<_> = self
-        .dag
-        .neighbors_directed(idx, Direction::Outgoing)
-        .collect();
-    let job_id = self.jobs[idx as usize].0.clone();
-    //.expect("Job was finished::Sucessful, but without history_output");
-
-    for downstream_idx in downstreams {
-        let e = self.dag.edge_weight_mut(idx, downstream_idx).unwrap();
-        match outcome {
-            Finished::Sucessful => {
-                let downstream_job_id = &self.jobs[downstream_idx as usize].0;
-                let key = format!("{}!!!{}", job_id, downstream_job_id);
-                let last_history_value = self.history.get(&key); //todo: fight alloc
-                match last_history_value {
-                    None => {
-                        e.validation_status = InvalidationStatus::Invalidated;
-                        self.propagate_upstream_required(downstream_idx);
-                    }
-                    Some(last_history) => {
-                        let history_output = &self.jobs[idx as usize].1.history_output.as_ref();
-                        if self.strategy.is_history_altered(
-                            &job_id,
-                            downstream_job_id,
-                            last_history,
-                            history_output.expect(
-                                "Job was finished::Sucessful, but without history_output",
-                            ),
-                        ) {
-                            e.validation_status = InvalidationStatus::Invalidated;
-                            self.propagate_upstream_required(downstream_idx);
-                        } else {
-                            e.validation_status = InvalidationStatus::Validated;
-                        }
-                    }
-                };
-            }
-            Finished::Skipped => {
-                e.validation_status = InvalidationStatus::Skipped;
-            }
-            Finished::Failure => {
-                e.validation_status = InvalidationStatus::Failed;
-                self.job_finished(downstream_idx, Finished::UpstreamFailure)
-            }
-            Finished::UpstreamFailure => {
-                e.validation_status = InvalidationStatus::Failed;
-                self.job_finished(downstream_idx, Finished::UpstreamFailure)
-            }
-        }
-    }
-}
-
-fn node_has_upstreams(&self, idx: u32) -> bool {
-    let mut upstreams = self.dag.neighbors_directed(idx, Direction::Incoming);
-    match upstreams.next() {
-        Some(_) => true,
-        None => false,
-    }
-}
-
-fn identify_missing_outputs(&mut self) {
-    let mut propagate = Vec::new();
-    for (node_idx, (job_id, job)) in self.jobs.iter().enumerate() {
-        if job.no_of_inputs_changed {
-            propagate.push(node_idx as u32);
-        } else if job.kind == JobKind::Output {
-            if !self.strategy.output_already_present(job_id) {
-                propagate.push(node_idx as u32);
-            }
-        }
-    }
-    for node_idx in propagate {
-        self.propagate_upstream_required(node_idx)
-    }
-}
-fn fill_in_unfinished_downstream_counts(&mut self) {
-    let mut jobs_to_mark_skipped = Vec::new();
-    for (node_idx, (job_id, job)) in self.jobs.iter_mut().enumerate() {
-        if job.kind == JobKind::Ephemeral {
-            let ds_count = self.dag.edges(node_idx as u32).count();
-            job.unfinished_downstreams = UnfinishedDownstreams::Count(ds_count as u32);
-            if ds_count == 0 {
-                jobs_to_mark_skipped.push(node_idx as u32);
-            }
-        }
-    }
-    for node_idx in jobs_to_mark_skipped {
-        self.job_finished(node_idx, Finished::Skipped);
-        self.propagate_upstream_not_required(node_idx);
-    }
-}
-
-fn propagate_upstream_required(&mut self, node_idx: u32) {
-    debug!("upstream required: {}", self.jobs[node_idx as usize].0);
-    let upstreams: Vec<_> = self
-        .dag
-        .neighbors_directed(node_idx, Direction::Incoming)
-        .collect();
-    for upstream_idx in upstreams {
-        self.dag
-            .edge_weight_mut(upstream_idx, node_idx)
-            .unwrap()
-            .downstream_required = Some(true);
-        if self.jobs[upstream_idx as usize].1.kind == JobKind::Ephemeral {
-            self.propagate_upstream_required(upstream_idx);
-        }
-    }
-}
-fn propagate_upstream_not_required(&mut self, node_idx: u32) {
-    let upstreams: Vec<_> = self
-        .dag
-        .neighbors_directed(node_idx, Direction::Incoming)
-        .collect();
-    for upstream_idx in upstreams {
-        self.dag
-            .edge_weight_mut(upstream_idx, node_idx)
-            .unwrap()
-            .downstream_required = Some(false);
-        if self.jobs[upstream_idx as usize].1.kind == JobKind::Ephemeral {
-            if self.all_downstream_edges_not_required(upstream_idx) {
-                self.propagate_upstream_not_required(upstream_idx);
-            }
-        }
-    }
-}
-
-fn all_downstream_edges_not_required(&self, node_idx: u32) -> bool {
-    let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
-    for downstream_idx in downstreams {
-        let e = self.dag.edge_weight(node_idx, downstream_idx).unwrap();
-        match e.downstream_required {
-            Some(true) | None => return false,
-            Some(false) => {}
-        }
-    }
-    true
-}
-
-fn identify_changed_input_counts(&mut self) {
-    let mut prev_counts: HashMap<String, u32> = HashMap::new();
-    for key in self.history.keys() {
-        if let Some((upstream_job_id, downstream_job_id)) = key.split_once("!!!") {
-            *prev_counts
-                .entry(downstream_job_id.to_string())
-                .or_insert(0) += 1;
-        }
-    }
-    for (node_idx, (job_id, job)) in self.jobs.iter_mut().enumerate() {
-        let current_count = self
-            .dag
-            .edges_directed(node_idx as u32, Direction::Incoming)
-            .count();
-        let previous_count = *prev_counts.get(job_id).unwrap_or(&0);
-        if current_count != previous_count as usize {
-            debug!("number of inputs changed {}", job_id);
-            job.no_of_inputs_changed = true;
-        }
-    }
-}
-
-pub fn event_startup(&mut self) -> Result<(), PPGEvaluatorError> {
-    info!("startup");
-    match self.already_started {
-        StartStatus::Running | StartStatus::Finished => {
-            return Err(PPGEvaluatorError::APIError("Can't start twice".to_string()));
-        }
-        _ => {}
-    };
-    self.already_started = StartStatus::Running;
-
-    // this is not particulary fast.
-    self.topo =
-        Some(petgraph::algo::toposort(petgraph::visit::Reversed(&self.dag), None).unwrap());
-    self.identify_changed_input_counts();
-    self.identify_missing_outputs();
-    self.fill_in_unfinished_downstream_counts();
-    self.update();
-    Ok(())
-}
-pub fn event_now_running(&mut self, job_id: &str) -> Result<(), PPGEvaluatorError> {
-    let idx = self.node_to_index.get(job_id).expect("Unknown job id");
-    let j = &mut self.jobs[*idx as usize];
-    match j.1.ran {
-        RunStatus::ReadyToRun => {
-            j.1.ran = RunStatus::Running;
-            self.jobs_ready_to_run.remove(job_id);
-            Ok(())
-        }
-        _ => Err(PPGEvaluatorError::APIError(format!(
-            "Requested to run a job that was not ready to run! {:?}",
-            j
-        ))),
-    }
-}
-
-pub fn event_job_finished_success( &mut self, job_id: &str, history_to_store: String,) -> Result<(), PPGEvaluatorError> {
-    let idx = *self.node_to_index.get(job_id).expect("Unknown job id");
-    let j = &mut self.jobs[idx as usize];
-    match j.1.ran {
-        RunStatus::Running => {
-            j.1.history_output = Some(history_to_store);
-            self.job_finished(idx, Finished::Sucessful);
-            self.update();
-            Ok(())
-        }
-        _ => Err(PPGEvaluatorError::APIError(format!(
-            "Signaled job finished/success on a job that was not running{:?}",
-            j
-        ))),
-    }
-}
-
-pub fn event_job_finished_failure(&mut self, job_id: &str) -> Result<(), PPGEvaluatorError> {
-    let idx = *self.node_to_index.get(job_id).expect("Unknown job id");
-    let j = &mut self.jobs[idx as usize];
-    match j.1.ran {
-        RunStatus::Running => {
-            self.job_finished(idx, Finished::Failure);
-            self.update();
-            Ok(())
-        }
-        _ => Err(PPGEvaluatorError::APIError(format!(
-            "Signaled job finished/failure on a job that was not running{:?}",
-            j
-        ))),
-    }
-}
-
-pub fn event_job_cleanup_done(&mut self, job_id: &str) -> Result<(), PPGEvaluatorError> {
-    let idx = *self.node_to_index.get(job_id).expect("Unknown job id");
-    let j = &mut self.jobs[idx as usize];
-    match j.1.cleanup_status {
-        CleanupStatus::NotYet | CleanupStatus::Done =>
-            return Err(PPGEvaluatorError::APIError(format!(
-            "Cleanup on a job that either was not ready for cleanup, or already cleaned up {} {:?}",
-            job_id, j.1.cleanup_status
-        ))),
-        CleanupStatus::Ready => {
-            j.1.cleanup_status = CleanupStatus::Done;
-        }
-    }
-    Ok(())
-}
-
-*/

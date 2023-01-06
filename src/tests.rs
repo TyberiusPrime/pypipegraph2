@@ -291,7 +291,6 @@ fn mk_history(input: &[((&str, &str), &str)]) -> HashMap<String, String> {
 
 #[test]
 pub fn ephemeral_nested_inner() {
-    start_logging();
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("C".to_string());
     let mut g = PPGEvaluator::new_with_history(
@@ -692,7 +691,7 @@ fn test_bigish_linear_graph() {
 }
 
 #[test]
-fn test_ephemeral_diamond() {
+fn test_ephemeral_one_ephemeral_two_downstreams() {
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("TA", JobKind::Ephemeral);
         g.add_node("B", JobKind::Output);
@@ -715,6 +714,113 @@ fn test_ephemeral_diamond() {
     assert!(ro.run_counters.get("B") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
 }
+
+#[test]
+fn test_ephemeral_triangle() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("TB", JobKind::Ephemeral);
+        g.add_node("TC", JobKind::Ephemeral);
+        g.add_node("D", JobKind::Output);
+        g.depends_on("TC", "TA");
+        g.depends_on("TC", "TB");
+        g.depends_on("D", "TC");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("TC") == Some(&1));
+    assert!(ro.run_counters.get("D") == Some(&1));
+
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("TC") == Some(&1));
+    assert!(ro.run_counters.get("D") == Some(&1));
+}
+
+#[test]
+fn test_ephemeral_triangle_plus() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("TB", JobKind::Ephemeral);
+        g.add_node("TC", JobKind::Ephemeral);
+        g.add_node("D", JobKind::Output);
+        g.add_node("E", JobKind::Always);
+        g.depends_on("TC", "TA");
+        g.depends_on("TC", "TB");
+        g.depends_on("D", "TC");
+        g.depends_on("D", "E");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("TC") == Some(&1));
+    assert!(ro.run_counters.get("D") == Some(&1));
+    assert!(ro.run_counters.get("E") == Some(&1));
+
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("TC") == Some(&1));
+    assert!(ro.run_counters.get("D") == Some(&1));
+    assert!(ro.run_counters.get("E") == Some(&1));
+
+    ro.outputs.insert("E".to_string(), "trigger_inval".to_string());
+    let g = ro.run(&Vec::new()).unwrap();
+
+    assert!(ro.run_counters.get("TA") == Some(&2));
+    assert!(ro.run_counters.get("TB") == Some(&2));
+    assert!(ro.run_counters.get("TC") == Some(&2));
+    assert!(ro.run_counters.get("D") == Some(&2));
+    assert!(ro.run_counters.get("E") == Some(&2));
+}
+
+#[test]
+fn test_ephemeral_output_triangle_plus() {
+    //same situation as test_ephemeral_triangle_plus, but TC is an output!
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("TB", JobKind::Ephemeral);
+        g.add_node("TC", JobKind::Output); // !!!
+        g.add_node("D", JobKind::Output);
+        g.add_node("E", JobKind::Always);
+        g.depends_on("TC", "TA");
+        g.depends_on("TC", "TB");
+        g.depends_on("D", "TC");
+        g.depends_on("D", "E");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("TC") == Some(&1));
+    assert!(ro.run_counters.get("D") == Some(&1));
+    assert!(ro.run_counters.get("E") == Some(&1));
+
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("TC") == Some(&1));
+    assert!(ro.run_counters.get("D") == Some(&1));
+    assert!(ro.run_counters.get("E") == Some(&1));
+
+    ro.outputs.insert("E".to_string(), "trigger_inval".to_string());
+    let g = ro.run(&Vec::new()).unwrap();
+
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("TC") == Some(&1)); // an output does not get rerun..
+    assert!(ro.run_counters.get("D") == Some(&2));
+    assert!(ro.run_counters.get("E") == Some(&2));
+}
+
+
 #[test]
 fn test_ephemeral_downstream_invalidated() {
     start_logging();
@@ -905,7 +1011,6 @@ fn test_replacing_an_input_then_restoring() {
     assert!(ro.run_counters.get("B") == Some(&2));
     assert!(ro.run_counters.get("C") == Some(&1));
 
-
     let g = ro.run(&Vec::new()).unwrap();
     dbg!(&ro.run_counters);
     assert!(ro.run_counters.get("A") == Some(&2));
@@ -921,8 +1026,36 @@ fn test_replacing_an_input_then_restoring() {
 }
 
 #[test]
-fn test_tf_tf_output_example() {
+fn test_two_ephemerals_one_output_straight() {
     start_logging();
+    //
+    // actually A diamend...
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Ephemeral);
+        g.add_node("B", JobKind::Ephemeral);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("C", "A");
+        g.depends_on("C", "B");
+        //g.depends_on("B", "A");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+
+    error!("part2");
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+}
+
+#[test]
+fn test_two_ephemerals_one_output_crosslinked() {
+    start_logging();
+    //
+    // actually A diamend...
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("A", JobKind::Ephemeral);
         g.add_node("B", JobKind::Ephemeral);
@@ -992,4 +1125,35 @@ fn test_epheremal_chained_invalidate_intermediate() {
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&2));
     assert!(ro.run_counters.get("C") == Some(&2));
+}
+#[test]
+fn test_ephemeral_diamond() {
+    // actually A diamend...
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("TB", JobKind::Ephemeral);
+        g.add_node("TC", JobKind::Ephemeral);
+        g.add_node("TD", JobKind::Ephemeral);
+        g.add_node("E", JobKind::Output);
+        g.depends_on("TB", "TA");
+        g.depends_on("TC", "TB");
+        g.depends_on("TD", "TB");
+        g.depends_on("TD", "TA");
+        g.depends_on("E", "TD");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("TC") == Some(&1));
+    assert!(ro.run_counters.get("TD") == Some(&1));
+    assert!(ro.run_counters.get("E") == Some(&1));
+
+    error!("part2");
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("TC") == Some(&1));
+    assert!(ro.run_counters.get("TD") == Some(&1));
+    assert!(ro.run_counters.get("E") == Some(&1));
 }
