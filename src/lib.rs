@@ -17,11 +17,11 @@ use thiserror::Error;
 
 use pyo3::prelude::*;
 
+mod engine;
 #[cfg(test)]
 mod tests;
-mod engine;
 
-use engine::{PPGEvaluator, JobKind};
+use engine::{JobKind, PPGEvaluator};
 
 static LOGGER_INIT: Once = Once::new();
 
@@ -70,7 +70,6 @@ impl PPGEvaluatorStrategy for StrategyForTesting {
     }
 }
 
-
 fn start_logging() {
     let start_time = chrono::Utc::now();
     if !LOGGER_INIT.is_completed() {
@@ -117,6 +116,7 @@ pub struct TestGraphRunner {
     pub already_done: HashSet<String>,
     pub allowed_nesting: u32,
     pub outputs: HashMap<String, String>,
+    pub run_order: Vec<String>,
 }
 
 impl TestGraphRunner {
@@ -128,6 +128,7 @@ impl TestGraphRunner {
             already_done: HashSet::new(),
             allowed_nesting: 250,
             outputs: HashMap::new(),
+            run_order: Vec::new(),
         }
     }
 
@@ -141,6 +142,7 @@ impl TestGraphRunner {
         }
         let already_done2 = Rc::clone(&strat.already_done);
         let mut g = PPGEvaluator::new_with_history(self.history.clone(), strat);
+        self.run_order.clear();
 
         (self.setup_graph)(&mut g);
         let mut counter = self.allowed_nesting;
@@ -151,6 +153,7 @@ impl TestGraphRunner {
             for job_id in to_run.iter() {
                 debug!("Running {}", job_id);
                 g.event_now_running(job_id)?;
+                self.run_order.push(job_id.to_string());
                 *self.run_counters.entry(job_id.clone()).or_insert(0) += 1;
                 if jobs_to_fail.contains(&&job_id[..]) {
                     g.event_job_finished_failure(job_id).unwrap();
@@ -181,9 +184,14 @@ impl TestGraphRunner {
         for k in already_done2.take().into_iter() {
             self.already_done.insert(k);
         }
+        if !g.verify_order_was_topological(&self.run_order) {
+            panic!("Run order was not topological");
+        }
 
         Ok(g)
     }
+
+    fn assert_run_order_is_topological(&self, g: &PPGEvaluator<StrategyForTesting>) {}
 }
 
 pub fn test_big_linear_graph(count: u32) {
@@ -347,7 +355,10 @@ impl PyPPG2Evaluator {
     }
 
     pub fn jobs_ready_for_cleanup(&self) -> Vec<String> {
-        self.evaluator.query_ready_for_cleanup().into_iter().collect()
+        self.evaluator
+            .query_ready_for_cleanup()
+            .into_iter()
+            .collect()
     }
 
     pub fn event_job_cleanup_done(&mut self, job_id: &str) -> Result<(), PyErr> {
