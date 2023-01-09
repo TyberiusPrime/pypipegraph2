@@ -29,6 +29,8 @@ static LOGGER_INIT: Once = Once::new();
 pub enum PPGEvaluatorError {
     #[error("API error. You're holding it wrong")]
     APIError(String),
+    #[error("Ephemeral was validated, but rerun for downstreams. It changed output, violating the constant input->constant output contstraint.")]
+    EphemeralChangedOutput,
 }
 pub trait PPGEvaluatorStrategy {
     fn output_already_present(&self, query: &str) -> bool;
@@ -158,14 +160,21 @@ impl TestGraphRunner {
                 if jobs_to_fail.contains(&&job_id[..]) {
                     g.event_job_finished_failure(job_id).unwrap();
                 } else {
-                    g.event_job_finished_success(
+                    match g.event_job_finished_success(
                         job_id,
                         self.outputs
                             .get(job_id)
                             .unwrap_or(&format!("history_{}", job_id))
                             .to_string(),
-                    )
-                    .unwrap();
+                    ) {
+                        Ok(_) => {}
+                        Err(err) => match err {
+                            PPGEvaluatorError::APIError(x) => panic!("api error {}", x),
+                            PPGEvaluatorError::EphemeralChangedOutput => {
+                                debug!("EphemeralChangedOutput error. ignoring for tests");
+                            }
+                        },
+                    }
                 }
                 already_done2.borrow_mut().insert(job_id.clone());
             }

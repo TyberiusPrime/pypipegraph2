@@ -73,8 +73,8 @@ pub enum JobStateOutput {
 pub enum JobStateEphemeral {
     NotReady(ValidationStatus),
     ReadyButDelayed, //ie. we have not made a decision on whether this is a go or not.
-    ReadyToRun,
-    Running,
+    ReadyToRun(ValidationStatus),
+    Running(ValidationStatus),
     FinishedSuccessNotReadyForCleanup,
     FinishedSuccessReadyForCleanup,
     FinishedSuccessCleanedUp,
@@ -171,8 +171,8 @@ impl JobQueries for JobStateEphemeral {
         match self {
             JobStateEphemeral::NotReady(_) => false,
             JobStateEphemeral::ReadyButDelayed => false,
-            JobStateEphemeral::ReadyToRun => false,
-            JobStateEphemeral::Running => false,
+            JobStateEphemeral::ReadyToRun(_) => false,
+            JobStateEphemeral::Running(_) => false,
             JobStateEphemeral::FinishedSuccessNotReadyForCleanup => true,
             JobStateEphemeral::FinishedSuccessReadyForCleanup => true,
             JobStateEphemeral::FinishedSuccessCleanedUp => true,
@@ -483,7 +483,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         match self.jobs[job_idx as usize].state {
             JobState::Ephemeral(_) => {}
             JobState::Always(_) | JobState::Output(_) => {
-                debug!("was not ephemeral {}", &self.jobs[job_idx as usize].job_id);
+            //    debug!("was not ephemeral {}", &self.jobs[job_idx as usize].job_id);
                 return false;
             }
         }
@@ -502,8 +502,19 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         if !self.is_finished() {
             panic!("Graph wasn't finished, not handing out history..."); // todo: actually, why not, we could save history occasionally?
         }
+        //our history 'keys'
+        //no !!! -> job output.
+        //ends with !!! -> the list of named inputs
+        //x!!!y -> input x for job y.
         let mut out = self.history.clone();
         for (idx, job) in self.jobs.iter().enumerate() {
+            //step 1: record what jobs when into this one
+            let input_name_key = format!("{}!!!", job.job_id);
+            out.insert(input_name_key, self.name_job_inputs(idx));
+
+            //step 2: record the actualy output of this job
+            // (are we using this anywhere?)
+
             let key = job.job_id.to_string();
             let history = match &job.history_output {
                 Some(new_history) => new_history,
@@ -516,7 +527,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             continue;
                         } else {
                             panic!(
-                                "Job was skipped but history had no entry for this job: {:?} {:?}. job_and_downstreams_are_ephmeral {}",
+                                "Job was skipped but history had no entry for this job: {:?} {:?}. job_and_downstreams_are_ephemeral {}",
                                 job.job_id, job.state, job_and_downstreams_are_ephmeral
 
                             );
@@ -624,9 +635,12 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 set_node_state!(j, JobState::Output(JobStateOutput::Running));
                 Ok(())
             }
-            JobState::Ephemeral(JobStateEphemeral::ReadyToRun) => {
+            JobState::Ephemeral(JobStateEphemeral::ReadyToRun(validation_status)) => {
                 self.jobs_ready_to_run.remove(job_id);
-                set_node_state!(j, JobState::Ephemeral(JobStateEphemeral::Running));
+                set_node_state!(
+                    j,
+                    JobState::Ephemeral(JobStateEphemeral::Running(validation_status))
+                );
                 Ok(())
             }
             _ => Err(PPGEvaluatorError::APIError(format!(
@@ -641,22 +655,48 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         job_id: &str,
         history_to_store: String,
     ) -> Result<(), PPGEvaluatorError> {
-        let idx = *self.job_id_to_node_idx.get(job_id).expect("Unknown job id");
-        let j = &mut self.jobs[idx as usize];
+        let node_idx = *self.job_id_to_node_idx.get(job_id).expect("Unknown job id");
+        let j = &self.jobs[node_idx as usize];
         match j.state {
             JobState::Always(JobStateAlways::Running)
             | JobState::Output(JobStateOutput::Running)
-            | JobState::Ephemeral(JobStateEphemeral::Running) => {}
+            | JobState::Ephemeral(JobStateEphemeral::Running(_)) => {}
             _ => {
                 return Err(PPGEvaluatorError::APIError(format!(
-                    "Reported a job as finished taht was not running ! {:?}",
+                    "Reported a job as finished that was not running ! {:?}",
                     j
                 )))
             }
         }
+        if j.state == JobState::Ephemeral(JobStateEphemeral::Running(ValidationStatus::Validated)) {
+            let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
+            for downstream_idx in downstreams {
+                let hist_key = format!(
+                    "{}!!!{}",
+                    j.job_id, &self.jobs[downstream_idx as usize].job_id
+                );
+                if let Some(downstream_history) = self.history.get(&hist_key) {
+                    if *downstream_history != history_to_store {
+                        self.signals.push_back(NewSignal!(
+                            SignalKind::JobFinishedFailure,
+                            node_idx,
+                            self.jobs
+                        ));
+                        self.process_signals(0);
+                        return Err(PPGEvaluatorError::EphemeralChangedOutput);
+                    }
+                }
+            }
+        }
+
+        let j = &mut self.jobs[node_idx as usize];
         j.history_output = Some(history_to_store);
-        self.signals
-            .push_back(NewSignal!(SignalKind::JobFinishedSuccess, idx, self.jobs));
+
+        self.signals.push_back(NewSignal!(
+            SignalKind::JobFinishedSuccess,
+            node_idx,
+            self.jobs
+        ));
         self.process_signals(0);
         Ok(())
     }
@@ -667,10 +707,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         match j.state {
             JobState::Always(JobStateAlways::Running)
             | JobState::Output(JobStateOutput::Running)
-            | JobState::Ephemeral(JobStateEphemeral::Running) => {}
+            | JobState::Ephemeral(JobStateEphemeral::Running(_)) => {}
             _ => {
                 return Err(PPGEvaluatorError::APIError(format!(
-                    "Reported a job as finished taht was not running ! {:?}",
+                    "Reported a job as finished that was not running ! {:?}",
                     j
                 )))
             }
@@ -731,11 +771,23 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             _ => panic!("unexpected"),
                         },
                         JobState::Ephemeral(state) => match state {
-                            JobStateEphemeral::NotReady(ValidationStatus::Invalidated)
+                            JobStateEphemeral::NotReady(ValidationStatus::Invalidated) => {
+                                set_node_state!(
+                                    j,
+                                    JobState::Ephemeral(JobStateEphemeral::ReadyToRun(
+                                        ValidationStatus::Invalidated
+                                    ))
+                                );
+                            }
                             // validated happens when the job is required
-                            | JobStateEphemeral::NotReady(ValidationStatus::Validated)
+                            JobStateEphemeral::NotReady(ValidationStatus::Validated)
                             | JobStateEphemeral::ReadyButDelayed => {
-                                set_node_state!(j, JobState::Ephemeral(JobStateEphemeral::ReadyToRun));
+                                set_node_state!(
+                                    j,
+                                    JobState::Ephemeral(JobStateEphemeral::ReadyToRun(
+                                        ValidationStatus::Validated
+                                    ))
+                                );
                             }
                             _ => panic!("unexpected {:?}", j),
                         },
@@ -804,7 +856,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         JobState::Output(JobStateOutput::Running) => {
                             set_node_state!(j, JobState::Output(JobStateOutput::FinishedSuccess));
                         }
-                        JobState::Ephemeral(JobStateEphemeral::Running) => {
+                        JobState::Ephemeral(JobStateEphemeral::Running(_)) => {
                             set_node_state!(
                                 j,
                                 JobState::Ephemeral(
@@ -825,7 +877,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         JobState::Output(JobStateOutput::Running) => {
                             set_node_state!(j, JobState::Output(JobStateOutput::FinishedFailure));
                         }
-                        JobState::Ephemeral(JobStateEphemeral::Running) => {
+                        JobState::Ephemeral(JobStateEphemeral::Running(_)) => {
                             set_node_state!(
                                 j,
                                 JobState::Ephemeral(JobStateEphemeral::FinishedFailure)
@@ -1150,7 +1202,6 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             //if all non-ephemeral upstreams are done
                             //and the ephemerals are validated.
                             if Self::all_upstreams_done(dag, jobs, node_idx) {
-                                debug!("JobFinishedSkip place 1");
                                 new_signals.push(NewSignal!(
                                     SignalKind::JobFinishedSkip,
                                     node_idx,
@@ -1419,55 +1470,104 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             *dag.edge_weight_mut(upstream_idx, node_idx).unwrap() = weight
         }
     }
+    fn name_job_inputs(&self, node_idx: NodeIndex) -> String {
+        let mut names = Vec::new();
+        let upstreams = self.dag.neighbors_directed(node_idx, Direction::Incoming);
+        for upstream_idx in upstreams {
+            names.push(&self.jobs[upstream_idx].job_id[..]);
+        }
+        names.sort();
+        names.join("\n")
+    }
 
     fn identify_missing_outputs(&mut self) {
         for &node_idx in self.topo.as_ref().unwrap().iter().rev() {
-            let job = &mut self.jobs[node_idx as usize];
-            match job.state {
-                JobState::Always(_) => {
-                    Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes)
+            let job = &self.jobs[node_idx as usize];
+
+            let input_name_key = format!("{}!!!", job.job_id);
+            let historical_input_names = self.history.get(&input_name_key);
+            let inputs_changed = match historical_input_names {
+                Some(historical_input_names) => {
+                    *historical_input_names != self.name_job_inputs(node_idx)
                 }
-                JobState::Output(_) => {
-                    if self.strategy.output_already_present(&job.job_id) {
-                        Self::set_upstream_edges(&mut self.dag, node_idx, Required::No)
-                    } else {
-                        Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
+                None => false, // not having an input job history is not itself
+                               // enough reason to invalidate -
+                               // they'll fail anyhow when we're looking at the individual edges
+                               // and this would trigger building non-used Ephemerals
+            };
+            let mut job = &mut self.jobs[node_idx as usize];
+
+            if inputs_changed {
+                debug!("Input to job {} changed.", job.job_id);
+                Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
+                match job.state {
+                    JobState::Always(JobStateAlways::Undetermined) => {}
+                    JobState::Output(JobStateOutput::NotReady(ValidationStatus::Unknown)) => {
                         set_node_state!(
                             job,
                             JobState::Output(JobStateOutput::NotReady(
                                 ValidationStatus::Invalidated,
                             ))
                         );
-                        //continue;
                     }
+                    JobState::Ephemeral(JobStateEphemeral::NotReady(ValidationStatus::Unknown)) => {
+                        set_node_state!(
+                            job,
+                            JobState::Ephemeral(JobStateEphemeral::NotReady(
+                                ValidationStatus::Invalidated,
+                            ))
+                        );
+                    }
+                    _ => panic!("should not happen"),
                 }
-                JobState::Ephemeral(_) => {
-                    //we're going reverse topological, so at this point,
-                    //all downstreams have declared whether they're required or not.
-                    let mut any_required = false;
-                    let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
-                    for downstream_idx in downstreams {
-                        match self.dag.edge_weight(node_idx, downstream_idx).unwrap() {
-                            Required::Unknown => panic!(
-                                "Should not happen {} {}",
-                                downstream_idx, self.jobs[downstream_idx].job_id
-                            ),
-                            Required::Yes => {
-                                any_required = true;
-                                break;
-                            }
-                            Required::No => {}
+            } else {
+                match job.state {
+                    JobState::Always(_) => {
+                        Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes)
+                    }
+                    JobState::Output(_) => {
+                        if self.strategy.output_already_present(&job.job_id) {
+                            Self::set_upstream_edges(&mut self.dag, node_idx, Required::No)
+                        } else {
+                            Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
+                            set_node_state!(
+                                job,
+                                JobState::Output(JobStateOutput::NotReady(
+                                    ValidationStatus::Invalidated,
+                                ))
+                            );
+                            //continue;
                         }
                     }
-                    Self::set_upstream_edges(
-                        &mut self.dag,
-                        node_idx,
-                        if any_required {
-                            Required::Yes
-                        } else {
-                            Required::No
-                        },
-                    )
+                    JobState::Ephemeral(_) => {
+                        //we're going reverse topological, so at this point,
+                        //all downstreams have declared whether they're required or not.
+                        let mut any_required = false;
+                        let downstreams =
+                            self.dag.neighbors_directed(node_idx, Direction::Outgoing);
+                        for downstream_idx in downstreams {
+                            match self.dag.edge_weight(node_idx, downstream_idx).unwrap() {
+                                Required::Unknown => panic!(
+                                    "Should not happen {} {}",
+                                    downstream_idx, self.jobs[downstream_idx].job_id
+                                ),
+                                Required::Yes => {
+                                    any_required = true;
+                                    break;
+                                }
+                                Required::No => {}
+                            }
+                        }
+                        Self::set_upstream_edges(
+                            &mut self.dag,
+                            node_idx,
+                            if any_required {
+                                Required::Yes
+                            } else {
+                                Required::No
+                            },
+                        )
+                    }
                 }
             }
         }
