@@ -2,6 +2,6 @@
 
 ./prep_for_tests.sh
 echo "cargo test"
-cargo test
+CARGO_TARGET_DIR=target_bacon cargo test
 echo "pytest"
-pytest $@
+CARGO_TARGET_DIR=target_bacon RUST_LOG=debug pytest $@

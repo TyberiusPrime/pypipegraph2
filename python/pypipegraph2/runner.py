@@ -219,7 +219,6 @@ class Runner:
         return history_is_different(self, job_id_from, job_id_to, last_value, new_value)
 
     def build_evaluator(self, history):
-        from . import pypipegraph2 as xxx
         from .pypipegraph2 import PPG2Evaluator
 
         e = PPG2Evaluator(history, self.compare_history)
@@ -692,6 +691,7 @@ class Runner:
 
                             self.job_outcomes[job_id].run_time = job.run_time
                         elif error:
+                            print(error)
                             raise error
                         self.check_for_new_jobs.set()
 
@@ -706,6 +706,7 @@ class Runner:
                 )
                 exception_type, exception_value, tb = sys.exc_info()
                 captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
+                log_error(str(captured_tb))
                 self.abort()
                 raise
             except BaseException as e:
