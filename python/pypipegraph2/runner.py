@@ -13,7 +13,7 @@ from .enums import (
 )
 from .exceptions import _RunAgain
 from .parallel import CoreLock, async_raise
-from threading import Thread
+from threading import ExceptHookArgs, Thread
 from . import ppg_traceback
 import threading
 from rich.console import Console
@@ -666,9 +666,17 @@ class Runner:
                                         outputs, sort_keys=True, indent=1
                                     )
                                     ljt(f"success {job_id} str_history {str_history}")
-                                    self.evaluator.event_job_success(
-                                        job_id, str_history
-                                    )
+                                    try:
+                                        self.evaluator.event_job_success(
+                                            job_id, str_history
+                                        )
+                                        failed = False
+                                    except Exception as e:
+                                        log_error(f"Recording job success failed for {job_id}. Likely constraint violation?: Message was '{e}'")
+                                        self.job_outcomes[job_id] = RecordedJobOutcome(
+                                            job_id, JobOutcome.Failed, str(e)
+                                        )
+
                                 else:
                                     ljt(f"failure {job_id}")
                                     self.job_outcomes[job_id] = RecordedJobOutcome(
