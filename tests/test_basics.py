@@ -148,9 +148,10 @@ class TestPypipegraph2:
         jobB = ppg.FileGeneratingJob(
             "B", lambda of: of.write_text("BBB" + Path("A").read_text())
         )
-        jobB.depends_on(jobA) # so that the changed A output actually get's registered
+        jobB.depends_on(jobA)  # so that the changed A output actually get's registered
         ppg.run()
         assert Path("a").read_text() == "2"
+        assert Path("A").read_text() == "AAAA"  # correctly rerun
         assert Path("B").read_text() == "BBBAAAA"  # correctly rerun
 
     def test_changing_bound_variables(self):
@@ -251,45 +252,52 @@ class TestPypipegraph2:
     def test_tempfile(self, job_trace_log):
         jobA = ppg.TempFileGeneratingJob(
             "TA",
-            lambda of: of.write_text("A" + counter("a")),
+            lambda of: counter("a") and of.write_text("A"),
             depend_on_function=False,
         )
         jobB = ppg.FileGeneratingJob(
             "B",
-            lambda of: of.write_text("B" + counter("c") + Path("TA").read_text()),
+            lambda of: counter("b") and of.write_text("B" + Path("TA").read_text()),
             depend_on_function=False,
         )
         jobB.depends_on(jobA)
         ppg.run()
         assert not Path("TA").exists()
         assert Path("B").exists()
-        assert Path("B").read_text() == "B0A0"
+        assert Path("B").read_text() == "BA"
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
         logger.error("Second run - no rerun")
         ppg.run()
         assert not Path("TA").exists()
         assert Path("B").exists()
-        assert Path("B").read_text() == "B0A0"
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
 
         Path("B").unlink()
         logger.error("Third run - B output missing")
         ppg.run()
         assert not Path("TA").exists()
         assert Path("B").exists()
-        assert Path("B").read_text() == "B1A1"
+        assert Path("B").read_text() == "BA"
+        assert Path("a").read_text() == "2"
+        assert Path("b").read_text() == "2"
 
     def test_tempfile_chained_invalidate_leaf(self):
         ppg.new(cores=1, log_level=6)
         jobA = ppg.TempFileGeneratingJob(
-            "TA", lambda of: of.write_text("A" + counter("a")), depend_on_function=False
+            "TA",
+            lambda of: counter("a") and of.write_text("A"),
+            depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "TB",
-            lambda of: of.write_text("B" + counter("b") + Path("TA").read_text()),
+            lambda of: counter("b") and of.write_text("B" + Path("TA").read_text()),
             depend_on_function=False,
         )
         jobC = ppg.FileGeneratingJob(
             "C",
-            lambda of: of.write_text("C" + counter("c") + Path("TB").read_text()),
+            lambda of: counter("c") and of.write_text("C" + Path("TB").read_text()),
             depend_on_function=False,
         )
         jobC.depends_on(jobB)
@@ -298,32 +306,42 @@ class TestPypipegraph2:
         ppg.run()
         assert not Path("TA").exists()
         assert not Path("TB").exists()
-        assert Path("C").read_text() == "C0B0A0"
+        assert Path("C").read_text() == "CBA"
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        assert Path("c").read_text() == "1"
         ppg.util.log_error("Second No op run.")
         ppg.run()
-        assert Path("C").read_text() == "C0B0A0"
+        assert Path("C").read_text() == "CBA"
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        assert Path("c").read_text() == "1"
         assert not Path("TA").exists()
         assert not Path("TB").exists()
 
         jobC.depends_on(ppg.FunctionInvariant(lambda: 53, "lambda_52"))
         ppg.util.log_error("Third run - rerun because of FI")
         ppg.run()
-        assert Path("C").read_text() == "C1B1A1"
+        assert Path("C").read_text() == "CBA"
+        assert Path("a").read_text() == "2"
+        assert Path("b").read_text() == "2"
+        assert Path("c").read_text() == "2"
+
         assert not Path("TA").exists()
         assert not Path("TB").exists()
 
     def test_tempfile_chained_invalidate_intermediate(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "TA", lambda of: of.write_text("A" + counter("a")), depend_on_function=False
+            "TA", lambda of: counter("a") and of.write_text("A" ), depend_on_function=False
         )
         jobB = ppg.TempFileGeneratingJob(
             "TB",
-            lambda of: of.write_text("B" + counter("b") + Path("TA").read_text()),
+            lambda of: counter("b") and of.write_text("B" +  Path("TA").read_text()),
             depend_on_function=False,
         )
         jobC = ppg.FileGeneratingJob(
             "C",
-            lambda of: of.write_text("C" + counter("c") + Path("TB").read_text()),
+            lambda of: counter("c") and of.write_text("C" +  Path("TB").read_text()),
             depend_on_function=False,
         )
         jobC.depends_on(jobB)
@@ -332,23 +350,33 @@ class TestPypipegraph2:
         ppg.run()
         assert not Path("TA").exists()
         assert not Path("TB").exists()
-        assert Path("C").read_text() == "C0B0A0"
+        assert Path("C").read_text() == "CBA"
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        assert Path("c").read_text() == "1"
+
         logger.error("Second No op run.")
         ppg.run()
-        assert Path("C").read_text() == "C0B0A0"
+        assert Path("C").read_text() == "CBA"
         assert not Path("TA").exists()
         assert not Path("TB").exists()
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        assert Path("c").read_text() == "1"
 
         jobB.depends_on(ppg.FunctionInvariant(lambda: 53, "lambda_52"))
         logger.error("Third run - rerun because of FI")
         ppg.run()
-        assert Path("C").read_text() == "C1B1A1"
+        assert Path("C").read_text() == "CBA"
         assert not Path("TA").exists()
         assert not Path("TB").exists()
+        assert Path("a").read_text() == "2"
+        assert Path("b").read_text() == "2"
+        assert Path("c").read_text() == "1" # B does not change output -> c does not get rerun
 
     def test_just_a_tempfile(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
-            "TA", lambda of: of.write_text("A" + counter("a")), depend_on_function=False
+            "TA", lambda of: + counter("a") and of.write_text("A" ), depend_on_function=False
         )
         ppg.run()
         assert not Path("TA").exists()
@@ -402,50 +430,68 @@ class TestPypipegraph2:
     def test_tempfile_triggered_by_invalidating_final_job(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
             "TA",
-            lambda of: of.write_text("A" + counter("a")),
+            lambda of: counter("a") and of.write_text("A" ),
             depend_on_function=False,
         )
         jobB = ppg.TempFileGeneratingJob(
             "TB",
-            lambda of: of.write_text("B" + counter("b") + Path("TA").read_text()),
+            lambda of: counter("b") and of.write_text("B"  + Path("TA").read_text()),
             depend_on_function=False,
         )
         jobC = ppg.FileGeneratingJob(
             "C",
-            lambda of: of.write_text("C" + counter("c") + Path("TB").read_text()),
+            lambda of: counter("c") and of.write_text("C"  + Path("TB").read_text()),
             depend_on_function=False,
         )
         jobC.depends_on(jobB)
         jobB.depends_on(jobA)
         ppg.run()
-        assert Path("C").read_text() == "C0B0A0"
+        assert Path("C").read_text() == "CBA"
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        assert Path("c").read_text() == "1"
+
         jobC.depends_on(ppg.FunctionInvariant(lambda: 52, "lambda_52"))
         ppg.run()
-        assert Path("C").read_text() == "C1B1A1"
+        assert Path("C").read_text() == "CBA"
+        assert Path("a").read_text() == "2"
+        assert Path("b").read_text() == "2"
+        assert Path("c").read_text() == "2"
+
 
     def test_tempfile_triggered_by_invalidating_tempfile(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
             "A",
-            lambda of: of.write_text("A" + counter("a")),
+            lambda of: counter("a") and of.write_text("A" ),
             depend_on_function=False,
         )
+        trigger = [True]
         jobB = ppg.TempFileGeneratingJob(
             "B",
-            lambda of: of.write_text("B" + counter("b") + Path("A").read_text()),
+            lambda of: counter("b") and of.write_text(("B" if trigger[0] else 'x')  + Path("A").read_text()),
             depend_on_function=False,
         )
         jobC = ppg.FileGeneratingJob(
             "C",
-            lambda of: of.write_text("C" + counter("c") + Path("B").read_text()),
+            lambda of: counter("c") and of.write_text("C"  + Path("B").read_text()),
             depend_on_function=False,
         )
         jobC.depends_on(jobB)
         jobB.depends_on(jobA)
         ppg.run()
-        assert Path("C").read_text() == "C0B0A0"
+        assert Path("C").read_text() == "CBA"
+        assert Path("a").read_text() == "1"
+        assert Path("b").read_text() == "1"
+        assert Path("c").read_text() == "1"
+
         jobB.depends_on(ppg.FunctionInvariant(lambda: 52, "lambda_52"))
+        trigger[0] = False
         ppg.run()
-        assert Path("C").read_text() == "C1B1A1"
+        assert Path("C").read_text() == "CxA"
+        assert Path("a").read_text() == "2"
+        assert Path("b").read_text() == "2"
+        assert Path("c").read_text() == "2"
+
 
     def test_last_invalidated_tempfile_isolation(self, trace_log):
         jobA = ppg.TempFileGeneratingJob(
@@ -726,8 +772,7 @@ class TestPypipegraph2:
         ppg.run(event_timeout=0.1)
         assert Path("a").exists()
 
-    def test_catching_catastrophic_execution_message_passing_failures(
-        self):
+    def test_catching_catastrophic_execution_message_passing_failures(self):
         import pickle
 
         class BadFileGeneratingJob(ppg.FileGeneratingJob):
@@ -764,12 +809,12 @@ class TestPypipegraph2:
             load_job2, cache_job2 = ppg.CachedDataLoadingJob(
                 "c", lambda: "52", load, depend_on_function=False
             )
-            d = ppg.FileGeneratingJob('D', lambda of: of.write_text('d' + o[-1]))
+            d = ppg.FileGeneratingJob("D", lambda of: of.write_text("d" + o[-1]))
             d.depends_on(load_job2)
-            Path('c').write_text('c')
+            Path("c").write_text("c")
             # write something sensible
             with open("b", "wb") as op:
-                pickle.dump('153', op)
+                pickle.dump("153", op)
             # now this does not get rewritten
             # because of the BadFileGeneratingJob
             assert type(cache_job) == BadFileGeneratingJob
@@ -778,8 +823,8 @@ class TestPypipegraph2:
             # at worst, you'll get a pickle failed error if the job dies
             with pytest.raises(ppg.JobsFailed):
                 ppg.run()
-            assert read('A') == 'a153'
-            assert 'UnpicklingError' in str(load_job2.exception)
+            assert read("A") == "a153"
+            assert "UnpicklingError" in str(load_job2.exception)
         finally:
             ppg.jobs.FileGeneratingJob = old_fg
 
@@ -939,7 +984,7 @@ class TestPypipegraph2:
         assert Path("B").read_text() == "b"
         assert Path("b").read_text() == "2"
 
-    @pytest.mark.skip # no longer relevant onnce we switched to deephash
+    @pytest.mark.skip  # no longer relevant onnce we switched to deephash
     def test_parameter_invariant_needs_hash(self, create_out_dir):
         class NoHash:
             def __hash__(self):
@@ -1324,7 +1369,7 @@ class TestPypipegraph2:
         ppg.FileGeneratingJob("C", lambda of: write(of, str(of)))
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
-        assert len(ppg.global_pipegraph.do_raise) == 2 # both exceptions
+        assert len(ppg.global_pipegraph.do_raise) == 2  # both exceptions
         assert ppg.global_pipegraph.last_run_result["A"].error
         assert ppg.global_pipegraph.last_run_result["B"].error
         assert not ppg.global_pipegraph.last_run_result["C"].error
@@ -1455,23 +1500,27 @@ class TestPypipegraph2:
             assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 0
             ppg.run()
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 1 + 1 + 1 # for latest
+                len(list(ppg.global_pipegraph.log_dir.glob("*")))
+                == 1 + 1 + 1  # for latest
             )  # runtimes
             ppg.run()
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 2 + 1 + 1 # for latest
+                len(list(ppg.global_pipegraph.log_dir.glob("*")))
+                == 2 + 1 + 1  # for latest
             )  # runtimes
             ppg.new(log_retention=2)
             ppg.run()
             prior = list(ppg.global_pipegraph.log_dir.glob("*"))
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 3 + 1 + 1 # for latest
+                len(list(ppg.global_pipegraph.log_dir.glob("*")))
+                == 3 + 1 + 1  # for latest
             )  # runtimes
             # no new.. still new log file please
             ppg.run()
             after = list(ppg.global_pipegraph.log_dir.glob("*"))
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*"))) == 3 + 1 + 1 # for latest
+                len(list(ppg.global_pipegraph.log_dir.glob("*")))
+                == 3 + 1 + 1  # for latest
             )  # runtimes
             assert set([x.name for x in prior]) != set([x.name for x in after])
 
@@ -1734,7 +1783,7 @@ class TestPypipegraph2:
             ppg.FileGeneratingJob("A", lambda of: counter("a") and of.write_text("A"))
 
         c = ppg.FileGeneratingJob("c", lambda of: of.write_text("c"))
-        ppg.JobGeneratingJob("B", inner)() # here is the call
+        ppg.JobGeneratingJob("B", inner)()  # here is the call
         assert read("b") == "1"
         assert read("a") == "1"
         assert read("A") == "A"
@@ -1746,13 +1795,13 @@ class TestPypipegraph2:
         assert read("c") == "c"
 
     def test_focus_on_multiple(self):
-        a = ppg.FileGeneratingJob('a', lambda of: of.write_text(of.name))
-        b = ppg.FileGeneratingJob('b', lambda of: of.write_text(of.name))
-        c = ppg.FileGeneratingJob('c', lambda of: of.write_text(of.name))
-        ppg.global_pipegraph.run_for_these([a,b])
-        assert read('a') == 'a'
-        assert read('b') == 'b'
-        assert not Path('c').exists()
+        a = ppg.FileGeneratingJob("a", lambda of: of.write_text(of.name))
+        b = ppg.FileGeneratingJob("b", lambda of: of.write_text(of.name))
+        c = ppg.FileGeneratingJob("c", lambda of: of.write_text(of.name))
+        ppg.global_pipegraph.run_for_these([a, b])
+        assert read("a") == "a"
+        assert read("b") == "b"
+        assert not Path("c").exists()
 
     def test_fail_but_write(self):
         def fail(of):

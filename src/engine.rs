@@ -483,7 +483,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         match self.jobs[job_idx as usize].state {
             JobState::Ephemeral(_) => {}
             JobState::Always(_) | JobState::Output(_) => {
-            //    debug!("was not ephemeral {}", &self.jobs[job_idx as usize].job_id);
+                //    debug!("was not ephemeral {}", &self.jobs[job_idx as usize].job_id);
                 return false;
             }
         }
@@ -500,13 +500,35 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
     pub fn new_history(&self) -> HashMap<String, String> {
         if !self.is_finished() {
+            debug!("{}", Self::debug(&self.dag, &self.jobs));
             panic!("Graph wasn't finished, not handing out history..."); // todo: actually, why not, we could save history occasionally?
         }
         //our history 'keys'
+        //(we can't do tuple indices because of json dumping)
         //no !!! -> job output.
         //ends with !!! -> the list of named inputs
         //x!!!y -> input x for job y.
+        //todo: consider splitting into multiple?
         let mut out = self.history.clone();
+        let mut out: HashMap<_,_> = out.drain().filter(|(k, v)| {
+            if k.contains("!!!") {
+                let (job_id_a, job_id_b) = k.split_once("!!!").unwrap();
+                if job_id_b != "" {
+                    let node_idx_a = self.job_id_to_node_idx.get(job_id_a);
+                    let node_idx_b = self.job_id_to_node_idx.get(job_id_b);
+                    match (node_idx_a, node_idx_b) {
+                        (Some(node_idx_a), Some(node_idx_b)) => {
+                            self.dag.edge_weight(*node_idx_a, *node_idx_b).is_some()
+                        }
+                        _ => false,
+                    }
+                } else {
+                    true
+                }
+            } else {
+                true // a node entry
+            }
+        }).collect();
         for (idx, job) in self.jobs.iter().enumerate() {
             //step 1: record what jobs when into this one
             let input_name_key = format!("{}!!!", job.job_id);

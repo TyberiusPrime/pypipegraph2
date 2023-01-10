@@ -29,7 +29,7 @@ static LOGGER_INIT: Once = Once::new();
 pub enum PPGEvaluatorError {
     #[error("API error. You're holding it wrong")]
     APIError(String),
-    #[error("Ephemeral was validated, but rerun for downstreams. It changed output, violating the constant input->constant output contstraint.")]
+    #[error("Ephemeral was validated, but rerun for downstreams. It changed output, violating the constant input->constant output assumption.")]
     EphemeralChangedOutput,
 }
 pub trait PPGEvaluatorStrategy {
