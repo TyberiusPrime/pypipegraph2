@@ -29,8 +29,12 @@ static LOGGER_INIT: Once = Once::new();
 pub enum PPGEvaluatorError {
     #[error("API error. You're holding it wrong")]
     APIError(String),
-    #[error("Ephemeral was validated, but rerun for downstreams. It changed output, violating the constant input->constant output assumption.")]
-    EphemeralChangedOutput,
+    #[error("Ephemeral {job_id} was validated, but rerun for downstreams. It changed output, violating the constant input->constant output assumption. Output was \n'{last_history}' is now \n'{new_history}'")]
+    EphemeralChangedOutput {
+        job_id: String,
+        last_history: String,
+        new_history: String,
+    },
 }
 pub trait PPGEvaluatorStrategy {
     fn output_already_present(&self, query: &str) -> bool;
@@ -170,7 +174,7 @@ impl TestGraphRunner {
                         Ok(_) => {}
                         Err(err) => match err {
                             PPGEvaluatorError::APIError(x) => panic!("api error {}", x),
-                            PPGEvaluatorError::EphemeralChangedOutput => {
+                            PPGEvaluatorError::EphemeralChangedOutput{..} => {
                                 debug!("EphemeralChangedOutput error. ignoring for tests");
                             }
                         },

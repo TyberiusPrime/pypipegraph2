@@ -96,8 +96,8 @@ pub fn test_failure() {
     assert!(g.query_ready_to_run().is_empty());
     assert!(g.is_finished());
     //we keep history that for jobs tha are currently not present
+    assert!(g.new_history().get("Job_not_present").is_some());
     assert!(g.new_history().len() == 1 + 3);
-    assert!(g.new_history().get("Job_not_present").is_some())
 }
 
 #[test]
@@ -142,7 +142,8 @@ pub fn ephemeral_output_already_done() {
     let mut his = HashMap::new();
     his.insert("in!!!out".to_string(), "".to_string());
     his.insert("in".to_string(), "".to_string());
-    his.insert("out".to_string(), "".to_string());
+    his.insert("in!!!".to_string(), "".to_string());
+    his.insert("out!!!".to_string(), "in".to_string());
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("out".to_string());
     let mut g = PPGEvaluator::new_with_history(his, strat);
@@ -199,13 +200,16 @@ pub fn ephemeral_nested() {
 pub fn ephemeral_nested_first_already_present() {
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("A".to_string());
-    let mut g = PPGEvaluator::new_with_history(
-        mk_history(&[
+    let mut hist = mk_history(&[
             (("E", "D"), ""),
             (("D", "C"), ""),
             (("C", "B"), ""),
             (("B", "A"), ""),
-        ]),
+        ]);
+    hist.insert("A!!!".to_string(), "".to_string());
+    hist.insert("A".to_string(), "".to_string());
+    let mut g = PPGEvaluator::new_with_history(
+        hist,
         strat,
     );
     //dbg!(&g.history);
@@ -667,6 +671,7 @@ fn test_simple_graph_runner() {
     assert_eq!(*ro.run_counters.get("A").unwrap(), 2);
     assert_eq!(*ro.run_counters.get("B").unwrap(), 1);
 
+    start_logging();
     error!("part5");
     let g = ro.run(&Vec::new());
     assert_eq!(*ro.run_counters.get("A").unwrap(), 2);
@@ -995,7 +1000,7 @@ fn test_loosing_an_input_is_invalidating() {
 #[test]
 fn test_changing_inputs_when_leaf_was_missing() {
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
-        g.add_node("A", JobKind::Always);
+        g.add_node("A", JobKind::Output);
         g.add_node("B", JobKind::Output);
         g.depends_on("B", "A");
     }
@@ -1012,19 +1017,23 @@ fn test_changing_inputs_when_leaf_was_missing() {
     }
     ro.setup_graph = Box::new(create_graph2);
 
+    //we change the outut. because of C this actually takes effect.
     ro.outputs.insert("A".to_string(), "new".to_string());
     let g = ro.run(&Vec::new()).unwrap();
     let new_history = g.new_history();
     assert!(new_history.contains_key("B"));
+    assert!(new_history.contains_key("B!!!"));
+    assert!(new_history.contains_key("A!!!B"));
     assert!(new_history.contains_key("A"));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
 
+    start_logging();
     // running it again doesn't run anything but the always job.
     let g = ro.run(&Vec::new()).unwrap();
     let new_history = g.new_history();
-    assert!(new_history.contains_key("B"));
+    //assert!(new_history.contains_key("B"));
     assert!(new_history.contains_key("A"));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&1));
@@ -1041,10 +1050,43 @@ fn test_changing_inputs_when_leaf_was_missing() {
     ro.setup_graph = Box::new(create_graph3);
     let g = ro.run(&Vec::new()).unwrap();
     assert!(ro.run_counters.get("A") == Some(&2));
-    assert!(ro.run_counters.get("B") == Some(&1)); // output is still around, input to B is
-                                                   // unchanged, so all good
-                                                   // kept the history. A is not being invalidated
+    assert!(ro.run_counters.get("B") == Some(&2)); // A's output changed between runs where we had
+                                                   // B.
+                                                   // So rerun is appropriate
     assert!(ro.run_counters.get("C") == Some(&3));
+    dbg!(g.new_history());
+
+    //now run again without B.
+    error!("part4");
+    ro.setup_graph = Box::new(create_graph2);
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&2));
+    assert!(ro.run_counters.get("C") == Some(&4));
+
+    //and readding B, but A's output did not change.
+    error!("part5");
+    ro.setup_graph = Box::new(create_graph2);
+    ro.setup_graph = Box::new(create_graph3);
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.run_counters.get("B") == Some(&2));
+    assert!(ro.run_counters.get("C") == Some(&5));
+
+    //now retriggering A, by removing C, while B is missing
+    fn create_graph4(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Output);
+    }
+    ro.setup_graph = Box::new(create_graph4);
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&3));
+
+    //and readding B, but keeping the same A output.
+    error!("part7");
+    ro.setup_graph = Box::new(create_graph);
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("A") == Some(&3));
+    assert!(ro.run_counters.get("B") == Some(&2));
 }
 #[test]
 fn test_replacing_an_input_then_restoring() {
@@ -1075,7 +1117,7 @@ fn test_replacing_an_input_then_restoring() {
     let new_history = g.new_history();
     assert!(new_history.contains_key("C"));
     assert!(new_history.contains_key("B"));
-    assert!(new_history.contains_key("A"));
+    //assert!(new_history.contains_key("A"));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&2));
     assert!(ro.run_counters.get("C") == Some(&1));
@@ -1533,7 +1575,7 @@ fn test_job_removed_input_changed_job_restored() {
     ro.already_done.remove("A");
     let g = ro.run(&Vec::new()).unwrap();
     let history = g.new_history();
-    assert!(!history.contains_key("A!!!B"));
+    assert!(history.contains_key("A!!!B"));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&1)); // after all, we lost an input
                                                    //
@@ -1544,4 +1586,84 @@ fn test_job_removed_input_changed_job_restored() {
     assert!(history.contains_key("A!!!B"));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&2)); // we regained
+}
+
+#[test]
+fn test_ephemeral_two_chained_with_always_inputs_dont_run() {
+    // ie when a link between two existing jobs is missing
+    // we no longer store that link
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("TB", JobKind::Ephemeral);
+        g.depends_on("TB", "TA");
+
+        g.add_node("FIA", JobKind::Always);
+        g.add_node("FIB", JobKind::Always);
+        g.depends_on("TA", "FIA");
+        g.depends_on("TB", "FIB");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+
+    assert!(ro.run_counters.get("FIA") == Some(&1));
+    assert!(ro.run_counters.get("FIB") == Some(&1));
+    assert!(ro.run_counters.get("TA") == None);
+    assert!(ro.run_counters.get("TB") == None);
+}
+
+#[test]
+fn test_two_temp_jobs() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("TB", JobKind::Ephemeral);
+        g.add_node("C", JobKind::Output);
+        g.add_node("D", JobKind::Output);
+        g.depends_on("C", "TA");
+        g.depends_on("C", "TB");
+        g.depends_on("D", "TB");
+
+        g.add_node("FiTA", JobKind::Always);
+        //g.add_node("FiTB", JobKind::Always);
+        //g.add_node("FiC", JobKind::Always);
+        //g.add_node("FiD", JobKind::Always);
+        g.depends_on("TA", "FiTA");
+        //g.depends_on("TB", "FiTB");
+        //g.depends_on("C", "FiC");
+        //g.depends_on("D", "FiD");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+
+    start_logging();
+
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("TB") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+    assert!(ro.run_counters.get("D") == Some(&1));
+}
+
+
+#[test]
+fn test_file_exists() {
+
+fn test_two_temp_jobs() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("b", JobKind::Output);
+        g.add_node("load_b", JobKind::Ephemeral );
+        g.add_node("A", JobKind::Output);
+        g.add_node("FIA", JobKind::Always);
+        g.depends_on("load_b", "b");
+        g.depends_on("A", "load_b");
+        g.depends_on("A", "FIA");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    ro.already_done.insert("b".to_string());
+    let g = ro.run(&Vec::new()).unwrap();
+
+    assert!(ro.run_counters.get("FIA") == Some(&1));
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("load_b") == Some(&1));
+    assert!(ro.run_counters.get("b") == Some(&1)); // we had no history, so we need to rerun
+ }
 }

@@ -206,6 +206,10 @@ class Job:
         """It yields self so you can use jobs and list of jobs uniformly"""
         yield self
 
+    def cleanup(self):
+        """Overwritten by Ephemeral jobs downstream"""
+        pass 
+
     def readd(self):
         """Readd this job to the current global pipegraph
         (possibly the *new* global pipegraph).
