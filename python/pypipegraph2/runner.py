@@ -12,7 +12,7 @@ from .enums import (
     Resources,
 )
 from .exceptions import _RunAgain
-from .parallel import CoreLock, async_raise
+from .parallel import CoreLock, async_raise, FakeLock
 from threading import ExceptHookArgs, Thread
 from . import ppg_traceback
 import threading
@@ -144,6 +144,7 @@ class Runner:
 
         def _recurse_unpruning(job_id):
             """This goes upstream"""
+            log_job_trace(f"_recurse_unpruning {job_id}")
             try:
                 pruned.remove(job_id)
                 del self.jobs[job_id].prune_reason
@@ -158,23 +159,27 @@ class Runner:
         else:
             new_jobs = set()
 
+        pruned = set()
         if focus_on_these_jobs:  # which is only set in the first run...
             # prune all jobs,
             # then unprune this one and it's predecessors
-            pruned = set(dag.nodes)  # prune all...
+            pruned.update(set(dag.nodes))  # prune all...
+            log_job_trace(f"pruned after focus {len(pruned)}")
             for job_id in set((x.job_id for x in focus_on_these_jobs)).union(new_jobs):
                 _recurse_unpruning(job_id)
-        else:
-            # apply regular pruning
-            if jobs_already_run_previously:
-                pruned = jobs_already_run_previously
-            else:
-                pruned = set()
-            for job_id in new_jobs:
-                _recurse_unpruning(job_id)
-            for job_id in self.jobs:
-                if self.jobs[job_id]._pruned:
-                    _recurse_pruning(job_id, job_id)
+            log_job_trace(f"pruned after unpruning {len(pruned)}")
+
+        # apply regular pruning
+        if jobs_already_run_previously:
+            pruned.update(jobs_already_run_previously)
+        for job_id in new_jobs:
+            _recurse_unpruning(job_id)
+
+        for job_id in self.jobs:
+            if self.jobs[job_id]._pruned:
+                _recurse_pruning(job_id, job_id)
+
+        log_job_trace(f"To prune {pruned}")
         for job_id in pruned:
             log_job_trace(f"pruned {job_id}")
             try:
@@ -232,7 +237,7 @@ class Runner:
             e.add_edge(b, a)
         return e
 
-    def run(self, history, print_failures):  # noqa:C901
+    def run(self, history, last_job_states, print_failures):  # noqa:C901
         """Actually run the current DAG"""
         from . import global_pipegraph
 
@@ -248,7 +253,9 @@ class Runner:
         self.stopped = False
         self.print_failures = print_failures
         self.output_hashes = {}
-        self.history = history  # so teh jobs can peak at it and avoid reprocessing
+        self.last_job_states = last_job_states
+
+        self.history = history  # so the jobs can peak at it and avoid reprocessing
         children_before_run = self.get_children_processes()
 
         self.evaluator = self.build_evaluator(history)
@@ -336,7 +343,9 @@ class Runner:
             for job_id in global_pipegraph.jobs:
                 if job_id not in self.jobs:
                     log_job_trace(f"new job {job_id}")
-            raise _RunAgain(self.job_states)
+            raise _RunAgain(
+                (self.job_outcomes, self.evaluator.new_history())
+            )  # self.job_states)
         log_trace("Left runner.run()")
 
         return self.job_outcomes, self.evaluator.new_history()
@@ -402,6 +411,16 @@ class Runner:
         """Fire up the default number of threads"""
         for ii in range(self.job_graph.cores):
             self._start_another_thread()
+
+    def _job_failed_last_time(self, job_id) -> bool:
+        """Did this job fail last time?"""
+        res = (
+            self.last_job_states
+            and job_id in self.last_job_states
+            and self.last_job_states[job_id].outcome == JobOutcome.Failed
+        )
+        log_trace(f"_job_failed_last_time: {job_id}: {res}")
+        return res
 
     def _start_another_thread(self):
         """Fire up another thread (if all current threads are blocked with multi core threads.
@@ -511,11 +530,13 @@ class Runner:
         cwd = (
             os.getcwd()
         )  # so we can detect if the job cahnges the cwd (don't do that!)
+        fake_lock = FakeLock()
         try:
             try:
                 while not (self.stopped or self.aborted):
                     job_id = None
                     error = None
+                    outputs = None
                     try:
                         do_sleep = False
                         with self.evaluator_lock:
@@ -559,7 +580,10 @@ class Runner:
                                 # log_trace(
                                 # f"{job_id} cores: {c}, max: {self.core_lock.max_cores}, jobs_in_flight: {len(self.jobs_in_flight)}, all_cores_in_flight: {self.jobs_all_cores_in_flight}, threads: {len(self.threads)}"
                                 # )
-                                if c > 1:
+                                job_failed_last_time = self._job_failed_last_time(
+                                    job_id
+                                )
+                                if not job_failed_last_time and (c > 1):
                                     # we could stall all SingleCores/RunsHere by having all_cores blocking all but one thread (which executes another all_core).
                                     # if we detect that situation, we spawn another one.
                                     self.jobs_all_cores_in_flight += 1
@@ -585,15 +609,18 @@ class Runner:
                         if c == 0:
                             log_error(f"Cores was 0! {job.job_id} {job.resources}")
 
-                        with self.core_lock.using(c):
+                        if job_failed_last_time:
+                            lock = fake_lock
+                        else:
+                            lock = self.core_lock
+
+                        with lock.using(c):
                             if self.stopped or self.aborted:
                                 continue  # -> while not stopped -> break
                             job.start_time = time.time()  # the *actual* start time
                             job.waiting = False
                             self._interactive_report()
                             ljt(f"Go {job_id}")
-                            outputs = None
-                            error = None
 
                             try:
                                 # that's history-output
@@ -606,9 +633,14 @@ class Runner:
                                     )
                                 else:
                                     old_history_for_this_job = {}
-                                outputs = job.run(
-                                    self, old_history_for_this_job
-                                )  # job_state.historical_output)
+                                if job_failed_last_time:
+                                    ljt("Job failed last time (new jobs were generated, graph rerun, not running again: {job_id}")
+                                    outputs = None
+                                    error = self.last_job_states[job_id].payload
+                                else:
+                                    outputs = job.run(
+                                        self, old_history_for_this_job
+                                    )  # job_state.historical_output)
                                 # ljt(f"job successfull {job_id}")
                             finally:
                                 # we still check the cwd, even if the job failed!
@@ -657,7 +689,22 @@ class Runner:
                             with self.evaluator_lock:
                                 if outputs is None and error is None:
                                     raise ValueError("Should not happen")
+                                if outputs is not None and set(outputs.keys()) != set(
+                                    self.jobs[job_id].outputs
+                                ):  # the 2nd one is a list...
+                                    log_trace(
+                                        f"\t{job_id} returned the wrong set of outputs. "
+                                        f"Should be {escape_logging(str(set(self.jobs[job_id].outputs)))}, was {escape_logging(str(set(outputs.keys())))}"
+                                    )
+
+                                    error = exceptions.JobContractError(
+                                        f"\t{job_id} returned the wrong set of outputs. "
+                                        f"Should be {escape_logging(str(set((self.jobs[job_id].outputs))))}, was {escape_logging(str(set(outputs.keys())))}",
+                                    )
+                                    outputs = None
+
                                 if outputs is not None:
+
                                     self.job_outcomes[job_id] = RecordedJobOutcome(
                                         job_id, JobOutcome.Success, outputs
                                     )
@@ -671,7 +718,9 @@ class Runner:
                                         )
                                         failed = False
                                     except Exception as e:
-                                        log_error(f"Recording job success failed for {job_id}. Likely constraint violation?: Message was '{e}'")
+                                        log_error(
+                                            f"Recording job success failed for {job_id}. Likely constraint violation?: Message was '{e}'"
+                                        )
                                         self.job_outcomes[job_id] = RecordedJobOutcome(
                                             job_id, JobOutcome.Failed, str(e)
                                         )

@@ -32,4 +32,7 @@ class RecordedJobOutcome:
         if self.outcome is JobOutcome.Failed:
             return self.payload
         else:
-            raise AttributeError("No error on on non failed JobOutcomes")
+            raise AttributeError(f"No error available on an non failed JobOutcome (was {self.outcome}")
+
+    def __repr__(self):
+        return f"RecordedJobOutcome({self.job_id}, {self.outcome}"

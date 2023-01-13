@@ -171,16 +171,17 @@ impl TestGraphRunner {
                             .unwrap_or(&format!("history_{}", job_id))
                             .to_string(),
                     ) {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            already_done2.borrow_mut().insert(job_id.clone());
+                        }
                         Err(err) => match err {
                             PPGEvaluatorError::APIError(x) => panic!("api error {}", x),
-                            PPGEvaluatorError::EphemeralChangedOutput{..} => {
+                            PPGEvaluatorError::EphemeralChangedOutput { .. } => {
                                 debug!("EphemeralChangedOutput error. ignoring for tests");
                             }
                         },
                     }
                 }
-                already_done2.borrow_mut().insert(job_id.clone());
             }
             counter -= 1;
             if counter == 0 {

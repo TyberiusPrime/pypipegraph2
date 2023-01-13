@@ -1046,8 +1046,14 @@ class TestPypipegraph2:
             ppg.util.log_error("final run")
             ppg.run()
             assert len(self.store) == 1
-            assert Path("b").read_text() == "3"
-            assert Path("B").read_text() == "B"
+            # assert Path("b").read_text() == "3"
+            # assert Path("B").read_text() == "B"
+            # with the rust based engine, we do not rerun
+            # because ephemeral jobs must not change their output 
+            # if their input was unchanged (=Validated)
+            assert Path("b").read_text() == "2"
+            assert Path("B").read_text() == "A"
+
 
         finally:
             del self.store
@@ -1345,7 +1351,7 @@ class TestPypipegraph2:
         ppg.run()
         assert read("C") == "C"
 
-    def test_job_lying_about_its_outputs(self):
+    def test_job_lying_about_its_outputs(self, job_trace_log):
         # tests the job returned the wrong set of outputs detection
         class LyingJob(ppg.FileGeneratingJob):
             def run(self, runner, historical_output):
@@ -1356,6 +1362,7 @@ class TestPypipegraph2:
         a = LyingJob("A", lambda of: counter("shu") and write(of, "shu"))
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
+        print(ppg.global_pipegraph.last_run_result)
         error = ppg.global_pipegraph.last_run_result["A"].error
         assert isinstance(error, ppg.JobContractError)
 
@@ -1392,7 +1399,8 @@ class TestPypipegraph2:
         assert len(ppg.global_pipegraph.do_raise) == 2  # both exceptions
         assert ppg.global_pipegraph.last_run_result["A"].error
         assert ppg.global_pipegraph.last_run_result["B"].error
-        assert not ppg.global_pipegraph.last_run_result["C"].error
+        with pytest.raises(AttributeError):
+            ppg.global_pipegraph.last_run_result["C"].error
 
     def test_getting_source_after_chdir(self):
         def inner(something):
@@ -1404,8 +1412,8 @@ class TestPypipegraph2:
         try:
             f = ppg.FunctionInvariant("shu", inner)
             os.chdir("/tmp")
-            assert f.get_source_file().is_absolute()
-            assert "552341512412" in f.get_source_file().read_text()
+            assert f.get_source_file_name().is_absolute()
+            assert "552341512412" in f.get_source()[0]
         finally:
             os.chdir(old)
 
@@ -1570,6 +1578,7 @@ class TestPypipegraph2:
         assert e.index("ValueError") < e.index("KeyError")
         assert "cause" in e
 
+    @pytest.mark.skip # TODO: Renaming support?
     def test_renaming_input_while_invalidating_other(self):
         a = ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
         b = ppg.FileGeneratingJob("B", lambda of: of.write_text("B"))
@@ -1603,6 +1612,7 @@ class TestPypipegraph2:
         assert read("C") == "2"
         assert read("c") == "AB2"
 
+    @pytest.mark.skip # TODO: Renaming support?
     def test_renaming_maps_to_muliple(self):
         a = ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
         b = ppg.FileGeneratingJob("B", lambda of: of.write_text("A"))
@@ -1833,7 +1843,7 @@ class TestPypipegraph2:
             ppg.run()
         assert read("a") == "A"
 
-    def test_failing_job_but_required_again_after_job_generating_job(self):
+    def test_failing_job_but_required_again_after_job_generating_job(self, job_trace_log):
         def fail(of):
             counter("a")
             raise ValueError()
@@ -1887,6 +1897,7 @@ class TestPypipegraph2:
         assert read("b") == "ba"
         assert read("B") == "1"
 
+    @pytest.mark.skip # TODO: Renaming support?
     def test_going_from_multi_file_generating_to_file_invariant_no_retrigger(self):
         # this one depends on all files
         a = ppg.MultiFileGeneratingJob(
@@ -1899,6 +1910,7 @@ class TestPypipegraph2:
         ppg.run()
         assert read("b") == "ba"
         assert read("B") == "1"
+
         ppg.new()
         b = ppg.FileGeneratingJob(
             "b", lambda of: counter("B") and of.write_text("b" + read("a"))

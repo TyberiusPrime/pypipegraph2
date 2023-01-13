@@ -527,7 +527,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             }
                             _ => true,
                         }
-                    } else {
+                    } else { // a node uplink entry.
                         true
                     }
                 } else {
@@ -537,37 +537,46 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             .collect();
         for (idx, job) in self.jobs.iter().enumerate() {
             //step 1: record what jobs when into this one
-            let input_name_key = format!("{}!!!", job.job_id);
-            out.insert(input_name_key, self.name_job_inputs(idx));
 
             //step 2: record the actualy output of this job
             // (are we using this anywhere?)
 
             let key = job.job_id.to_string();
-            let history = match &job.history_output {
-                Some(new_history) => new_history,
-                None => match self.history.get(&key) {
-                    Some(old_history) => old_history,
-                    None => {
-                        let job_and_downstreams_are_ephmeral =
-                            Self::_job_and_downstreams_are_ephemeral(
-                                &self.dag,
-                                &self.jobs,
-                                idx as NodeIndex,
-                            );
-                        if job_and_downstreams_are_ephmeral || job.state.is_failed() {
-                            continue;
-                        } else {
-                            panic!(
+            let job_was_success = job.history_output.is_some();
+            let input_name_key = format!("{}!!!", job.job_id);
+            if job_was_success { 
+                // if the job did not succeed, we want it to rerun!
+                out.insert(input_name_key, self.name_job_inputs(idx));
+
+                let history = match &job.history_output {
+                    Some(new_history) => new_history,
+                    None => match self.history.get(&key) {
+                        Some(old_history) => old_history,
+                        None => {
+                            let job_and_downstreams_are_ephmeral =
+                                Self::_job_and_downstreams_are_ephemeral(
+                                    &self.dag,
+                                    &self.jobs,
+                                    idx as NodeIndex,
+                                );
+                            if job_and_downstreams_are_ephmeral || job.state.is_failed() {
+                                continue;
+                            } else {
+                                panic!(
                                 "Job was skipped but history had no entry for this job: {:?} {:?}. job_and_downstreams_are_ephemeral {}",
                                 job.job_id, job.state, job_and_downstreams_are_ephmeral
 
                             );
+                            }
                         }
-                    }
-                },
-            };
-            out.insert(key, history.to_string());
+                    },
+                };
+                out.insert(key, history.to_string());
+            } else {
+                out.remove(&job.job_id);
+                out.remove(&input_name_key);
+
+            }
         }
         for (a, b, x) in self.dag.all_edges() {
             // the root has no sensible history.
@@ -575,57 +584,61 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             let job_id_b = &self.jobs[b as usize].job_id;
             let key = format!("{}!!!{}", job_id_a.to_string(), job_id_b.to_string());
             let history = self.jobs[a as usize].history_output.as_ref();
-            let history = match history {
-                Some(run_history) => run_history, // we have new history.
-                None => {
-                    match self.jobs[a as usize].state {
-                        JobState::Output(JobStateOutput::FinishedSkipped)
-                        | JobState::Ephemeral(JobStateEphemeral::FinishedSkipped) => {
-                            match self.history.get(&key) {
-                                Some(old_run_history) => old_run_history,
-                                None => {
-                                    // we had no history for this edge, for the incoming job was skipped.
-                                    // But we should have a history entry for the job itself, right?
-                                    let job_key = job_id_a;
-                                    match self.history.get(job_key) {
-                                        Some(old_run_history) => old_run_history,
-                                        None => match (&self.jobs[a as usize]).state {
-                                            JobState::Ephemeral(_) => {
-                                                continue;
-                                            }
-                                            _ => {
-                                                panic!("No history for edge from this run, none from the prev run, and no upstream job history. Bug: {}, {}",
+            let second_job_success = self.jobs[b as usize].history_output.is_some();
+            if second_job_success {
+                // we do not store the history link if the second job failed.
+                let history = match history {
+                    Some(run_history) => run_history, // we have new history.
+                    None => {
+                        match self.jobs[a as usize].state {
+                            JobState::Output(JobStateOutput::FinishedSkipped)
+                            | JobState::Ephemeral(JobStateEphemeral::FinishedSkipped) => {
+                                match self.history.get(&key) {
+                                    Some(old_run_history) => old_run_history,
+                                    None => {
+                                        // we had no history for this edge, for the incoming job was skipped.
+                                        // But we should have a history entry for the job itself, right?
+                                        let job_key = job_id_a;
+                                        match self.history.get(job_key) {
+                                            Some(old_run_history) => old_run_history,
+                                            None => match (&self.jobs[a as usize]).state {
+                                                JobState::Ephemeral(_) => {
+                                                    continue;
+                                                }
+                                                _ => {
+                                                    panic!("No history for edge from this run, none from the prev run, and no upstream job history. Bug: {}, {}",
                                                job_id_a, job_id_b);
-                                            }
-                                        },
+                                                }
+                                            },
+                                        }
                                     }
                                 }
                             }
-                        }
-                        JobState::Always(JobStateAlways::FinishedFailure)
-                        | JobState::Always(JobStateAlways::FinishedUpstreamFailure)
-                        | JobState::Output(JobStateOutput::FinishedFailure)
-                        | JobState::Output(JobStateOutput::FinishedUpstreamFailure)
-                        | JobState::Ephemeral(JobStateEphemeral::FinishedFailure)
-                        | JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) => {
-                            match self.history.get(&key) {
-                                //we have an old edge
-                                Some(old_run_history) => old_run_history,
-                                None => {
-                                    continue;
+                            JobState::Always(JobStateAlways::FinishedFailure)
+                            | JobState::Always(JobStateAlways::FinishedUpstreamFailure)
+                            | JobState::Output(JobStateOutput::FinishedFailure)
+                            | JobState::Output(JobStateOutput::FinishedUpstreamFailure)
+                            | JobState::Ephemeral(JobStateEphemeral::FinishedFailure)
+                            | JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) => {
+                                match self.history.get(&key) {
+                                    //we have an old edge
+                                    Some(old_run_history) => old_run_history,
+                                    None => {
+                                        continue;
+                                    }
                                 }
                             }
-                        }
-                        _ => {
-                            panic!(
+                            _ => {
+                                panic!(
                                     "unexpected ran state when no history was present. job_id: '{}', ran state: '{:?}'",
                                     job_id_a, self.jobs[a as usize].state
                                 );
+                            }
                         }
                     }
-                }
-            };
-            out.insert(key, history.to_string());
+                };
+                out.insert(key, history.to_string());
+            }
         }
 
         out
@@ -1250,19 +1263,21 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     // not the most elegant control flow, but ok.
                                     reconsider_job!(jobs, node_idx, new_signals);
 
-                                let upstreams =
-                                    dag.neighbors_directed(node_idx, Direction::Incoming);
-                                for upstream_idx in upstreams {
-                                    match jobs[upstream_idx as usize].state {
-                                        JobState::Ephemeral(JobStateEphemeral::ReadyButDelayed)
-                                        | JobState::Ephemeral(JobStateEphemeral::NotReady(
-                                            ValidationStatus::Validated,
-                                        )) => {
-                                            reconsider_job!(jobs, upstream_idx, new_signals);
+                                    let upstreams =
+                                        dag.neighbors_directed(node_idx, Direction::Incoming);
+                                    for upstream_idx in upstreams {
+                                        match jobs[upstream_idx as usize].state {
+                                            JobState::Ephemeral(
+                                                JobStateEphemeral::ReadyButDelayed,
+                                            )
+                                            | JobState::Ephemeral(JobStateEphemeral::NotReady(
+                                                ValidationStatus::Validated,
+                                            )) => {
+                                                reconsider_job!(jobs, upstream_idx, new_signals);
+                                            }
+                                            _ => {}
                                         }
-                                        _ => {}
                                     }
-                                }
                                 }
                             }
                         }
@@ -1279,7 +1294,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 ))
                             } else {
                                 /*
-                                */
+                                 */
                             }
                             //}
                         }
@@ -1363,6 +1378,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     {
                         if Self::any_downstream_required(dag, jobs, node_idx) {
                             debug!("\tA downstream was required");
+                            Self::remove_consider_signals(new_signals, node_idx);
                             new_signals.push(NewSignal!(SignalKind::JobReadyToRun, node_idx, jobs));
                         } else if Self::all_downstreams_validated(dag, jobs, node_idx) {
                             Self::remove_consider_signals(new_signals, node_idx);
@@ -1557,14 +1573,15 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 Some(historical_input_names) => {
                     *historical_input_names != self.name_job_inputs(node_idx)
                 }
-                None => { // not having an input job history is not itself
-                           // enough reason to invalidate -
-                           // they'll fail anyhow when we're looking at the individual edges
-                           // and this would trigger building non-used Ephemerals
-                           // but if you don't have an upstream,
-                           // ande the strategy says 'already done',
-                           // this is the only time we can get them invalidated
-                        !Self::has_upstreams(&self.dag, node_idx)
+                None => {
+                    // not having an input job history is not itself
+                    // enough reason to invalidate -
+                    // they'll fail anyhow when we're looking at the individual edges
+                    // and this would trigger building non-used Ephemerals
+                    // but if you don't have an upstream,
+                    // ande the strategy says 'already done',
+                    // this is the only time we can get them invalidated
+                    !Self::has_upstreams(&self.dag, node_idx)
                 }
             };
             let mut job = &mut self.jobs[node_idx as usize];

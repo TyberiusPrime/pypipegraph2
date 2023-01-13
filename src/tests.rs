@@ -97,7 +97,7 @@ pub fn test_failure() {
     assert!(g.is_finished());
     //we keep history that for jobs tha are currently not present
     assert!(g.new_history().get("Job_not_present").is_some());
-    assert!(g.new_history().len() == 1 + 3);
+    assert!(g.new_history().len() == 1);
 }
 
 #[test]
@@ -201,17 +201,14 @@ pub fn ephemeral_nested_first_already_present() {
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("A".to_string());
     let mut hist = mk_history(&[
-            (("E", "D"), ""),
-            (("D", "C"), ""),
-            (("C", "B"), ""),
-            (("B", "A"), ""),
-        ]);
+        (("E", "D"), ""),
+        (("D", "C"), ""),
+        (("C", "B"), ""),
+        (("B", "A"), ""),
+    ]);
     hist.insert("A!!!".to_string(), "".to_string());
     hist.insert("A".to_string(), "".to_string());
-    let mut g = PPGEvaluator::new_with_history(
-        hist,
-        strat,
-    );
+    let mut g = PPGEvaluator::new_with_history(hist, strat);
     //dbg!(&g.history);
     g.add_node("A", JobKind::Output);
     g.add_node("B", JobKind::Ephemeral);
@@ -640,7 +637,7 @@ fn test_ephemeral_not_running_without_downstreams() {
     g.event_job_finished_failure("A1").unwrap();
     assert!(g.is_finished());
     let his = g.new_history();
-    assert_eq!(his.len(), 5); //since nothing succeeded
+    assert_eq!(his.len(), 0); //since nothing succeeded
     for k in his.keys() {
         assert!(k.ends_with("!!!"));
     }
@@ -1496,7 +1493,6 @@ fn test_ephemeral_retriggered_changing_output() {
     let g = ro.run(&Vec::new()).unwrap();
     assert!(ro.run_counters.get("TA") == Some(&2));
     let failed = g.query_failed();
-    dbg!(&failed);
     assert!(failed.contains("TA"));
     assert!(failed.len() == 1);
     let upstream_failed = g.query_upstream_failed();
@@ -1643,27 +1639,76 @@ fn test_two_temp_jobs() {
     assert!(ro.run_counters.get("D") == Some(&1));
 }
 
-
 #[test]
 fn test_file_exists() {
+    fn test_two_temp_jobs() {
+        fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+            g.add_node("b", JobKind::Output);
+            g.add_node("load_b", JobKind::Ephemeral);
+            g.add_node("A", JobKind::Output);
+            g.add_node("FIA", JobKind::Always);
+            g.depends_on("load_b", "b");
+            g.depends_on("A", "load_b");
+            g.depends_on("A", "FIA");
+        }
+        let mut ro = TestGraphRunner::new(Box::new(create_graph));
+        ro.already_done.insert("b".to_string());
+        let g = ro.run(&Vec::new()).unwrap();
 
-fn test_two_temp_jobs() {
+        assert!(ro.run_counters.get("FIA") == Some(&1));
+        assert!(ro.run_counters.get("A") == Some(&1));
+        assert!(ro.run_counters.get("load_b") == Some(&1));
+        assert!(ro.run_counters.get("b") == Some(&1)); // we had no history, so we need to rerun
+    }
+}
+
+#[test]
+fn test_failure_does_not_store_history_link() {
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
-        g.add_node("b", JobKind::Output);
-        g.add_node("load_b", JobKind::Ephemeral );
-        g.add_node("A", JobKind::Output);
-        g.add_node("FIA", JobKind::Always);
-        g.depends_on("load_b", "b");
-        g.depends_on("A", "load_b");
-        g.depends_on("A", "FIA");
+        g.add_node("A", JobKind::Always);
+        g.add_node("B", JobKind::Output);
+        g.depends_on("B", "A");
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
-    ro.already_done.insert("b".to_string());
-    let g = ro.run(&Vec::new()).unwrap();
 
-    assert!(ro.run_counters.get("FIA") == Some(&1));
+    let g = ro.run(&["B"]).unwrap();
+    assert!(!ro.already_done.contains("B"));
+    let history = g.new_history();
+    assert!(!history.contains_key("A!!!B"));
+    assert!(ro.run_counters.get("B") == Some(&1));
+
+    let g = ro.run(&[]).unwrap();
+    let history = g.new_history();
+    assert!(ro.run_counters.get("B") == Some(&2));
+    assert!(ro.already_done.contains("B"));
+    assert!(history.contains_key("A!!!B"));
+    let old_ab = history.get("A!!!B").unwrap().to_string();
+
+    // retrigger
+    ro.outputs
+        .insert("A".to_string(), "trigger_inval".to_string());
+    let g = ro.run(&["B"]).unwrap();
+    let history = g.new_history();
+    assert!(ro.run_counters.get("B") == Some(&3));
+    assert!(*history.get("A!!!B").unwrap() == old_ab);
+}
+
+#[test]
+fn test_failure_does_not_store_history_for_job() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Always);
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&["A"]).unwrap();
+    let history = g.new_history();
+    dbg!(&history);
+    assert!(history.is_empty());
     assert!(ro.run_counters.get("A") == Some(&1));
-    assert!(ro.run_counters.get("load_b") == Some(&1));
-    assert!(ro.run_counters.get("b") == Some(&1)); // we had no history, so we need to rerun
- }
+    assert!(!ro.already_done.contains("A"));
+
+    let g = ro.run(&[]).unwrap();
+    let history = g.new_history();
+    assert!(!history.is_empty());
+    assert!(ro.run_counters.get("A") == Some(&2));
+    assert!(ro.already_done.contains("A"));
 }
