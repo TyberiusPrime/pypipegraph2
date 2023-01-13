@@ -15,6 +15,22 @@ class _CoreLockContextManager:
     def __exit__(self, exc_type, exc_value, traceback):
         self.core_lock._release(self.cores)
 
+class FakeContextManager():
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
+     
+
+class FakeLock:
+
+    def __init__(self):
+        self.cm = FakeContextManager()
+
+    def using(self, _cores):
+        return self.cm
+
 
 class CoreLock:
     """Allow threads to request n 'cores',

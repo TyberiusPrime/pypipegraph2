@@ -711,7 +711,7 @@ class MultiFileGeneratingJob(Job):
                 #             # historical_output, stat.st_mtime, stat.st_size
                 #             # )
                 # # at least one file was missing
-                log_trace(f"unlinking {fn}")
+                log_job_trace(f"unlinking {fn}")
                 fn.unlink()
                 del_counter += 1
                 all_present = False
@@ -723,7 +723,7 @@ class MultiFileGeneratingJob(Job):
             # ok, we triggered rebuild - nuke all output files
             for fn in self.files:
                 if fn.exists():
-                    log_trace(f"unlinking {fn}")
+                    log_job_trace(f"unlinking {fn}")
                     fn.unlink()
 
         input = self.get_input()
@@ -1835,12 +1835,13 @@ class DataLoadingJob(Job):
         log_trace(f"dl {self.job_id} - {escape_logging(historical_output)}")
         if load_res is None:
             log_warning(
-                f"DataLoadingJob {self.job_id} returned None - downstreams will be invalidated whenever this runs."
+                f"DataLoadingJob {self.job_id} returned None - downstreams will never be invalidated by this"
             )
-            try:
-                my_hash = historical_output.get(self.outputs[0], 0) + 1
-            except TypeError:  # pragma: no cover
-                my_hash = 0  # start over. Historical can't have been 0
+            # try:
+            #     my_hash = historical_output.get(self.outputs[0], 0) + 1
+            # except TypeError:  # pragma: no cover
+            #     my_hash = 0  # start over. Historical can't have been 0
+            my_hash = 0
             # so the downstream get's invalidated when ever this runs. This is a safe,
             # but potentially wasteful
         else:

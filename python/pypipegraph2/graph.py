@@ -18,7 +18,7 @@ from loguru import logger
 
 from . import exceptions
 from .runner import Runner, JobOutcome
-from .util import CPUs, console
+from .util import CPUs, console, log_job_trace
 from .enums import RunMode
 from .exceptions import JobsFailed, _RunAgain
 from .util import log_info, log_error, log_warning, log_debug, log_trace
@@ -238,7 +238,9 @@ class PyPipeGraph:
                         self._jobs_do_dump_subgraph_debug,
                     )
                     result, new_history = self.runner.run(
-                        history, print_failures=print_failures
+                        history,
+                        result,
+                        print_failures=print_failures
                     )
                     aborted = self.runner.aborted
                     del self.runner
@@ -246,7 +248,7 @@ class PyPipeGraph:
                     do_break = True
                 except _RunAgain as e:
                     log_info("Jobs created - running again")
-                    result = e.args[0]
+                    result, new_history = e.args[0]
                 if history != new_history:
                     self._save_history(new_history)
                 history = new_history
