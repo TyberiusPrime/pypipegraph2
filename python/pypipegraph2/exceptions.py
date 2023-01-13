@@ -88,3 +88,7 @@ class JobError(PPGException):
 
 class JobCanceled(PPGException):
     pass
+
+
+class HistoryLoadingFailed(FatalGraphException):
+    pass

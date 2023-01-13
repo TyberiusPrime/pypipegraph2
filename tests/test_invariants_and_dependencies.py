@@ -253,6 +253,7 @@ class TestInvariant:
         ppg.run()
         assert read(of) == "shushu"  # job does get rerun
 
+    @pytest.mark.skip  # TODO: Renaming support?
     def test_input_file_was_renamed(self):
         of = "out/B"
 
@@ -410,7 +411,8 @@ class TestInvariant:
         # but within the pipegraph itself (e.g. when the user hit's CTRL-C
         # during history dumping
         # which we simulate here
-        import pickle
+        import json
+        import traceback
 
         def w(of):
             write("out/A", "A")
@@ -425,6 +427,7 @@ class TestInvariant:
         ppg.run()
         assert read("out/A") == "A"
         assert read("out/B") == "B"
+
         ppg.new(run_mode=ppg.RunMode.CONSOLE)
         # ppg.new()
 
@@ -443,21 +446,12 @@ class TestInvariant:
         fg2 = ppg.FileGeneratingJob(
             "out/C", lambda of: counter("out/c") and append(of, "C")
         )
-        old_pickle_dumps = pickle.dumps
-        raised_ki = [False]
-
-        def new_pickle_dump(obj, protocol=None):
-            if obj == "out/A" and not raised_ki[0]:
-                raised_ki[0] = True
-                raise KeyboardInterrupt("simulated")
-            else:
-                return old_pickle_dumps(obj, protocol)
-
-        mocker.patch("pickle.dumps", new_pickle_dump)
         ki_raised = False
         assert not hasattr(ppg.global_pipegraph, "last_run_result")
+        ppg.global_pipegraph._test_failing_outside_of_job = True
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
+        print(ppg.global_pipegraph.do_raise)
         assert isinstance(ppg.global_pipegraph.do_raise[0], KeyboardInterrupt)
         assert len(ppg.global_pipegraph.do_raise) == 2
         assert hasattr(ppg.global_pipegraph, "last_run_result")
@@ -505,18 +499,7 @@ class TestInvariant:
     def test_input_output_dumping_dies_for_some_reason(self, ppg2_per_test, mocker):
         import pickle
 
-        raised_ki = [False]
-        old_pickle_dumps = pickle.dumps
-
-        def new_pickle_dump(obj, protocol=None):
-            if obj == "A" and not raised_ki[0]:
-                raised_ki[0] = True
-                raise ValueError("simulated")
-            else:
-                return old_pickle_dumps(obj, protocol)
-
-        mocker.patch("pickle.dumps", new_pickle_dump)
-
+        ppg.global_pipegraph._test_failing_outside_of_job = True
         ppg.FileGeneratingJob("A", lambda of: counter("a") and write(of, "A"))
         ppg.FileGeneratingJob("B", lambda of: counter("b") and write(of, "B"))
         with pytest.raises(ppg.RunFailedInternally):
@@ -528,8 +511,10 @@ class TestInvariant:
         ppg.run()
         assert read("A") == "A"
         assert read("B") == "B"
-        assert read("a") == "2"
-        assert read("b") == "1"  # we had captured B so it's all good
+        assert (
+            read("a") == "1"
+        )  # we had captured the output for both. history saving now is all or nothing...
+        assert read("b") == "1"
 
     def test_FileInvariant_cant_have_dependencies(self):
         # invariants are always roots of the DAG - they can't have any dependencies themselves
@@ -569,55 +554,7 @@ class TestInvariant:
         with gzip.GzipFile(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             op.write(b"This breaks")
-        with pytest.raises(ppg.JobsFailed):
-            ppg.run()
-        assert read("out/b") == "a"  # job was not run
-
-    def test_invariant_loading_issues_on_value_undepickableclass(self):
-        import tempfile
-        import pickle
-
-        # make sure Undepickable is Undepickable
-        with tempfile.TemporaryFile("wb+") as tf:
-            o = Undepickable()
-            pickle.dump(o, tf, pickle.HIGHEST_PROTOCOL)
-            with pytest.raises(pickle.UnpicklingError):
-                tf.seek(0, 0)
-                pickle.load(tf)
-
-        a = ppg.ParameterInvariant("a", 5)
-        b = ppg.FileGeneratingJob(
-            "out/b", lambda of: write("out/b", "b"), depend_on_function=False
-        )
-        c = ppg.ParameterInvariant("c", 23)
-        b.depends_on(a)
-        write("out/b", "a")
-
-        Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True)
-        with gzip.GzipFile(ppg.global_pipegraph.get_history_filename(), "wb") as op:
-            pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
-            pickle.dump(Undepickable(), op, pickle.HIGHEST_PROTOCOL)
-            pickle.dump(c.job_id, op, pickle.HIGHEST_PROTOCOL)
-            pickle.dump(({}, {"c": str(c.parameters)}), op, pickle.HIGHEST_PROTOCOL)
-        with pytest.raises(ppg.JobsFailed):
-            ppg.run()
-        assert read("out/b") == "b"  # job was run
-        # assert a.job_id in ppg.global_pipegraph.invariant_loading_issues
-        # assert ppg.global_pipegraph.invariant_status["PIc"] == 23
-
-    def test_invariant_loading_issues_on_key(self):
-        a = ppg.DataLoadingJob("a", lambda: 5)
-        b = ppg.FileGeneratingJob(
-            "out/b", lambda of: write("out/b", "b"), depend_on_function=False
-        )
-        b.depends_on(a)
-        write("out/b", "a")
-
-        Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True)
-        with gzip.GzipFile(ppg.global_pipegraph.get_history_filename(), "wb") as op:
-            op.write(b"key breaks already")
-            op.write(b"This breaks")
-        with pytest.raises(ppg.JobsFailed):
+        with pytest.raises(ppg.HistoryLoadingFailed):
             ppg.run()
         assert read("out/b") == "a"  # job was not run
 

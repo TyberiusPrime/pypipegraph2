@@ -1818,7 +1818,6 @@ class TestTempFileGeneratingJob:
         assert Path("tf").read_text() == "1"
         assert Path("j").read_text() == "1"
         assert not Path("J").exists()
-        ppg.pypipegraph2.enable_logging()
         ppg.run()
         assert Path("J").read_text() == "J"
         assert Path("j").read_text() == "2"

@@ -2,7 +2,7 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 use log::{debug, error, info, warn};
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyTypeError, PyValueError, PyKeyError};
 use pyo3::types::{PyDict, PyFunction};
 use std::any;
 use std::cell::RefCell;
@@ -123,7 +123,7 @@ pub struct TestGraphRunner {
     pub allowed_nesting: u32,
     pub outputs: HashMap<String, String>,
     pub run_order: Vec<String>,
-    pub cleaned_up: HashSet<String>
+    pub cleaned_up: HashSet<String>,
 }
 
 impl TestGraphRunner {
@@ -194,7 +194,8 @@ impl TestGraphRunner {
             }
 
             for c in g.query_ready_for_cleanup() {
-                g.event_job_cleanup_done(&c).expect("cleanup registering failed");
+                g.event_job_cleanup_done(&c)
+                    .expect("cleanup registering failed");
                 self.cleaned_up.insert(c);
             }
         }
@@ -398,6 +399,16 @@ impl PyPPG2Evaluator {
 
     pub fn new_history(&self) -> HashMap<String, String> {
         self.evaluator.new_history()
+    }
+
+    pub fn get_job_output(&self,job_id:&str
+                          ) -> Result<String, PyErr> {
+        match self.evaluator.get_job_output(job_id) {
+            engine::JobOutputResult::Done(v) => Ok(v),
+            engine::JobOutputResult::NoSuchJob => Err(PyKeyError::new_err("Invalid job id")),
+            engine::JobOutputResult::NotDone => Err(PyValueError::new_err("job not done")),
+        }
+
     }
 }
 

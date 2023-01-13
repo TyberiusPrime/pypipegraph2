@@ -395,7 +395,10 @@ class Job:
     def failed(self):
         """Did this job fail in any way in the last run?
         I.e. does it have an exception?"""
-        return bool(self.exception)
+        try:
+            return bool(self.exception)
+        except AttributeError:
+            return False
 
     @property
     def stack_trace(self):
@@ -2588,7 +2591,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
         # we clean up if we build,
         # or if we had no history
-        if did_build or not runner.job_states[self.job_id].historical_output:
+        if did_build or not self.job_id in runner.history:
             self._cleanup(runner)
         self._log_local_usage(by_input_key)
         return res
@@ -2663,19 +2666,25 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
     def _derive_output_name(self, runner):
         """Given the set of inputs, get as the key for by_input"""
-        if (
-            runner.job_states[self.job_id].validation_state == ValidationState.Unknown
-        ):  # pragma: no cover
-            raise ValueError(
-                "deriving output name on SharedMultiFileGeneratingJob "
-                "before all parent hashes are available is impossible"
-            )
-
         input_names = runner.job_inputs[self.job_id]
         if not input_names:
             return "no_input"
-        actual_input = runner.job_states[self.job_id].updated_input
-        return self._hash_hashes(actual_input, runner)
+        updated_input = {}
+        for input_filename in input_names:
+            upstream_job_id = runner.outputs_to_job_ids[input_filename]
+            try:
+                job_output = runner.evaluator.get_job_output(upstream_job_id)
+                job_output = json.loads(job_output)
+                jj = job_output[input_filename]
+                updated_input[input_filename] = jj
+            except ValueError:  # pragma: no cover
+                raise ValueError(
+                    "deriving output name on SharedMultiFileGeneratingJob "
+                    "before all parent hashes are available is impossible."
+                    f" {upstream_job_id} was not available"
+                )
+
+        return self._hash_hashes(updated_input, runner)
 
     def extract_strict_hash(self, a_hash) -> bytes:
         return a_hash["hash"].encode("utf-8")

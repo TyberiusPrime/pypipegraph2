@@ -100,6 +100,7 @@ class PyPipeGraph:
             {}
         )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
         self.run_id = 0
+        self._test_failing_outside_of_job = False
         self.allow_short_filenames = allow_short_filenames
         if cache_dir:
             self.cache_dir = Path(cache_dir)
@@ -213,68 +214,80 @@ class PyPipeGraph:
         try:
             result = None
             self._install_signals()
-            history = self._load_history()
+            try:
+                history = self._load_history()
+            except Exception as e:
+                raise exceptions.HistoryLoadingFailed(e)
             max_runs = 5
             jobs_already_run = set()
             final_result = {}
             aborted = False
-            while True:
-                max_runs -= 1
-                if max_runs == 0:  # pragma: no cover
-                    raise ValueError(
-                        "Maximum graph-generating-jobs recursion depth exceeded"
-                    )
-                do_break = False
-                job_count = len(self.job_dag)
-                try:
-                    self.runner = Runner(
-                        self,
-                        history,
-                        event_timeout,
-                        focus_on_these_jobs,
-                        jobs_already_run,
-                        dump_graphml,
-                        self.run_id,
-                        self._jobs_do_dump_subgraph_debug,
-                    )
-                    result, new_history = self.runner.run(
-                        history,
-                        result,
-                        print_failures=print_failures
-                    )
-                    aborted = self.runner.aborted
-                    del self.runner
-                    self.run_id += 1
-                    do_break = True
-                except _RunAgain as e:
-                    log_info("Jobs created - running again")
-                    result, new_history = e.args[0]
-                if history != new_history:
-                    self._save_history(new_history)
-                history = new_history
-                self._log_runtimes(result, start_time)
-                # assert len(result) == job_count # does not account for cleanup jobs...
-                # leave out the cleanup jobs added virtually by the run
-                jobs_already_run.update((k for k in result.keys() if k in self.jobs))
-                log_info(f"Result len {len(result)}")
-                for k, v in result.items():
-                    if (
-                        not k in final_result
-                        or final_result[k].outcome != JobOutcome.Failed
-                    ):
-                        final_result[k] = v
-                # final_result.update(result)
-                if do_break:
-                    break
-                # final_result.update(result)
+            try:
+                while True:
+                    max_runs -= 1
+                    if max_runs == 0:  # pragma: no cover
+                        raise ValueError(
+                            "Maximum graph-generating-jobs recursion depth exceeded"
+                        )
+                    do_break = False
+                    job_count = len(self.job_dag)
+                    try:
+                        self.runner = Runner(
+                            self,
+                            history,
+                            event_timeout,
+                            focus_on_these_jobs,
+                            jobs_already_run,
+                            dump_graphml,
+                            self.run_id,
+                            self._jobs_do_dump_subgraph_debug,
+                        )
+                        result, new_history = self.runner.run(
+                            history,
+                            result,
+                            print_failures=print_failures
+                        )
+                        aborted = self.runner.aborted
+                        del self.runner
+                        self.run_id += 1
+                        do_break = True
+                    except _RunAgain as e:
+                        log_info("Jobs created - running again")
+                        result, new_history = e.args[0]
+                    self._log_runtimes(result, start_time)
+                    # assert len(result) == job_count # does not account for cleanup jobs...
+                    # leave out the cleanup jobs added virtually by the run
+                    jobs_already_run.update((k for k in result.keys() if k in self.jobs))
+                    log_info(f"Result len {len(result)}")
+                    for k, v in result.items():
+                        if (
+                            not k in final_result
+                            or final_result[k].outcome != JobOutcome.Failed
+                        ):
+                            final_result[k] = v
+                    # final_result.update(result)
+                    if history != new_history:
+                        self._save_history(new_history)
+                    history = new_history
+
+                    if do_break:
+                        break
+                    # final_result.update(result)
+            except KeyboardInterrupt:
+                self.do_raise.append(KeyboardInterrupt())
             del result
             log_info(f"Left graph loop {len(final_result)}")
+            jobs_failed = False
             for job_id, job_state in final_result.items():
                 if job_state.outcome == JobOutcome.Failed:
                     self.do_raise.append(job_state.payload)
+                    jobs_failed = True
             self.last_run_result = final_result
             if raise_on_job_error and self.do_raise and not self._restart_afterwards:
-                raise exceptions.JobsFailed("At least one job failed", self.do_raise)
+                if jobs_failed:
+                    raise exceptions.JobsFailed("At least one job failed", self.do_raise)
+                else:
+                    raise exceptions.RunFailedInternally()
             elif not raise_on_job_error and self.do_raise:
                 log_error("At least one job failed")
             if aborted:
@@ -401,6 +414,10 @@ class PyPipeGraph:
             with gzip.GzipFile(fn, "wb") as op:
                 try:
                     op.write(json.dumps(historical, indent=2).encode("utf-8"))
+                    if self._test_failing_outside_of_job: # for unit test
+                        self._test_failing_outside_of_job = False
+                        log_error("keyboard interrupt raised in loop")
+                        raise KeyboardInterrupt('simulated')
                     try_again = False
                 except KeyboardInterrupt:
                     raise_keyboard_interrupt = True

@@ -165,18 +165,24 @@ class Runner:
             # prune all jobs,
             # then unprune this one and it's predecessors
             pruned.update(set(dag.nodes))  # prune all...
-            for job_id in set((x.job_id for x in focus_on_these_jobs)).union(new_jobs):
+            focus_job_ids = set((x.job_id for x in focus_on_these_jobs))
+            for job_id in focus_job_ids.union(new_jobs):
                 _recurse_unpruning(job_id)
+        else:
+            focus_job_ids = set()
 
         # apply regular pruning
         if jobs_already_run_previously:
             pruned.update(jobs_already_run_previously)
-        for job_id in new_jobs:
-            _recurse_unpruning(job_id)
 
         for job_id in self.jobs:
             if self.jobs[job_id]._pruned:
-                _recurse_pruning(job_id, job_id)
+                if not job_id in focus_job_ids:
+                    log_job_trace(f"pruning because of _pruned {job_id}")
+                    _recurse_pruning(job_id, job_id)
+
+        for job_id in new_jobs:
+            _recurse_unpruning(job_id)
 
         for job_id in pruned:
             log_job_trace(f"pruned {job_id}")
@@ -285,14 +291,16 @@ class Runner:
             # log_job_trace("Joining threads")
             with self.evaluator_lock:
                 self.stopped = True
-
             for t in self.threads:
                 t.join()
             if self.aborted:  # todo: refactor
+                log_error("aborted")
                 children_after_abort = self.get_children_processes()
+                log_debug(f"children after abort {children_after_abort}")
                 children_to_reap = [
                     x for x in children_after_abort if not x in children_before_run
                 ]
+                log_debug(f"children before {children_before_run}")
                 if children_to_reap:
                     for p in children_to_reap:
                         try:
@@ -396,6 +404,12 @@ class Runner:
         self.abort_time = time.time()
         self.aborted = True
         self.check_for_new_jobs.set()
+        self.evaluation_done.set()
+        for t in self.threads:
+            try:
+                async_raise(t.ident, KeyboardInterrupt)
+            except ValueError:
+                pass
 
     def stop(self):
         """Leave runner after current jobs
@@ -636,7 +650,9 @@ class Runner:
                                 else:
                                     old_history_for_this_job = {}
                                 if job_failed_last_time:
-                                    ljt("Job failed last time (new jobs were generated, graph rerun, not running again: {job_id}")
+                                    ljt(
+                                        "Job failed last time (new jobs were generated, graph rerun, not running again: {job_id}"
+                                    )
                                     outputs = None
                                     error = self.last_job_states[job_id].payload
                                 else:
@@ -653,9 +669,11 @@ class Runner:
                                     log_error(
                                         f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
                                     )
-                                    raise exceptions.JobContractError(
+                                    error = exceptions.JobContractError(
                                         f"{job_id} changed current_working_directory. Since ppg2 is multithreaded, you must not do this in jobs that RunHere"
                                     )
+                                    outputs = None
+                                    raise error
 
                     except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
                         log_trace(
@@ -691,7 +709,10 @@ class Runner:
                             # log_trace(f"Leaving thread for {job_id}")
                             with self.evaluator_lock:
                                 if outputs is None and error is None:
-                                    raise ValueError("Should not happen")
+                                    # this happes when the job get's terminated by abort
+                                    log_error(f"job aborted {job_id}")
+                                    error = exceptions.JobError("Aborted", KeyboardInterrupt())
+                                    # raise ValueError("Should not happen")
                                 if outputs is not None and set(outputs.keys()) != set(
                                     self.jobs[job_id].outputs
                                 ):  # the 2nd one is a list...
@@ -729,7 +750,7 @@ class Runner:
                                         )
 
                                 else:
-                                    ljt(f"failure {job_id}")
+                                    ljt(f"failure {job_id} - {error}")
                                     self.job_outcomes[job_id] = RecordedJobOutcome(
                                         job_id, JobOutcome.Failed, error
                                     )
