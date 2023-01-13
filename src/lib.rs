@@ -123,6 +123,7 @@ pub struct TestGraphRunner {
     pub allowed_nesting: u32,
     pub outputs: HashMap<String, String>,
     pub run_order: Vec<String>,
+    pub cleaned_up: HashSet<String>
 }
 
 impl TestGraphRunner {
@@ -135,6 +136,7 @@ impl TestGraphRunner {
             allowed_nesting: 250,
             outputs: HashMap::new(),
             run_order: Vec::new(),
+            cleaned_up: HashSet::new(),
         }
     }
 
@@ -189,6 +191,11 @@ impl TestGraphRunner {
                     "run out of room, you nested them more than {} deep?",
                     self.allowed_nesting
                 )));
+            }
+
+            for c in g.query_ready_for_cleanup() {
+                g.event_job_cleanup_done(&c).expect("cleanup registering failed");
+                self.cleaned_up.insert(c);
             }
         }
         self.history.clear();
@@ -258,8 +265,14 @@ struct StrategyForPython {
 impl PPGEvaluatorStrategy for StrategyForPython {
     fn output_already_present(&self, query: &str) -> bool {
         use std::path::PathBuf;
-        let p = PathBuf::from(query);
-        p.exists()
+        // support for multi file generating jobs
+        for sub_path in query.split(":::") {
+            let p = PathBuf::from(sub_path);
+            if !p.exists() {
+                return false;
+            }
+        }
+        true
     }
 
     fn is_history_altered(

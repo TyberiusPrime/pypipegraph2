@@ -27,6 +27,7 @@ from .util import escape_logging
 import hashlib
 import shutil
 from .util import log_info, log_error, log_warning, log_debug, log_trace, log_job_trace
+from .history_comparisons import history_is_different
 
 module_type = type(sys)
 is_hex_re = re.compile("^[a-fA-F0-9]+$")
@@ -208,7 +209,7 @@ class Job:
 
     def cleanup(self):
         """Overwritten by Ephemeral jobs downstream"""
-        pass 
+        pass
 
     def readd(self):
         """Readd this job to the current global pipegraph
@@ -648,6 +649,10 @@ class MultiFileGeneratingJob(Job):
                 raise ValueError(
                     f"Absolute file path as job_ids prevented by graph.prevent_absolute_paths. Was {f}"
                 )
+            if ":::" in str(f):
+                raise ValueError(
+                    "File names must not contain :::. Internally used by MultiFileGeneratingJob"
+                )
         path_files = (Path(x) for x in files)
         abs_files = [_normalize_path(x) for x in path_files]
         if lookup:
@@ -1053,6 +1058,33 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
             self, files, generating_function, resources, depend_on_function
         )
         self._single_file = False
+
+    def run(self, runner, historical_output):
+        if historical_output and self.all_files_exist():
+            new_hashes = {
+                str(of): hashers.hash_file(self._map_filename(of))
+                for of in self.org_files
+            }
+            all_ok = True
+            for filename in self.org_files:
+                key = str(filename)
+                if key in historical_output and key in new_hashes:
+                    if not self.compare_hashes(historical_output[key], new_hashes[key]):
+                        all_ok = False
+                else:
+                    all_ok = False
+            if all_ok:
+                log_job_trace(
+                    "Temp file output existed and had same hashes. No recalc, but job 'ran'"
+                )
+                return new_hashes
+        return MultiFileGeneratingJob.run(self, runner, historical_output)
+
+    def all_files_exist(self):
+        for fn in self.org_files:
+            if not fn.exists():
+                return False
+        return True
 
     def output_needed(self, runner):
         raise NotImplementedError("unreachable")  # pragma: no cover
@@ -1957,12 +1989,13 @@ class AttributeLoadingJob(
         value = self.callback()
         if value is None:
             log_warning(
-                f"AttributeLoadingJob {self.job_id} returned None - downstreams will be invalidated whenever this runs."
+                f"AttributeLoadingJob {self.job_id} returned None - downstreams will be never be invalidated if this runs."
             )
-            try:
-                hash = historical_output.get(self.outputs[0], 0) + 1
-            except TypeError:  # pragma: no cover
-                hash = 0
+            hash = 0
+            # try:
+            #     hash = historical_output.get(self.outputs[0], 0) + 1
+            # except TypeError:  # pragma: no cover
+            #     hash = 0
         else:
             value, hash = _hash_object(value)
         setattr(self.object, self.attribute_name, value)

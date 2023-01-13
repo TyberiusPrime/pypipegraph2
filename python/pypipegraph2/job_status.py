@@ -31,6 +31,8 @@ class RecordedJobOutcome:
     def error(self):
         if self.outcome is JobOutcome.Failed:
             return self.payload
+        elif self.outcome is JobOutcome.UpstreamFailed:
+            return "Upstream"
         else:
             raise AttributeError(f"No error available on an non failed JobOutcome (was {self.outcome}")
 
