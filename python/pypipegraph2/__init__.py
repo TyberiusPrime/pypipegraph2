@@ -37,6 +37,7 @@ from .exceptions import (
     RunFailedInternally,
     JobsFailed,
     JobError,
+    HistoryLoadingFailed,
     JobEvaluationFailed,
 )
 from .enums import Resources, RunMode

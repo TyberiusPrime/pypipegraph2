@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
+export CARGO_TARGET_DIR=target_pyloop c 
 ./prep_for_tests.sh
 echo "cargo test"
-CARGO_TARGET_DIR=target_bacon cargo test
+cargo test
 echo "pytest"
-CARGO_TARGET_DIR=target_bacon RUST_LOG=debug pytest $@
+RUST_LOG=debug pytest $@

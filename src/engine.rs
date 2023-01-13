@@ -286,8 +286,8 @@ macro_rules! reconsider_job {
         $node_idx: expr,
         $new_signals: expr
     ) => {
-        //let mut do_add = true;
-        /* for s in $new_signals.iter() {
+        let mut do_add = true;
+        for s in $new_signals.iter() {
             if s.node_idx == $node_idx {
                 debug!(
                     "-> Not adding ConsiderJob for {} - already had {:?}",
@@ -297,10 +297,16 @@ macro_rules! reconsider_job {
                 break;
             }
         }
-        if do_add { */
-        $new_signals.push(NewSignal!(SignalKind::ConsiderJob, $node_idx, $jobs));
-        //}
+        if do_add {
+            $new_signals.push(NewSignal!(SignalKind::ConsiderJob, $node_idx, $jobs));
+        }
     };
+}
+
+pub enum JobOutputResult {
+    Done(String),
+    NoSuchJob,
+    NotDone,
 }
 
 type NodeIndex = usize;
@@ -504,10 +510,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         return true;
     }
     pub fn new_history(&self) -> HashMap<String, String> {
-        if !self.is_finished() {
+        /* if !self.is_finished() {
             debug!("{}", Self::debug(&self.dag, &self.jobs));
             panic!("Graph wasn't finished, not handing out history..."); // todo: actually, why not, we could save history occasionally?
-        }
+        } */
         //our history 'keys'
         //(we can't do tuple indices because of json dumping)
         //no !!! -> job output.
@@ -644,6 +650,17 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
 
         out
+    }
+
+    pub fn get_job_output(&self, job_id: &str) -> JobOutputResult {
+        let job_idx = self.job_id_to_node_idx.get(job_id);
+        match job_idx {
+            None => JobOutputResult::NoSuchJob,
+            Some(job_idx) => match &self.jobs[*job_idx as usize].history_output {
+                Some(v) => JobOutputResult::Done(v.to_string()),
+                None => JobOutputResult::NotDone,
+            },
+        }
     }
 
     pub fn event_startup(&mut self) -> Result<(), PPGEvaluatorError> {
@@ -828,7 +845,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             JobStateOutput::NotReady(ValidationStatus::Invalidated) => {
                                 set_node_state!(j, JobState::Output(JobStateOutput::ReadyToRun));
                             }
-                            _ => panic!("unexpected"),
+                            _ => panic!("unexpected was {:?}", j),
                         },
                         JobState::Ephemeral(state) => match state {
                             JobStateEphemeral::NotReady(ValidationStatus::Invalidated) => {
@@ -1560,12 +1577,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 )
                             );
                         } else {
-                            debug!("Job ready for cleanup {:?}, but downstreams failed -> no cleanup", jobs[upstream_idx]);
+                            debug!(
+                                "Job ready for cleanup {:?}, but downstreams failed -> no cleanup",
+                                jobs[upstream_idx]
+                            );
                             set_node_state!(
                                 jobs[upstream_idx],
-                                JobState::Ephemeral(
-                                    JobStateEphemeral::FinishedSuccessSkipCleanup,
-                                )
+                                JobState::Ephemeral(JobStateEphemeral::FinishedSuccessSkipCleanup,)
                             );
                         }
                     }

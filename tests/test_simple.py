@@ -55,5 +55,5 @@ class TestSimple:
         ppg.new(history_dir="shu")
         ppg.FileGeneratingJob("A", lambda of: write(of, "A"))
         ppg.run()
-        assert Path("shu/ppg_history.gz").exists()
-        assert not Path(".ppg/ppg_history.gz").exists()
+        assert (Path("shu") / ppg.global_pipegraph.get_history_filename().name).exists()
+        assert not (Path(".ppg") / ppg.global_pipegraph.get_history_filename().name).exists()

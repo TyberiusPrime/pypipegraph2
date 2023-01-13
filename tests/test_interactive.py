@@ -40,7 +40,7 @@ class TestCallSyntax:
         assert read("a") == "2"
         assert read("b") == "1"  # was shielded
 
-    def test_job_is_pruned(self):
+    def test_job_is_pruned(self, job_trace_log):
         a = ppg.FileGeneratingJob("A", lambda of: counter("a") and of.write_text("A"))
         b = ppg.FileGeneratingJob("B", lambda of: counter("b") and of.write_text("B"))
         a.prune()
