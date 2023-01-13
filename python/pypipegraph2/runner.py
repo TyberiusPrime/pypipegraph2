@@ -1,3 +1,4 @@
+from logging import captureWarnings
 from . import exceptions
 import sys
 import os
@@ -144,7 +145,7 @@ class Runner:
 
         def _recurse_unpruning(job_id):
             """This goes upstream"""
-            log_job_trace(f"_recurse_unpruning {job_id}")
+            # log_job_trace(f"_recurse_unpruning {job_id}")
             try:
                 pruned.remove(job_id)
                 del self.jobs[job_id].prune_reason
@@ -164,10 +165,8 @@ class Runner:
             # prune all jobs,
             # then unprune this one and it's predecessors
             pruned.update(set(dag.nodes))  # prune all...
-            log_job_trace(f"pruned after focus {len(pruned)}")
             for job_id in set((x.job_id for x in focus_on_these_jobs)).union(new_jobs):
                 _recurse_unpruning(job_id)
-            log_job_trace(f"pruned after unpruning {len(pruned)}")
 
         # apply regular pruning
         if jobs_already_run_previously:
@@ -179,7 +178,6 @@ class Runner:
             if self.jobs[job_id]._pruned:
                 _recurse_pruning(job_id, job_id)
 
-        log_job_trace(f"To prune {pruned}")
         for job_id in pruned:
             log_job_trace(f"pruned {job_id}")
             try:
@@ -543,7 +541,11 @@ class Runner:
                             cleanups = self.evaluator.jobs_ready_for_cleanup()
 
                             for cleanup_job_id in cleanups:
-                                self.jobs[cleanup_job_id].cleanup()
+                                try:
+                                    log_error(f"Cleanup for {cleanup_job_id}")
+                                    self.jobs[cleanup_job_id].cleanup()
+                                except Exception as e:
+                                    log_error(f"Cleanup had an exception {repr(e)}")
                                 self.evaluator.event_job_cleanup_done(cleanup_job_id)
 
                             rr = self.evaluator.jobs_ready_to_run()
@@ -672,6 +674,7 @@ class Runner:
                             captured_tb = ppg_traceback.Trace(
                                 exception_type, exception_value, tb
                             )
+                            print(captured_tb)
                             e = exceptions.JobError(
                                 e,
                                 captured_tb,

@@ -112,6 +112,7 @@ class TestJobs:
         ppg.run()
 
     def test_data_loading_MultiFile_dowstream(self, job_trace_log):
+        #todo :rename this test?
         def tf(ofs):
             counter("A")
             ofs[0].write_text("a1")
@@ -130,6 +131,7 @@ class TestJobs:
         bc.depends_on(a)
         bc()
         assert read("c") == "ca1"
+        assert read("b") == "b"
         assert read("b") == "b"
         assert read("A") == "1"
         assert read("B") == "1"
@@ -156,7 +158,7 @@ class TestJobs:
         ppg.run()
         assert read("a") == "2"
         assert read("c") == "2"
-        assert read("b") == "2"
+        assert read("b") == "1" # ppg2_rust change
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestJobs2:
@@ -1453,7 +1455,7 @@ class TestAttributeJob:
         ppg.run()
         assert read("a") == "2"
         assert read("c") == "2"
-        assert read("b") == "2"
+        assert read("b") == "1" # ppg2_rust
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1558,11 +1560,11 @@ class TestTempFileGeneratingJob:
         assert read(normal_count_file) == "AA"
         assert not (Path(temp_file).exists())
 
-    def test_dependand_explodes(self):
+    def test_dependand_explodes(self, job_trace_log):
         temp_file = "out/temp"
 
         def write_temp(of):
-            append(temp_file, "hello")
+            append(of, "hello")
 
         temp_job = ppg.TempFileGeneratingJob(temp_file, write_temp)
         ofA = "out/A"
@@ -1816,6 +1818,7 @@ class TestTempFileGeneratingJob:
         assert Path("tf").read_text() == "1"
         assert Path("j").read_text() == "1"
         assert not Path("J").exists()
+        ppg.pypipegraph2.enable_logging()
         ppg.run()
         assert Path("J").read_text() == "J"
         assert Path("j").read_text() == "2"

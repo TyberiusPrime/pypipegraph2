@@ -78,6 +78,7 @@ pub enum JobStateEphemeral {
     FinishedSuccessNotReadyForCleanup,
     FinishedSuccessReadyForCleanup,
     FinishedSuccessCleanedUp,
+    FinishedSuccessSkipCleanup,
     FinishedFailure,
     FinishedUpstreamFailure,
     FinishedSkipped,
@@ -176,6 +177,7 @@ impl JobQueries for JobStateEphemeral {
             JobStateEphemeral::FinishedSuccessNotReadyForCleanup => true,
             JobStateEphemeral::FinishedSuccessReadyForCleanup => true,
             JobStateEphemeral::FinishedSuccessCleanedUp => true,
+            JobStateEphemeral::FinishedSuccessSkipCleanup => true,
             JobStateEphemeral::FinishedFailure => true,
             JobStateEphemeral::FinishedUpstreamFailure => true,
             JobStateEphemeral::FinishedSkipped => true,
@@ -284,8 +286,8 @@ macro_rules! reconsider_job {
         $node_idx: expr,
         $new_signals: expr
     ) => {
-        let mut do_add = true;
-        for s in $new_signals.iter() {
+        //let mut do_add = true;
+        /* for s in $new_signals.iter() {
             if s.node_idx == $node_idx {
                 debug!(
                     "-> Not adding ConsiderJob for {} - already had {:?}",
@@ -295,9 +297,9 @@ macro_rules! reconsider_job {
                 break;
             }
         }
-        if do_add {
-            $new_signals.push(NewSignal!(SignalKind::ConsiderJob, $node_idx, $jobs));
-        }
+        if do_add { */
+        $new_signals.push(NewSignal!(SignalKind::ConsiderJob, $node_idx, $jobs));
+        //}
     };
 }
 
@@ -527,7 +529,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             }
                             _ => true,
                         }
-                    } else { // a node uplink entry.
+                    } else {
+                        // a node uplink entry.
                         true
                     }
                 } else {
@@ -544,7 +547,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             let key = job.job_id.to_string();
             let job_was_success = job.history_output.is_some();
             let input_name_key = format!("{}!!!", job.job_id);
-            if job_was_success { 
+            if job_was_success {
                 // if the job did not succeed, we want it to rerun!
                 out.insert(input_name_key, self.name_job_inputs(idx));
 
@@ -575,7 +578,6 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             } else {
                 out.remove(&job.job_id);
                 out.remove(&input_name_key);
-
             }
         }
         for (a, b, x) in self.dag.all_edges() {
@@ -785,6 +787,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             JobState::Ephemeral(JobStateEphemeral::FinishedSuccessReadyForCleanup) => {
                 self.signals
                     .push_back(NewSignal!(SignalKind::JobCleanedUp, idx, self.jobs));
+                self.process_signals(0);
                 Ok(())
             }
 
@@ -855,6 +858,9 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     let j = &mut self.jobs[node_idx as usize];
                     match j.state {
                         JobState::Always(_) => panic!("skipping always job is a bug"),
+                        JobState::Output(JobStateOutput::FinishedSkipped)
+                        | JobState::Ephemeral(JobStateEphemeral::FinishedSkipped) => { // ignore,
+                        }
                         JobState::Output(state) => match state {
                             JobStateOutput::NotReady(
                                 ValidationStatus::Validated | ValidationStatus::Unknown,
@@ -965,6 +971,11 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 SignalKind::JobUpstreamFailure => {
                     let j = &mut self.jobs[node_idx as usize];
                     match j.state {
+                        JobState::Always(JobStateAlways::FinishedUpstreamFailure)
+                        | JobState::Output(JobStateOutput::FinishedUpstreamFailure)
+                        | JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) => {
+                            //ignore
+                        }
                         JobState::Always(JobStateAlways::Undetermined) => {
                             set_node_state!(
                                 j,
@@ -988,6 +999,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     new_signals.push(NewSignal!(SignalKind::JobDone, node_idx, self.jobs));
                     let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
                     for downstream_idx in downstreams {
+                        Self::remove_consider_signals(&mut new_signals, downstream_idx);
                         new_signals.push(NewSignal!(
                             SignalKind::JobUpstreamFailure,
                             downstream_idx,
@@ -1219,6 +1231,9 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             "\tconsidering job {}: {:?}",
             jobs[node_idx as usize].job_id, jobs[node_idx as usize].state
         ); */
+        if jobs[node_idx as usize].state.is_finished() {
+            debug!("Considering an already finished job -> no-op");
+        }
         match jobs[node_idx as usize].state {
             JobState::Always(state) => match state {
                 JobStateAlways::Undetermined => {
@@ -1525,19 +1540,34 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             match jobs[upstream_idx].state {
                 JobState::Ephemeral(JobStateEphemeral::FinishedSuccessNotReadyForCleanup) => {
                     let mut all_downstreams_done = true;
+                    let mut no_downstream_failed = true;
                     let downstreams = dag.neighbors_directed(upstream_idx, Direction::Outgoing);
                     for downstream_idx in downstreams {
                         if !jobs[downstream_idx].state.is_finished() {
                             all_downstreams_done = false;
                             break;
+                        } else if jobs[downstream_idx].state.is_failed() {
+                            no_downstream_failed = false;
                         }
                     }
                     if all_downstreams_done {
-                        debug!("Job ready for cleanup {:?}", jobs[upstream_idx]);
-                        set_node_state!(
-                            jobs[upstream_idx],
-                            JobState::Ephemeral(JobStateEphemeral::FinishedSuccessReadyForCleanup,)
-                        );
+                        if no_downstream_failed {
+                            debug!("Job ready for cleanup {:?}", jobs[upstream_idx]);
+                            set_node_state!(
+                                jobs[upstream_idx],
+                                JobState::Ephemeral(
+                                    JobStateEphemeral::FinishedSuccessReadyForCleanup,
+                                )
+                            );
+                        } else {
+                            debug!("Job ready for cleanup {:?}, but downstreams failed -> no cleanup", jobs[upstream_idx]);
+                            set_node_state!(
+                                jobs[upstream_idx],
+                                JobState::Ephemeral(
+                                    JobStateEphemeral::FinishedSuccessSkipCleanup,
+                                )
+                            );
+                        }
                     }
                 }
                 _ => {}
@@ -1619,6 +1649,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             Self::set_upstream_edges(&mut self.dag, node_idx, Required::No)
                         } else {
                             Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
+                            debug!("output was missing {}", &job.job_id);
                             set_node_state!(
                                 job,
                                 JobState::Output(JobStateOutput::NotReady(
@@ -1673,7 +1704,6 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }) {
             let job = &self.jobs[root_idx as usize];
             debug!("root node '{}'", job.job_id);
-            debug!("ConsiderJob place 5");
             out_signals.push(NewSignal!(SignalKind::ConsiderJob, root_idx, self.jobs));
         }
         for signal in out_signals.into_iter() {

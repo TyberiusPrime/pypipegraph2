@@ -134,6 +134,9 @@ pub fn simplest_ephemeral() {
     g.event_job_finished_success("out", "".to_string()).unwrap();
     assert!(g.is_finished());
     assert_eq!(g.query_ready_for_cleanup(), set!["in"]);
+    g.event_job_cleanup_done("in").unwrap();
+    dbg!(g.query_ready_for_cleanup());
+    assert!(g.query_ready_for_cleanup().is_empty());
     assert!(g.query_ready_to_run().is_empty())
 }
 
@@ -1711,4 +1714,21 @@ fn test_failure_does_not_store_history_for_job() {
     assert!(!history.is_empty());
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.already_done.contains("A"));
+}
+
+
+#[test]
+fn test_no_cleanup_if_downstream_failes() {
+  fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("B", JobKind::Output);
+        g.depends_on("B","TA");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&["B"]).unwrap();
+    assert!(!ro.already_done.contains("B"));
+    assert!(ro.already_done.contains("TA"));
+    assert!(!ro.cleaned_up.contains("TA"));
+    let history = g.new_history();
+
 }
