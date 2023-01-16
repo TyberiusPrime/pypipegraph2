@@ -1,17 +1,13 @@
-#![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
+#![allow(clippy::borrow_deref_ref)]
+#[allow(unused_imports)]
 use log::{debug, error, info, warn};
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
-use pyo3::types::{PyDict, PyFunction};
-use std::any;
+use pyo3::types::PyDict;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
 use std::io::Write;
 use std::rc::Rc;
 use std::sync::Once;
-use std::thread::current; // Use log crate when building application
 
 use thiserror::Error;
 
@@ -53,6 +49,7 @@ pub struct StrategyForTesting {
 }
 
 impl StrategyForTesting {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         StrategyForTesting {
             already_done: Rc::new(RefCell::new(HashSet::new())),
@@ -67,8 +64,8 @@ impl PPGEvaluatorStrategy for StrategyForTesting {
 
     fn is_history_altered(
         &self,
-        job_id_upstream: &str,
-        job_id_downstream: &str,
+        _job_id_upstream: &str,
+        _job_id_downstream: &str,
         last_recorded_value: &str,
         current_value: &str,
     ) -> bool {
@@ -81,7 +78,7 @@ pub fn start_logging() {
     if !LOGGER_INIT.is_completed() {
         LOGGER_INIT.call_once(move || {
             use colored::Colorize;
-            let start_time2 = start_time.clone();
+            let start_time2 = start_time;
             env_logger::builder()
                 .format(move |buf, record| {
                     let filename = record
@@ -116,6 +113,7 @@ pub fn start_logging() {
 // run - jobs just register that they've been run,
 // and output a 'dummy' history.
 pub struct TestGraphRunner {
+    #[allow(clippy::type_complexity)]
     pub setup_graph: Box<dyn Fn(&mut PPGEvaluator<StrategyForTesting>)>,
     pub run_counters: HashMap<String, usize>,
     pub history: HashMap<String, String>,
@@ -127,6 +125,7 @@ pub struct TestGraphRunner {
 }
 
 impl TestGraphRunner {
+    #[allow(clippy::type_complexity)]
     pub fn new(setup_func: Box<dyn Fn(&mut PPGEvaluator<StrategyForTesting>)>) -> Self {
         TestGraphRunner {
             setup_graph: setup_func,
@@ -290,7 +289,7 @@ pub fn test_big_graph_in_layers(nodes_per_layer: u32, layers: u32, run_count: u3
     };
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     ro.allowed_nesting = layers + 1;
-    for ii in 0..run_count {
+    for _ in 0..run_count {
         let g = ro.run(&Vec::new());
         assert!(g.is_ok())
     }
@@ -359,7 +358,7 @@ impl From<PPGEvaluatorError> for PyErr {
 impl PyPPG2Evaluator {
     #[new]
     fn __new__(
-        py: Python,
+        _py: Python,
         py_history: &PyDict,
         history_compare_callable: PyObject,
     ) -> Result<Self, PyErr> {
@@ -431,7 +430,7 @@ impl PyPPG2Evaluator {
         Ok(self.evaluator.event_job_cleanup_done(job_id)?)
     }
 
-    pub fn is_finished(&self) -> bool {
+    pub fn is_finished(&mut self) -> bool {
         self.evaluator.is_finished()
     }
 
