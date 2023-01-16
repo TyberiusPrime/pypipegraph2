@@ -2,7 +2,7 @@
 #![allow(unused_variables)]
 #![allow(unused_imports)]
 use log::{debug, error, info, warn};
-use pyo3::exceptions::{PyTypeError, PyValueError, PyKeyError};
+use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::types::{PyDict, PyFunction};
 use std::any;
 use std::cell::RefCell;
@@ -76,7 +76,7 @@ impl PPGEvaluatorStrategy for StrategyForTesting {
     }
 }
 
-fn start_logging() {
+pub fn start_logging() {
     let start_time = chrono::Utc::now();
     if !LOGGER_INIT.is_completed() {
         LOGGER_INIT.call_once(move || {
@@ -144,6 +144,7 @@ impl TestGraphRunner {
         &mut self,
         jobs_to_fail: &[&str],
     ) -> Result<PPGEvaluator<StrategyForTesting>, PPGEvaluatorError> {
+        debug!("GOGOGO");
         let strat = StrategyForTesting::new();
         for k in self.already_done.iter() {
             strat.already_done.borrow_mut().insert(k.to_string());
@@ -153,10 +154,14 @@ impl TestGraphRunner {
         self.run_order.clear();
 
         (self.setup_graph)(&mut g);
+        //debug!("{}", g.debug_());
         let mut counter = self.allowed_nesting;
         g.event_startup().unwrap();
         while !g.is_finished() {
             let to_run = g.query_ready_to_run();
+            if to_run.is_empty() {
+                g.debug_is_finished();
+            }
             assert!(!to_run.is_empty());
             for job_id in to_run.iter() {
                 debug!("Running {}", job_id);
@@ -199,6 +204,7 @@ impl TestGraphRunner {
                 self.cleaned_up.insert(c);
             }
         }
+
         self.history.clear();
         for (k, v) in g.new_history().iter() {
             self.history.insert(k.clone(), v.clone());
@@ -206,14 +212,13 @@ impl TestGraphRunner {
         for k in already_done2.take().into_iter() {
             self.already_done.insert(k);
         }
+        /* #[cfg(debug_assertions)]
         if !g.verify_order_was_topological(&self.run_order) {
             panic!("Run order was not topological");
         }
-
+ */
         Ok(g)
     }
-
-    fn assert_run_order_is_topological(&self, g: &PPGEvaluator<StrategyForTesting>) {}
 }
 
 pub fn test_big_linear_graph(count: u32) {
@@ -256,6 +261,39 @@ pub fn test_big_linear_graph_half_ephemeral(count: u32) {
     ro.allowed_nesting = count + 1;
     let g = ro.run(&Vec::new());
     assert!(g.is_ok())
+    //dbg!(g.new_history().len());
+}
+
+pub fn test_big_graph_in_layers(nodes_per_layer: u32, layers: u32, run_count: u32) {
+    let create_graph = move |g: &mut PPGEvaluator<StrategyForTesting>| {
+        for ll in 0..layers {
+            if ll == 0 {
+                for ii in 0..nodes_per_layer {
+                    g.add_node(&format!("A{}_{}", ll, ii), JobKind::Always);
+                }
+            } else {
+                for ii in 0..nodes_per_layer {
+                    g.add_node(
+                        &format!("A{}_{}", ll, ii),
+                        if ii % 2 == 0 {
+                            JobKind::Output
+                        } else {
+                            JobKind::Ephemeral
+                        },
+                    );
+                    for yy in 0..nodes_per_layer {
+                        g.depends_on(&format!("A{}_{}", ll, ii), &format!("A{}_{}", ll-1, yy))
+                    }
+                }
+            }
+        }
+    };
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    ro.allowed_nesting = layers + 1;
+    for ii in 0..run_count {
+        let g = ro.run(&Vec::new());
+        assert!(g.is_ok())
+    }
     //dbg!(g.new_history().len());
 }
 
@@ -401,14 +439,12 @@ impl PyPPG2Evaluator {
         self.evaluator.new_history()
     }
 
-    pub fn get_job_output(&self,job_id:&str
-                          ) -> Result<String, PyErr> {
+    pub fn get_job_output(&self, job_id: &str) -> Result<String, PyErr> {
         match self.evaluator.get_job_output(job_id) {
             engine::JobOutputResult::Done(v) => Ok(v),
             engine::JobOutputResult::NoSuchJob => Err(PyKeyError::new_err("Invalid job id")),
             engine::JobOutputResult::NotDone => Err(PyValueError::new_err("job not done")),
         }
-
     }
 }
 

@@ -6,7 +6,11 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "pypipegraph2"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "ppg2_profileing"
+path = "src/main.rs"
 
 [dependencies]
 pyo3 = { version = "0.15.1", features = ["extension-module"] }
@@ -26,4 +30,9 @@ python-source = "python"
 [dev-dependencies]
 criterion = {version = "0.3", features = ["html_reports"]}
 
+[[bench]]
+name = "bench1"
+harness = false
 
+[profile.release]
+debug = true

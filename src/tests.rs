@@ -671,7 +671,6 @@ fn test_simple_graph_runner() {
     assert_eq!(*ro.run_counters.get("A").unwrap(), 2);
     assert_eq!(*ro.run_counters.get("B").unwrap(), 1);
 
-    start_logging();
     error!("part5");
     let g = ro.run(&Vec::new());
     assert_eq!(*ro.run_counters.get("A").unwrap(), 2);
@@ -711,8 +710,8 @@ fn test_nested_too_deply_detection() {
 
 #[test]
 fn test_bigish_linear_graph() {
-    crate::test_big_linear_graph(100);
-    crate::test_big_linear_graph_half_ephemeral(100);
+    crate::test_big_linear_graph(1000);
+    crate::test_big_linear_graph_half_ephemeral(1000);
 }
 
 #[test]
@@ -1029,7 +1028,6 @@ fn test_changing_inputs_when_leaf_was_missing() {
     assert!(ro.run_counters.get("B") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
 
-    start_logging();
     // running it again doesn't run anything but the always job.
     let g = ro.run(&Vec::new()).unwrap();
     let new_history = g.new_history();
@@ -1633,7 +1631,6 @@ fn test_two_temp_jobs() {
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
 
-    start_logging();
 
     let g = ro.run(&Vec::new()).unwrap();
     assert!(ro.run_counters.get("TA") == Some(&1));
@@ -1731,4 +1728,9 @@ fn test_no_cleanup_if_downstream_failes() {
     assert!(!ro.cleaned_up.contains("TA"));
     let history = g.new_history();
 
+}
+#[test]
+fn test_always_as_root() {
+    start_logging();
+    crate::test_big_graph_in_layers(2,3,2);        
 }
