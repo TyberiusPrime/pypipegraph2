@@ -48,6 +48,10 @@ pub enum Required {
     Yes,
     No,
 }
+pub struct EdgeInfo {
+    required: Required,
+    invalidated: Required,
+}
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum JobStateAlways {
     Undetermined,
@@ -311,7 +315,7 @@ pub enum JobOutputResult {
 
 type NodeIndex = usize;
 
-type GraphType = GraphMap<NodeIndex, Required, Directed>;
+type GraphType = GraphMap<NodeIndex, EdgeInfo, Directed>;
 
 pub struct PPGEvaluator<T: PPGEvaluatorStrategy> {
     dag: GraphType,
@@ -321,6 +325,7 @@ pub struct PPGEvaluator<T: PPGEvaluatorStrategy> {
     strategy: T,
     already_started: StartStatus,
     jobs_ready_to_run: HashSet<String>,
+    jobs_ready_for_cleanup: HashSet<String>,
     topo: Option<Vec<NodeIndex>>,
     signals: VecDeque<Signal>,
 }
@@ -341,6 +346,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             strategy,
             already_started: StartStatus::NotStarted,
             jobs_ready_to_run: HashSet::new(),
+            jobs_ready_for_cleanup: HashSet::new(),
             topo: None,
             signals: VecDeque::new(),
         };
@@ -388,8 +394,14 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         let downstream_id = self.id_to_idx(downstream);
         let upstream_id = self.id_to_idx(upstream);
         assert_ne!(downstream_id, upstream_id, "can't depend on self");
-        self.dag
-            .add_edge(upstream_id, downstream_id, Required::Unknown);
+        self.dag.add_edge(
+            upstream_id,
+            downstream_id,
+            EdgeInfo {
+                required: Required::Unknown,
+                invalidated: Required::Unknown,
+            },
+        );
     }
 
     pub fn is_finished(&self) -> bool {
@@ -399,6 +411,18 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             }
         }
         true
+    }
+    pub fn debug_is_finished(&self) -> bool {
+        for job in self.jobs.iter() {
+            if !job.state.is_finished() {
+                debug!("Unfinished: {}", job.job_id);
+            }
+        }
+        true
+    }
+
+    pub fn debug_(&self) -> String {
+        Self::debug(&self.dag, &self.jobs)
     }
     fn debug(dag: &GraphType, jobs: &Vec<NodeInfo>) -> String {
         let mut out = "\n".to_string();
@@ -411,7 +435,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             let downstream_id = &jobs[downstream_idx as usize].job_id;
             out.push_str(&format!(
                 "({}->{}: {:?}\n",
-                upstream_id, downstream_id, weight
+                upstream_id, downstream_id, weight.required
             ));
         }
         out
@@ -449,18 +473,12 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
 
     pub fn query_ready_for_cleanup(&self) -> HashSet<String> {
-        self.jobs
-            .iter()
-            .filter_map(|job| match job.state {
-                JobState::Ephemeral(JobStateEphemeral::FinishedSuccessReadyForCleanup) => {
-                    Some(job.job_id.clone())
-                }
-                _ => None,
-            })
-            .collect()
+        self.jobs_ready_for_cleanup.clone()
     }
 
     pub fn query_failed(&self) -> HashSet<String> {
+        // not worth keeping a list to prevent the scanning
+        // called typically only once per graph
         self.jobs
             .iter()
             .filter_map(|job| match job.state {
@@ -475,6 +493,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
 
     pub fn query_upstream_failed(&self) -> HashSet<String> {
+        // not worth keeping a list to prevent the scanning
+        // called typically only once per graph
         self.jobs
             .iter()
             .filter_map(|job| match job.state {
@@ -544,6 +564,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 }
             })
             .collect();
+
         for (idx, job) in self.jobs.iter().enumerate() {
             //step 1: record what jobs when into this one
 
@@ -592,7 +613,9 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             let job_id_b = &self.jobs[b as usize].job_id;
             let key = format!("{}!!!{}", job_id_a.to_string(), job_id_b.to_string());
             let history = self.jobs[a as usize].history_output.as_ref();
-            let second_job_success = self.jobs[b as usize].history_output.is_some();
+            let second_job_success = self.jobs[b as usize].history_output.is_some()
+                || self.jobs[b as usize].state
+                    == JobState::Ephemeral(JobStateEphemeral::FinishedSkipped);
             if second_job_success {
                 // we do not store the history link if the second job failed.
                 let history = match history {
@@ -818,7 +841,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     fn process_signals(&mut self, depth: u32) {
         debug!("");
         debug!("Process signals, depth {}", depth);
-        if depth > 150 {
+        if depth > 1500 {
             panic!("Depth ConsiderJob loop. Either pathological input, or bug. Aborting to avoid stack overflow");
         }
         let mut new_signals = Vec::new();
@@ -933,6 +956,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     Self::consider_upstreams_for_cleanup(
                         &self.dag,
                         &mut self.jobs,
+                        &mut self.jobs_ready_for_cleanup,
                         node_idx,
                         &mut new_signals,
                     );
@@ -1043,6 +1067,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 j,
                                 JobState::Ephemeral(JobStateEphemeral::FinishedSuccessCleanedUp,)
                             );
+                            self.jobs_ready_for_cleanup.remove(&j.job_id);
                         }
                         _ => panic!("unexpected"),
                     }
@@ -1071,7 +1096,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         for (upstream_index, downstream_index, weight) in
             dag.edges_directed(node_idx, Direction::Outgoing)
         {
-            match weight {
+            match weight.required {
                 Required::Unknown => {}
                 Required::Yes => return true,
                 Required::No => {}
@@ -1103,6 +1128,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
 
     fn all_upstreams_done(dag: &GraphType, jobs: &mut Vec<NodeInfo>, node_idx: NodeIndex) -> bool {
+        //there's no point caching this - it never get's called again if it ever returned true
         let upstreams = dag.neighbors_directed(node_idx, Direction::Incoming);
         for upstream_idx in upstreams {
             if !jobs[upstream_idx as usize].state.is_finished() {
@@ -1144,49 +1170,79 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
 
     fn edge_invalidated(
+        dag: &mut GraphType,
         strategy: &dyn PPGEvaluatorStrategy,
         jobs: &Vec<NodeInfo>,
         history: &HashMap<String, String>,
         upstream_idx: NodeIndex,
         downstream_idx: NodeIndex,
     ) -> bool {
-        let upstream_id = &jobs[upstream_idx].job_id;
-        let downstream_id = &jobs[downstream_idx].job_id;
-        let key = format!("{}!!!{}", upstream_id, downstream_id); //todo: express onlyonce
-        let last_history_value = history.get(&key); //todo: fight alloc
-        match last_history_value {
-            Some(last_history_value) => {
-                let current_value = jobs[upstream_idx]
-                    .history_output
-                    .as_ref()
-                    .expect(&format!("No history? Unexpected {:?}", &jobs[upstream_idx]));
-                strategy.is_history_altered(
-                    upstream_id,
-                    &downstream_id,
-                    last_history_value,
-                    current_value,
-                )
-            }
+        match dag
+            .edge_weight(upstream_idx, downstream_idx)
+            .unwrap()
+            .invalidated
+        {
+            //caching this speeds up  test_big_graph_in_layers(300,30,2)
+            Required::Yes => return true,
+            Required::No => return false,
+            Required::Unknown => {
+                let upstream_id = &jobs[upstream_idx].job_id;
+                let downstream_id = &jobs[downstream_idx].job_id;
+                let key = format!("{}!!!{}", upstream_id, downstream_id); //todo: express onlyonce
+                let last_history_value = history.get(&key); //todo: fight alloc
+                match last_history_value {
+                    Some(last_history_value) => {
+                        let current_value = jobs[upstream_idx]
+                            .history_output
+                            .as_ref()
+                            .expect(&format!("No history? Unexpected {:?}", &jobs[upstream_idx]));
+                        if strategy.is_history_altered(
+                            upstream_id,
+                            &downstream_id,
+                            last_history_value,
+                            current_value,
+                        ) {
+                            dag.edge_weight_mut(upstream_idx, downstream_idx)
+                                .unwrap()
+                                .invalidated = Required::Yes;
+                            return true;
+                        } else {
+                            dag.edge_weight_mut(upstream_idx, downstream_idx)
+                                .unwrap()
+                                .invalidated = Required::No;
+                            return false;
+                        }
+                    }
 
-            None => true,
+                    None => {
+                        dag.edge_weight_mut(upstream_idx, downstream_idx)
+                            .unwrap()
+                            .invalidated = Required::Yes;
+
+                        true
+                    }
+                }
+            }
         }
     }
 
     fn update_validation_status(
         strategy: &dyn PPGEvaluatorStrategy,
-        dag: &GraphType,
+        dag: &mut GraphType,
         jobs: &Vec<NodeInfo>,
         history: &HashMap<String, String>,
         node_idx: NodeIndex,
     ) -> ValidationStatus {
-        let upstreams = dag.neighbors_directed(node_idx, Direction::Incoming);
+        let upstreams: Vec<_> = dag
+            .neighbors_directed(node_idx, Direction::Incoming)
+            .collect();
         let mut not_done = 0;
         let mut invalidated = false;
         for upstream_idx in upstreams {
             if jobs[upstream_idx as usize].state.is_finished() {
                 if
                 // !jobs[upstream_idx as usize].state.is_skipped() &&
-                Self::edge_invalidated(strategy, jobs, history, upstream_idx, node_idx) {
+                Self::edge_invalidated(dag, strategy, jobs, history, upstream_idx, node_idx) {
                     invalidated = true
                 } else {
                     //       debug!("\t\tEdge not invalidated {} {}", jobs[upstream_idx].job_id, jobs[node_idx].job_id);
@@ -1226,7 +1282,9 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             .neighbors_directed(node_idx, Direction::Incoming)
             .collect();
         for upstream_idx in upstreams {
-            *dag.edge_weight_mut(upstream_idx, node_idx).unwrap() = Required::Yes;
+            dag.edge_weight_mut(upstream_idx, node_idx)
+                .unwrap()
+                .required = Required::Yes;
             match jobs[upstream_idx].state {
                 JobState::Always(_) | JobState::Output(_) => {}
                 JobState::Ephemeral(_) => Self::propagate_job_required(dag, jobs, upstream_idx),
@@ -1461,7 +1519,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     ) -> Required {
         let downstreams = dag.neighbors_directed(node_idx, Direction::Outgoing);
         for downstream_idx in downstreams {
-            match dag.edge_weight(node_idx, downstream_idx).unwrap() {
+            match dag.edge_weight(node_idx, downstream_idx).unwrap().required {
                 Required::Unknown => return Required::Unknown,
                 Required::Yes => return Required::Yes,
                 Required::No => match jobs[downstream_idx].state {
@@ -1549,6 +1607,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     fn consider_upstreams_for_cleanup(
         dag: &GraphType,
         jobs: &mut Vec<NodeInfo>,
+        jobs_ready_for_cleanup: &mut HashSet<String>,
         node_idx: NodeIndex,
         new_signals: &mut Vec<Signal>,
     ) {
@@ -1565,6 +1624,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             break;
                         } else if jobs[downstream_idx].state.is_failed() {
                             no_downstream_failed = false;
+                            break;
                         }
                     }
                     if all_downstreams_done {
@@ -1576,6 +1636,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     JobStateEphemeral::FinishedSuccessReadyForCleanup,
                                 )
                             );
+                            jobs_ready_for_cleanup.insert(jobs[upstream_idx].job_id.clone());
                         } else {
                             debug!(
                                 "Job ready for cleanup {:?}, but downstreams failed -> no cleanup",
@@ -1598,7 +1659,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             .neighbors_directed(node_idx, Direction::Incoming)
             .collect();
         for upstream_idx in upstreams {
-            *dag.edge_weight_mut(upstream_idx, node_idx).unwrap() = weight
+            (*dag.edge_weight_mut(upstream_idx, node_idx).unwrap()).required = weight
         }
     }
     fn name_job_inputs(&self, node_idx: NodeIndex) -> String {
@@ -1684,7 +1745,12 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         let downstreams =
                             self.dag.neighbors_directed(node_idx, Direction::Outgoing);
                         for downstream_idx in downstreams {
-                            match self.dag.edge_weight(node_idx, downstream_idx).unwrap() {
+                            match self
+                                .dag
+                                .edge_weight(node_idx, downstream_idx)
+                                .unwrap()
+                                .required
+                            {
                                 Required::Unknown => panic!(
                                     "Should not happen {} {}",
                                     downstream_idx, self.jobs[downstream_idx].job_id

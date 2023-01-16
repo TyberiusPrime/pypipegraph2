@@ -24,12 +24,14 @@
     pkgs = import nixpkgs {inherit system overlays;};
     rust = pkgs.rust-bin.stable."1.65.0".default.override {
       targets = ["x86_64-unknown-linux-gnu" "x86_64-unknown-linux-musl"];
+      extensions = ["llvm-tools-preview"];
     };
     pkgs_with_rust =
       pkgs
       // {
         cargo = rust;
         rustc = rust;
+        cargo-binutils = pkgs.cargo-binutils.override { cargo = rust; rustc=rust;};
       };
 
     naersk-lib = naersk.lib."${system}".override {
@@ -163,6 +165,8 @@
       CARGO_TARGET_DIR = "target_rust_analyzer";
       nativeBuildInputs = [
         rust
+        pkgs.cargo-binutils
+
         pkgs.rust-analyzer
         pkgs.git
         pkgs.cargo-udeps
