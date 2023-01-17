@@ -74,12 +74,13 @@ impl PPGEvaluatorStrategy for StrategyForTesting {
 }
 
 pub fn start_logging() {
-    let start_time = chrono::Utc::now();
+    let start_time = std::time::Instant::now();
     if !LOGGER_INIT.is_completed() {
         LOGGER_INIT.call_once(move || {
             use colored::Colorize;
             let start_time2 = start_time;
             env_logger::builder()
+                .filter_level(log::LevelFilter::Debug)
                 .format(move |buf, record| {
                     let filename = record
                         .file()
@@ -98,7 +99,7 @@ pub fn start_logging() {
                         buf,
                         "{}\t{:.4} | {}",
                         ff,
-                        (chrono::Utc::now() - start_time2).num_milliseconds(),
+                        (std::time::Instant::now() - start_time2).as_millis(),
                         //chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
                         record.args()
                     )
@@ -212,10 +213,10 @@ impl TestGraphRunner {
             self.already_done.insert(k);
         }
         /* #[cfg(debug_assertions)]
-        if !g.verify_order_was_topological(&self.run_order) {
-            panic!("Run order was not topological");
-        }
- */
+               if !g.verify_order_was_topological(&self.run_order) {
+                   panic!("Run order was not topological");
+               }
+        */
         Ok(g)
     }
 }
@@ -281,7 +282,7 @@ pub fn test_big_graph_in_layers(nodes_per_layer: u32, layers: u32, run_count: u3
                         },
                     );
                     for yy in 0..nodes_per_layer {
-                        g.depends_on(&format!("A{}_{}", ll, ii), &format!("A{}_{}", ll-1, yy))
+                        g.depends_on(&format!("A{}_{}", ll, ii), &format!("A{}_{}", ll - 1, yy))
                     }
                 }
             }
