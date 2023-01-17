@@ -24,7 +24,7 @@ fn test_one_output() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     dbg!(&new_history);
     assert!(new_history.contains_key("A"));
     assert!(ro.run_counters.get("A") == Some(&1));
@@ -58,7 +58,7 @@ pub fn test_three_outputs() {
     g.event_job_finished_success("out3", "out3output".to_string())
         .unwrap();
     assert!(g.is_finished());
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     dbg!(&history);
     assert!(history.get(&("out!!!out2".to_string())).unwrap() == "outAResult");
     assert!(history.get(&("out!!!out3".to_string())).unwrap() == "outAResult");
@@ -97,8 +97,8 @@ pub fn test_failure() {
     assert!(g.query_ready_to_run().is_empty());
     assert!(g.is_finished());
     //we keep history that for jobs tha are currently not present
-    assert!(g.new_history().get("Job_not_present").is_some());
-    assert!(g.new_history().len() == 1);
+    assert!(g.new_history().unwrap().get("Job_not_present").is_some());
+    assert!(g.new_history().unwrap().len() == 1);
 }
 
 #[test]
@@ -430,7 +430,7 @@ pub fn disjoint_and_twice() {
         g.event_job_finished_success("C", "histC".to_string())
             .unwrap();
         already_done.borrow_mut().insert("C".to_string());
-        g.new_history()
+        g.new_history().unwrap()
     };
     error!("part 2");
 
@@ -526,7 +526,7 @@ fn run_graph(
             done_log.borrow_mut().insert(job_id.clone());
         }
     }
-    g.new_history()
+    g.new_history().unwrap()
 }
 
 #[test]
@@ -551,7 +551,7 @@ fn test_run_then_add_jobs() {
     g.event_job_finished_success("B", "history_b".to_string())
         .unwrap();
     assert!(g.is_finished());
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     dbg!(&history);
     assert_eq!(history.get("A!!!B"), Some(&"history_A".to_string()));
 }
@@ -640,7 +640,7 @@ fn test_ephemeral_not_running_without_downstreams() {
     g.event_now_running("A1").unwrap();
     g.event_job_finished_failure("A1").unwrap();
     assert!(g.is_finished());
-    let his = g.new_history();
+    let his = g.new_history().unwrap();
     assert_eq!(his.len(), 0); //since nothing succeeded
     for k in his.keys() {
         assert!(k.ends_with("!!!"));
@@ -726,7 +726,7 @@ fn test_ephemeral_one_ephemeral_two_downstreams() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(new_history.contains_key("TA"));
     assert!(new_history.contains_key("B"));
     assert!(new_history.contains_key("C"));
@@ -762,7 +762,7 @@ fn test_ephemeral_triangle_just() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("TA") == Some(&1));
     assert!(ro.run_counters.get("TB") == Some(&1));
     assert!(ro.run_counters.get("TC") == Some(&1));
@@ -797,7 +797,7 @@ fn test_ephemeral_triangle_plus() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("TA") == Some(&1));
     assert!(ro.run_counters.get("TB") == Some(&1));
     assert!(ro.run_counters.get("TC") == Some(&1));
@@ -844,7 +844,7 @@ fn test_ephemeral_output_triangle_plus() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("TA") == Some(&1));
     assert!(ro.run_counters.get("TB") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
@@ -898,7 +898,7 @@ fn test_ephemeral_downstream_invalidated() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(new_history.contains_key("TA"));
     assert!(new_history.contains_key("B"));
     assert!(ro.run_counters.get("TA") == Some(&1));
@@ -907,7 +907,7 @@ fn test_ephemeral_downstream_invalidated() {
 
     ro.setup_graph = Box::new(create_graph2);
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(new_history.contains_key("FI52"));
     dbg!(&ro.run_counters);
     assert!(ro.run_counters.get("FI52") == Some(&1));
@@ -942,7 +942,7 @@ fn test_ephemeral_leaf_invalidated() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(new_history.contains_key("TA"));
     assert!(new_history.contains_key("TB"));
     assert!(new_history.contains_key("C"));
@@ -954,7 +954,7 @@ fn test_ephemeral_leaf_invalidated() {
 
     ro.setup_graph = Box::new(create_graph2);
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(new_history.contains_key("FI52"));
     dbg!(&ro.run_counters);
     assert!(ro.run_counters.get("FI52") == Some(&1));
@@ -980,7 +980,7 @@ fn test_loosing_an_input_is_invalidating() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("A") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
 
@@ -990,7 +990,7 @@ fn test_loosing_an_input_is_invalidating() {
     error!("part2");
     ro.setup_graph = Box::new(create_graph2);
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(new_history.contains_key("C"));
     assert!(new_history.contains_key("A"));
     assert!(ro.run_counters.get("A") == Some(&1));
@@ -1006,7 +1006,7 @@ fn test_changing_inputs_when_leaf_was_missing() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("A") == Some(&1));
     assert!(ro.run_counters.get("B") == Some(&1));
 
@@ -1020,7 +1020,7 @@ fn test_changing_inputs_when_leaf_was_missing() {
     //we change the outut. because of C this actually takes effect.
     ro.outputs.insert("A".to_string(), "new".to_string());
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(new_history.contains_key("B"));
     assert!(new_history.contains_key("B!!!"));
     assert!(new_history.contains_key("A!!!B"));
@@ -1031,7 +1031,7 @@ fn test_changing_inputs_when_leaf_was_missing() {
 
     // running it again doesn't run anything but the always job.
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     //assert!(new_history.contains_key("B"));
     assert!(new_history.contains_key("A"));
     assert!(ro.run_counters.get("A") == Some(&2));
@@ -1053,7 +1053,6 @@ fn test_changing_inputs_when_leaf_was_missing() {
                                                    // B.
                                                    // So rerun is appropriate
     assert!(ro.run_counters.get("C") == Some(&3));
-    dbg!(g.new_history());
 
     //now run again without B.
     error!("part4");
@@ -1096,12 +1095,12 @@ fn test_replacing_an_input_then_restoring() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("A") == Some(&1));
     assert!(ro.run_counters.get("B") == Some(&1));
 
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&1));
 
@@ -1113,7 +1112,7 @@ fn test_replacing_an_input_then_restoring() {
     ro.setup_graph = Box::new(create_graph2);
 
     let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history();
+    let new_history = g.new_history().unwrap();
     assert!(new_history.contains_key("C"));
     assert!(new_history.contains_key("B"));
     //assert!(new_history.contains_key("A"));
@@ -1207,7 +1206,7 @@ fn test_one_ephemeral_two_outputs() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    //    let new_history = g.new_history();
+    //    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("TA") == Some(&1));
     assert!(ro.run_counters.get("B") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
@@ -1230,7 +1229,7 @@ fn test_one_ephemeral_two_outputs() {
     }
     ro.setup_graph = Box::new(create_graph2);
     let g = ro.run(&Vec::new()).unwrap();
-    //    let new_history = g.new_history();
+    //    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("TA") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
@@ -1255,7 +1254,7 @@ fn test_epheremal_chained_invalidate_intermediate() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    //    let new_history = g.new_history();
+    //    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("TA") == Some(&1));
     assert!(ro.run_counters.get("TB") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
@@ -1313,7 +1312,7 @@ fn test_ephemeral_adding_output() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
-    //    let new_history = g.new_history();
+    //    let new_history = g.new_history().unwrap();
     assert!(ro.run_counters.get("TA") == Some(&1));
     assert!(ro.run_counters.get("TB") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
@@ -1522,7 +1521,7 @@ fn test_no_storing_removed_links_in_history() {
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     ro.outputs.insert("A".to_string(), "AAA".to_string());
     let g = ro.run(&Vec::new()).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(history.contains_key("A!!!B"));
     assert!(ro.run_counters.get("A") == Some(&1));
     assert!(ro.run_counters.get("B") == Some(&1));
@@ -1535,14 +1534,14 @@ fn test_no_storing_removed_links_in_history() {
     ro.outputs.insert("A".to_string(), "AAAA".to_string());
     ro.already_done.remove("A");
     let g = ro.run(&Vec::new()).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(!history.contains_key("A!!!B"));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&2)); // after all, we lost an input
 
     ro.setup_graph = Box::new(create_graph);
     let g = ro.run(&Vec::new()).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(history.contains_key("A!!!B"));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&3)); // we regained the input.
@@ -1560,7 +1559,7 @@ fn test_job_removed_input_changed_job_restored() {
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     ro.outputs.insert("A".to_string(), "AAA".to_string());
     let g = ro.run(&Vec::new()).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(history.contains_key("A!!!B"));
     assert!(ro.run_counters.get("A") == Some(&1));
     assert!(ro.run_counters.get("B") == Some(&1));
@@ -1572,7 +1571,7 @@ fn test_job_removed_input_changed_job_restored() {
     ro.outputs.insert("A".to_string(), "AAAA".to_string());
     ro.already_done.remove("A");
     let g = ro.run(&Vec::new()).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(history.contains_key("A!!!B"));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&1)); // after all, we lost an input
@@ -1580,7 +1579,7 @@ fn test_job_removed_input_changed_job_restored() {
                                                    //
     ro.setup_graph = Box::new(create_graph);
     let g = ro.run(&Vec::new()).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(history.contains_key("A!!!B"));
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.run_counters.get("B") == Some(&2)); // we regained
@@ -1671,12 +1670,12 @@ fn test_failure_does_not_store_history_link() {
 
     let g = ro.run(&["B"]).unwrap();
     assert!(!ro.already_done.contains("B"));
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(!history.contains_key("A!!!B"));
     assert!(ro.run_counters.get("B") == Some(&1));
 
     let g = ro.run(&[]).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(ro.run_counters.get("B") == Some(&2));
     assert!(ro.already_done.contains("B"));
     assert!(history.contains_key("A!!!B"));
@@ -1686,7 +1685,7 @@ fn test_failure_does_not_store_history_link() {
     ro.outputs
         .insert("A".to_string(), "trigger_inval".to_string());
     let g = ro.run(&["B"]).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(ro.run_counters.get("B") == Some(&3));
     assert!(*history.get("A!!!B").unwrap() == old_ab);
 }
@@ -1698,14 +1697,14 @@ fn test_failure_does_not_store_history_for_job() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&["A"]).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     dbg!(&history);
     assert!(history.is_empty());
     assert!(ro.run_counters.get("A") == Some(&1));
     assert!(!ro.already_done.contains("A"));
 
     let g = ro.run(&[]).unwrap();
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
     assert!(!history.is_empty());
     assert!(ro.run_counters.get("A") == Some(&2));
     assert!(ro.already_done.contains("A"));
@@ -1723,7 +1722,7 @@ fn test_no_cleanup_if_downstream_failes() {
     assert!(!ro.already_done.contains("B"));
     assert!(ro.already_done.contains("TA"));
     assert!(!ro.cleaned_up.contains("TA"));
-    let history = g.new_history();
+    let history = g.new_history().unwrap();
 }
 #[test]
 fn test_correct_storing_of_skipped_ephemerals() {
