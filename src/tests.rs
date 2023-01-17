@@ -1,3 +1,4 @@
+#![allow(unused_variables)]
 /* ↓ ←➔ ↑ */
 #![allow(unused_macros)]
 use std::collections::{HashMap, HashSet};
@@ -1631,7 +1632,6 @@ fn test_two_temp_jobs() {
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
 
-
     let g = ro.run(&Vec::new()).unwrap();
     assert!(ro.run_counters.get("TA") == Some(&1));
     assert!(ro.run_counters.get("TB") == Some(&1));
@@ -1641,25 +1641,23 @@ fn test_two_temp_jobs() {
 
 #[test]
 fn test_file_exists() {
-    fn test_two_temp_jobs() {
-        fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
-            g.add_node("b", JobKind::Output);
-            g.add_node("load_b", JobKind::Ephemeral);
-            g.add_node("A", JobKind::Output);
-            g.add_node("FIA", JobKind::Always);
-            g.depends_on("load_b", "b");
-            g.depends_on("A", "load_b");
-            g.depends_on("A", "FIA");
-        }
-        let mut ro = TestGraphRunner::new(Box::new(create_graph));
-        ro.already_done.insert("b".to_string());
-        let g = ro.run(&Vec::new()).unwrap();
-
-        assert!(ro.run_counters.get("FIA") == Some(&1));
-        assert!(ro.run_counters.get("A") == Some(&1));
-        assert!(ro.run_counters.get("load_b") == Some(&1));
-        assert!(ro.run_counters.get("b") == Some(&1)); // we had no history, so we need to rerun
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("b", JobKind::Output);
+        g.add_node("load_b", JobKind::Ephemeral);
+        g.add_node("A", JobKind::Output);
+        g.add_node("FIA", JobKind::Always);
+        g.depends_on("load_b", "b");
+        g.depends_on("A", "load_b");
+        g.depends_on("A", "FIA");
     }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    ro.already_done.insert("b".to_string());
+    let g = ro.run(&Vec::new()).unwrap();
+
+    assert!(ro.run_counters.get("FIA") == Some(&1));
+    assert!(ro.run_counters.get("A") == Some(&1));
+    assert!(ro.run_counters.get("load_b") == Some(&1));
+    assert!(ro.run_counters.get("b") == Some(&1)); // we had no history, so we need to rerun
 }
 
 #[test]
@@ -1713,13 +1711,12 @@ fn test_failure_does_not_store_history_for_job() {
     assert!(ro.already_done.contains("A"));
 }
 
-
 #[test]
 fn test_no_cleanup_if_downstream_failes() {
-  fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("TA", JobKind::Ephemeral);
         g.add_node("B", JobKind::Output);
-        g.depends_on("B","TA");
+        g.depends_on("B", "TA");
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&["B"]).unwrap();
@@ -1727,10 +1724,8 @@ fn test_no_cleanup_if_downstream_failes() {
     assert!(ro.already_done.contains("TA"));
     assert!(!ro.cleaned_up.contains("TA"));
     let history = g.new_history();
-
 }
 #[test]
-fn test_always_as_root() {
-    start_logging();
-    crate::test_big_graph_in_layers(2,3,2);        
+fn test_correct_storing_of_skipped_ephemerals() {
+    crate::test_big_graph_in_layers(2, 3, 2);
 }

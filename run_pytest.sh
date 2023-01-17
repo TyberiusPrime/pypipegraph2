@@ -5,4 +5,4 @@ export CARGO_TARGET_DIR=target_pyloop c
 echo "cargo test"
 cargo test
 echo "pytest"
-RUST_LOG=debug pytest $@
+RUST_BACKTRACE=1 RUST_LOG=debug pytest $@
