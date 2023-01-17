@@ -11,6 +11,7 @@ ljt = log_job_trace
 def history_is_different(runner, job_upstream_id, job_downstream_id, str_last, str_now):
     # note that at this point, we already know str_last != str_now,
     # that was tested in rust
+    # log_error(f"history is different {job_upstream_id} {job_downstream_id}")
     job_upstream = runner.jobs[job_upstream_id]
     obj_last = json.loads(str_last)
     obj_now = json.loads(str_now)
@@ -21,6 +22,7 @@ def history_is_different(runner, job_upstream_id, job_downstream_id, str_last, s
             if ip in outputs:
                 altered = not job_upstream.compare_hashes(obj_last[ip], obj_now[ip])
                 if altered:
+                    # log_error(f"Was altered {obj_last[ip]} {obj_now[ip]}")
                     return True
     except:
         exception_type, exception_value, tb = sys.exc_info()
@@ -32,4 +34,5 @@ def history_is_different(runner, job_upstream_id, job_downstream_id, str_last, s
         log_error(f"{captured_tb}")
         raise
 
+    # log_error(f"history the same {job_upstream_id} {job_downstream_id}")
     return False

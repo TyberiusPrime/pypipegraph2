@@ -1,3 +1,4 @@
+from multiprocessing.sharedctypes import Value
 from typing import Optional, Union, Dict
 import gzip
 import threading
@@ -216,7 +217,11 @@ class PyPipeGraph:
             self._install_signals()
             try:
                 history = self._load_history()
+                #REMOVE
+                import pprint
+                pprint.pprint(history)
             except Exception as e:
+                log_error(f"{e}")
                 raise exceptions.HistoryLoadingFailed(e)
             max_runs = 5
             jobs_already_run = set()
@@ -232,6 +237,7 @@ class PyPipeGraph:
                     do_break = False
                     job_count = len(self.job_dag)
                     try:
+                        print("Run history")
                         self.runner = Runner(
                             self,
                             history,
@@ -243,9 +249,7 @@ class PyPipeGraph:
                             self._jobs_do_dump_subgraph_debug,
                         )
                         result, new_history = self.runner.run(
-                            history,
-                            result,
-                            print_failures=print_failures
+                            history, result, print_failures=print_failures
                         )
                         aborted = self.runner.aborted
                         del self.runner
@@ -257,7 +261,9 @@ class PyPipeGraph:
                     self._log_runtimes(result, start_time)
                     # assert len(result) == job_count # does not account for cleanup jobs...
                     # leave out the cleanup jobs added virtually by the run
-                    jobs_already_run.update((k for k in result.keys() if k in self.jobs))
+                    jobs_already_run.update(
+                        (k for k in result.keys() if k in self.jobs)
+                    )
                     log_info(f"Result len {len(result)}")
                     for k, v in result.items():
                         if (
@@ -276,6 +282,7 @@ class PyPipeGraph:
             except KeyboardInterrupt:
                 self.do_raise.append(KeyboardInterrupt())
             del result
+            print("leave history")
             log_info(f"Left graph loop {len(final_result)}")
             jobs_failed = False
             for job_id, job_state in final_result.items():
@@ -285,7 +292,9 @@ class PyPipeGraph:
             self.last_run_result = final_result
             if raise_on_job_error and self.do_raise and not self._restart_afterwards:
                 if jobs_failed:
-                    raise exceptions.JobsFailed("At least one job failed", self.do_raise)
+                    raise exceptions.JobsFailed(
+                        "At least one job failed", self.do_raise
+                    )
                 else:
                     raise exceptions.RunFailedInternally()
             elif not raise_on_job_error and self.do_raise:
@@ -294,6 +303,9 @@ class PyPipeGraph:
                 raise KeyboardInterrupt("Run aborted")  # pragma: no cover
             ok = True
             return final_result
+        except Exception as e:
+            print(e)
+            raise
         finally:
             if ok:
                 log_info("Run is done")
@@ -393,6 +405,7 @@ class PyPipeGraph:
     def _load_history(self):
         log_trace("_load_history")
         fn = self.get_history_filename()
+        self._convert_old_history()
         history = {}
         if fn.exists():
             log_trace("Historical existed")
@@ -414,16 +427,104 @@ class PyPipeGraph:
             with gzip.GzipFile(fn, "wb") as op:
                 try:
                     op.write(json.dumps(historical, indent=2).encode("utf-8"))
-                    if self._test_failing_outside_of_job: # for unit test
+                    if self._test_failing_outside_of_job:  # for unit test
                         self._test_failing_outside_of_job = False
                         log_error("keyboard interrupt raised in loop")
-                        raise KeyboardInterrupt('simulated')
+                        raise KeyboardInterrupt("simulated")
                     try_again = False
                 except KeyboardInterrupt:
                     raise_keyboard_interrupt = True
         if raise_keyboard_interrupt:
             log_error("Keyboard interrupt during history dumping")
             raise KeyboardInterrupt()
+
+    def _convert_old_history(self):
+        """Convert pre-rust history,
+        by assuming that it's the same graph, and you changed *nothing* else in the upgrade
+        """
+        old_filename = self.history_dir / "ppg_history.gz"
+        new_filename = self.get_history_filename()
+        if not old_filename.exists():
+            return
+
+        def failed(reason):
+            sys.stderr.write("Could not convert history.\n")
+            sys.stderr.write(f"Reason: {reason}.\n\n")
+            sys.stderr.write(
+                f"Safe choice: Remove {self.history_dir}, rebuild everything\n"
+            )
+            sys.stderr.write(
+                f"Unsafe choice: Remove {self.history_dir}/ppg_history.gz, keeping ppg_history.2.gz.\n"
+            )
+            sys.stderr.write(
+                "The old history had no knowledge of the set of inputs of a job\n"
+            )
+            sys.stderr.write(
+                "So for the new one we must assume that those did not change.\n"
+            )
+
+            sys.stderr.write("And we can't do that automatically.\n")
+            sys.stderr.write("\nAborting\n")
+            sys.exit(1)
+
+        if old_filename.exists() and new_filename.exists():
+            raise ValueError(
+                "Both new and old history existed. Presumably a failed conversion job. Aborting"
+            )
+        log_warning("Converting old history to new style")
+
+        old = self._load_old_history(old_filename)  # todo
+        new = {}
+        # for job_id in self.jobs.keys():
+        # new[job_id] = json.dumps(old[job_id], indent=2)
+
+        import pprint
+
+        for job_id, job in self.jobs.items():
+            upstreams = job.upstreams
+            incoming_edges = sorted([x.job_id for x in upstreams])
+            new[job_id + "!!!"] = "\n".join(incoming_edges)
+            new[job_id] = json.dumps(old[job_id][1])  # 1, that's the output hash.
+
+            for input_name in self.job_inputs[job_id]:
+                upstream_job_id = self.outputs_to_job_ids[input_name]
+                key = f"{upstream_job_id}!!!{job_id}"
+                new[key] = json.dumps(
+                    {input_name: old[job_id][0][input_name]}
+                )  # 0 - that's the input hashs.
+
+        for k, v in new.items():
+            if not isinstance(v, str):
+                raise ValueError(k, v)
+        self._save_history(new)
+
+        keys = set(self.jobs.keys())
+        if len(old) != len(keys):
+            missing = set(old.keys()).difference(keys)
+            gained = set(keys).difference(old.keys())
+            return failed(
+                f"Number of jobs changed. Was {len(old)} is now {len(keys)}. Missing {missing}. Gained: {gained}"
+            )
+        if keys != set(old):
+            return failed("Job names changed")
+
+        old_filename.rename(old_filename.with_suffix(".1.gz.converted_to_2_format"))
+
+    @staticmethod
+    def _load_old_history(path):
+        with gzip.GzipFile(Path(path)) as of:
+
+            old = {}
+            try:
+                while True:
+                    key = pickle.load(of)
+                    value = pickle.load(of)
+                    if key in old:
+                        raise KeyError()
+                    old[key] = value
+            except EOFError:
+                pass
+        return old
 
     def _resolve_dependency_callbacks(self):
         """jobs may depend on functions that return their actual dependencies.

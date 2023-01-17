@@ -1919,6 +1919,28 @@ class TestMultiTempFileGeneratingJob:
         with pytest.raises(TypeError):
             ppg.MultiTempFileGeneratingJob(25, lambda of: write("out/A", param))
 
+    def test_adding_another_that_downstream_does_not_depend_on_does_not_retrigger(self):
+        def do_a(ofs):
+            counter('a')
+            for of in ofs:
+                of.write_text(of.name)
+        jobA = ppg.MultiFileGeneratingJob(['A','B'], do_a)
+        jobB = ppg.FileGeneratingJob("C", lambda of: counter('c') and of.write_text(of))
+        jobB.depends_on("C")
+        ppg.run()
+        assert Path('C').read_text('C')
+        assert Path('c').read_text('1')
+
+        jobA = ppg.MultiFileGeneratingJob(['A','B','D'], do_a)
+        ppg.run()
+        assert Path('D').read_text('D')
+        assert Path('C').read_text('C')
+        assert Path('a').read_text('2')
+        assert Path('c').read_text('1')
+
+
+
+
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestNoDotDotInJobIds:
