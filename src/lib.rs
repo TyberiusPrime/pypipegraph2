@@ -25,12 +25,16 @@ static LOGGER_INIT: Once = Once::new();
 pub enum PPGEvaluatorError {
     #[error("API error. You're holding it wrong")]
     APIError(String),
-    #[error("Ephemeral {job_id} was validated, but rerun for downstreams. It changed output, violating the constant input->constant output assumption. Output was \n'{last_history}' is now \n'{new_history}'")]
+    #[error("Ephemeral {job_id} was validated, but rerun for downstreams. It changed output, violating the constant input->constant output assumption. Output was \n'{last_history}' is now \n'{new_history}'. You are holding it very wrong.")]
     EphemeralChangedOutput {
         job_id: String,
         last_history: String,
         new_history: String,
     },
+    #[error(
+        "Internal error. Something in the pipegraph2 engine is wrong. Graph execution aborted."
+    )]
+    InternalError(String),
 }
 pub trait PPGEvaluatorStrategy {
     fn output_already_present(&self, query: &str) -> bool;
@@ -186,6 +190,7 @@ impl TestGraphRunner {
                             PPGEvaluatorError::EphemeralChangedOutput { .. } => {
                                 debug!("EphemeralChangedOutput error. ignoring for tests");
                             }
+                            PPGEvaluatorError::InternalError(x) => panic!("internal error {}", x),
                         },
                     }
                 }
@@ -206,7 +211,7 @@ impl TestGraphRunner {
         }
 
         self.history.clear();
-        for (k, v) in g.new_history().iter() {
+        for (k, v) in g.new_history()?.iter() {
             self.history.insert(k.clone(), v.clone());
         }
         for k in already_done2.take().into_iter() {
@@ -435,8 +440,8 @@ impl PyPPG2Evaluator {
         self.evaluator.is_finished()
     }
 
-    pub fn new_history(&self) -> HashMap<String, String> {
-        self.evaluator.new_history()
+    pub fn new_history(&self) -> Result<HashMap<String, String>, PyErr> {
+        Ok(self.evaluator.new_history()?)
     }
 
     pub fn get_job_output(&self, job_id: &str) -> Result<String, PyErr> {
