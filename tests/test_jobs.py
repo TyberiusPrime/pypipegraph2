@@ -1925,18 +1925,21 @@ class TestMultiTempFileGeneratingJob:
             for of in ofs:
                 of.write_text(of.name)
         jobA = ppg.MultiFileGeneratingJob(['A','B'], do_a)
-        jobB = ppg.FileGeneratingJob("C", lambda of: counter('c') and of.write_text(of))
-        jobB.depends_on("C")
+        jobB = ppg.FileGeneratingJob("C", lambda of: counter('c') and of.write_text(of.name))
+        jobB.depends_on("A")
         ppg.run()
-        assert Path('C').read_text('C')
-        assert Path('c').read_text('1')
+        assert Path('C').read_text() == 'C'
+        assert Path('c').read_text() == '1'
 
+        ppg.new()
         jobA = ppg.MultiFileGeneratingJob(['A','B','D'], do_a)
+        jobB = ppg.FileGeneratingJob("C", lambda of: counter('c') and of.write_text(of.name))
+        jobB.depends_on("A")
         ppg.run()
-        assert Path('D').read_text('D')
-        assert Path('C').read_text('C')
-        assert Path('a').read_text('2')
-        assert Path('c').read_text('1')
+        assert Path('D').read_text() == 'D'
+        assert Path('C').read_text() == 'C'
+        assert Path('a').read_text() == '2'
+        assert Path('c').read_text() == '1'
 
 
 
