@@ -4,6 +4,19 @@ build-backend = "maturin"
 
 [project]
 name = "pypipegraph2"
+version = "3.0.0"
+description = "Advanced python 'what changed and what do we need to do' tracking"
+license = "MIT"
+long-description = "README.md"
+authors = [
+ {"name" = "Florian Finkernagel", "email" = "finkernagel@imt.uni-marburg.de"}
+]
+classifiers = [
+	"Development Status :: 4 - Beta",
+	"Programming Language :: Python",
+]
+urls = {"homepage": "https://github.com/TyberiusPrime/pypipegraph2"}
+
 requires-python = ">=3.7"
 dependencies = [
 	"loguru",
