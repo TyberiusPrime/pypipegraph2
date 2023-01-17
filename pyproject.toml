@@ -15,7 +15,7 @@ classifiers = [
 	"Development Status :: 4 - Beta",
 	"Programming Language :: Python",
 ]
-urls = {"homepage": "https://github.com/TyberiusPrime/pypipegraph2"}
+urls = {"homepage"= "https://github.com/TyberiusPrime/pypipegraph2"}
 
 requires-python = ">=3.7"
 dependencies = [
