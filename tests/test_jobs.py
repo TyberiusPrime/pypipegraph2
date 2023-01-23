@@ -1926,7 +1926,7 @@ class TestMultiTempFileGeneratingJob:
                 of.write_text(of.name)
         jobA = ppg.MultiFileGeneratingJob(['A','B'], do_a)
         jobB = ppg.FileGeneratingJob("C", lambda of: counter('c') and of.write_text(of.name))
-        jobB.depends_on("A")
+        jobB.depends_on("A") # note how this depends on the file "A", not the job jobA.
         ppg.run()
         assert Path('C').read_text() == 'C'
         assert Path('c').read_text() == '1'
@@ -1935,6 +1935,7 @@ class TestMultiTempFileGeneratingJob:
         jobA = ppg.MultiFileGeneratingJob(['A','B','D'], do_a)
         jobB = ppg.FileGeneratingJob("C", lambda of: counter('c') and of.write_text(of.name))
         jobB.depends_on("A")
+        ppg.pypipegraph2.enable_logging()
         ppg.run()
         assert Path('D').read_text() == 'D'
         assert Path('C').read_text() == 'C'
