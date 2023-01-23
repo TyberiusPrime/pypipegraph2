@@ -192,10 +192,14 @@ macro_rules! set_node_state {
             $node.job_id, $node.state, $new_state
         );
         match ($node.state, $new_state) {
-            (JobState::Always(_), JobState::Always(_)) => {}
-            (JobState::Output(_), JobState::Output(_)) => {}
-            (JobState::Ephemeral(_), JobState::Ephemeral(_)) => {}
-            _ => panic!("Moving a job between kinds"), // if you encounter this from python, the
+            (JobState::Always(_), JobState::Always(_)) |
+            (JobState::Output(_), JobState::Output(_)) |
+            (JobState::Ephemeral(_), JobState::Ephemeral(_)) => {},
+
+            (JobState::Always(_), _other) |
+            (JobState::Ephemeral(_), _other) |
+            (JobState::Output(_), _other)
+             => panic!("Moving a job between kinds"), // if you encounter this from python, the
                                                        // sky must be falling
         }
         $node.state = $new_state;
