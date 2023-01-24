@@ -403,6 +403,7 @@ class Runner:
         """
         self.abort_time = time.time()
         self.aborted = True
+        print("set 2")
         self.check_for_new_jobs.set()
         self.evaluation_done.set()
         for t in self.threads:
@@ -617,9 +618,11 @@ class Runner:
                                         self._start_another_thread()
                         # letting go of evaluator lock
                         if do_sleep:
-                            self.check_for_new_jobs.wait(5)
+                            self.check_for_new_jobs.wait(60) # not sure why we even have a timeout?
                             self.check_for_new_jobs.clear()
                             continue
+                        else:
+                            print("no sleep")
 
                         # ljt(f"wait for {job_id}")
                         if c == 0:
@@ -763,10 +766,13 @@ class Runner:
                                         )
 
                             self.job_outcomes[job_id].run_time = job.run_time
+                            print("set 1", job_id)
+                            self.check_for_new_jobs.set()
                         elif error:
                             print(error)
+                            print("set 1", job_id)
+                            self.check_for_new_jobs.set()
                             raise error
-                        self.check_for_new_jobs.set()
 
             except (KeyboardInterrupt, SystemExit):  # happens on abort
                 log_trace(

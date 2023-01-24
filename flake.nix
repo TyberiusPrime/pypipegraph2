@@ -191,6 +191,7 @@
         bacon
         mypython
         pkgs.maturin
+        pkgs.py-spy
       ];
     };
   };
