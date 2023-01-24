@@ -622,7 +622,7 @@ class Runner:
                             self.check_for_new_jobs.clear()
                             continue
                         else:
-                            print("no sleep")
+                            pass
 
                         # ljt(f"wait for {job_id}")
                         if c == 0:
@@ -766,11 +766,9 @@ class Runner:
                                         )
 
                             self.job_outcomes[job_id].run_time = job.run_time
-                            print("set 1", job_id)
                             self.check_for_new_jobs.set()
                         elif error:
                             print(error)
-                            print("set 1", job_id)
                             self.check_for_new_jobs.set()
                             raise error
 
