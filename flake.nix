@@ -31,7 +31,10 @@
       // {
         cargo = rust;
         rustc = rust;
-        cargo-binutils = pkgs.cargo-binutils.override { cargo = rust; rustc=rust;};
+        cargo-binutils = pkgs.cargo-binutils.override {
+          cargo = rust;
+          rustc = rust;
+        };
       };
 
     naersk-lib = naersk.lib."${system}".override {
@@ -74,6 +77,19 @@
         ];
         requirementsExtra = ''
           maturin
+        '';
+        requirements = ''
+          pytest
+           pytest-mock
+           loguru
+           rich
+           xxhash
+           wrapt
+           deepdiff
+           psutil
+           networkx
+           cython
+
         '';
         format = "pyproject";
       };
