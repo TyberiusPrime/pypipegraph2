@@ -74,6 +74,7 @@
           pkgs.cargo
           pkgs.openssl.dev
           pkgs.perl
+          pkgs.maturin
         ];
         requirementsExtra = ''
           maturin
