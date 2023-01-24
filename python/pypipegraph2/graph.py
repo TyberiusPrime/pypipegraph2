@@ -217,9 +217,6 @@ class PyPipeGraph:
             self._install_signals()
             try:
                 history = self._load_history()
-                #REMOVE
-                import pprint
-                pprint.pprint(history)
             except Exception as e:
                 log_error(f"{e}")
                 raise exceptions.HistoryLoadingFailed(e)
