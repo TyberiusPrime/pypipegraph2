@@ -32,7 +32,7 @@ pub enum PPGEvaluatorError {
         new_history: String,
     },
     #[error(
-        "Internal error. Something in the pipegraph2 engine is wrong. Graph execution aborted."
+        "Internal error. Something in the pipegraph2 engine is wrong. Graph execution aborted. Msg was {0}"
     )]
     InternalError(String),
 }
