@@ -906,7 +906,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     j,
                                     JobState::Output(JobStateOutput::FinishedSkipped)
                                 );
-                                j.history_output = self.history.get(&j.job_id).cloned();
+                                match self.history.get(&j.job_id) {
+                                    Some(x) => j.history_output = Some(x.to_string()),
+                                    None => 
+                                        return Err(PPGEvaluatorError::InternalError(format!(
+                                        "Skipped job, but no history was available? {:?}", 
+                                        j)))
+                                }
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(format!(
@@ -1205,7 +1211,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         let current_value =
                             jobs[upstream_idx].history_output.as_ref().ok_or_else(|| {
                                 PPGEvaluatorError::InternalError(format!(
-                                    "No history? Unexpected {:?}",
+                                    "No current history for job? Unexpected {:?}",
                                     &jobs[upstream_idx]
                                 ))
                             })?;
@@ -1730,7 +1736,19 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     }
                     JobState::Output(_) => {
                         if self.strategy.output_already_present(&job.job_id) {
-                            Self::set_upstream_edges(&mut self.dag, node_idx, Required::No)
+                            if self.history.contains_key(&job.job_id) {
+                                Self::set_upstream_edges(&mut self.dag, node_idx, Required::No)
+                            } else {
+                                warn!("output present, but we had no history for {}, redoing", 
+                                      &job.job_id);
+                                Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
+                                set_node_state!(
+                                    job,
+                                    JobState::Output(JobStateOutput::NotReady(
+                                        ValidationStatus::Invalidated,
+                                    ))
+                                );
+                            }
                         } else {
                             Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
                             debug!("output was missing {}", &job.job_id);
