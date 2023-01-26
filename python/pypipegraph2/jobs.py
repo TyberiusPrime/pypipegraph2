@@ -918,7 +918,11 @@ class MultiFileGeneratingJob(Job):
                 stderr.close()
                 os.unlink(stderr.name)
                 exception_out.close()
-                os.unlink(exception_out.name)
+                # log_error(f"unlinking {exception_out.name}")
+                try:
+                    os.unlink(exception_out.name)
+                except FileNotFoundError:
+                    log_error(f"file not found for unlinking? {exception_out.name}")
 
                 self.pid = None
         else:
@@ -2292,6 +2296,7 @@ def PlotJob(  # noqa:C901
 
     return PlotJobTuple(plot_job, cache_job, table_job)
 
+_SharedMultiFileGeneratingJob_log_local_lock = Lock()
 
 class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
     """A shared MultiFileGeneratingJob.
@@ -2323,7 +2328,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
 
     eval_job_kind = "Output"
 
-    _log_local_lock = Lock()
     log_filename = "SharedMultiFileGeneratingJobs.json"
     run_only_post_validation = True
 
@@ -2603,7 +2607,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         from . import global_pipegraph
 
         fn = global_pipegraph.history_dir / SharedMultiFileGeneratingJob.log_filename
-        with SharedMultiFileGeneratingJob._log_local_lock:
+        with _SharedMultiFileGeneratingJob_log_local_lock: 
             if fn.exists():
                 keys = json.loads(fn.read_text())
             else:
