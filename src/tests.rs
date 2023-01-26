@@ -1728,3 +1728,13 @@ fn test_no_cleanup_if_downstream_failes() {
 fn test_correct_storing_of_skipped_ephemerals() {
     crate::test_big_graph_in_layers(2, 3, 2);
 }
+
+#[test]
+fn test_if_present_but_history_removed() {
+    todo!()
+}
+
+#[test]
+fn test_multi_file_job_gaining_output() {
+    todo!()
+}
