@@ -1,7 +1,10 @@
 #[allow(unused_imports)]
 use log::{debug, error, info, warn};
 use petgraph::{graphmap::GraphMap, Directed, Direction};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet, VecDeque},
+};
 
 use crate::{PPGEvaluatorError, PPGEvaluatorStrategy};
 
@@ -176,10 +179,20 @@ impl JobQueries for JobStateEphemeral {
 }
 
 #[derive(Clone, Debug)]
-struct NodeInfo {
+pub(crate) struct NodeInfo {
     job_id: String,
     state: JobState,
     history_output: Option<String>,
+}
+
+impl NodeInfo {
+    pub(crate) fn clone_job_id(&self) -> String {
+        self.job_id.clone()
+    }
+
+    pub(crate) fn get_job_id(&self) -> &str {
+        &self.job_id
+    }
 }
 
 macro_rules! set_node_state {
@@ -282,11 +295,11 @@ pub enum JobOutputResult {
     NotDone,
 }
 
-type NodeIndex = usize;
+pub(crate) type NodeIndex = usize;
 
-type GraphType = GraphMap<NodeIndex, EdgeInfo, Directed>;
+pub(crate) type GraphType = GraphMap<NodeIndex, EdgeInfo, Directed>;
 
-pub struct PPGEvaluator<T: PPGEvaluatorStrategy> {
+pub(crate) struct PPGEvaluator<T: PPGEvaluatorStrategy> {
     dag: GraphType,
     jobs: Vec<NodeInfo>,
     job_id_to_node_idx: HashMap<String, NodeIndex>,
@@ -300,6 +313,7 @@ pub struct PPGEvaluator<T: PPGEvaluatorStrategy> {
 }
 
 impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
+    #[allow(dead_code)] // used for testing
     pub fn new(strategy: T) -> Self {
         // todo: get rid of the box for the caller at least?
         Self::new_with_history(HashMap::new(), strategy)
@@ -397,6 +411,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         true
     }
 
+    #[allow(dead_code)]
     pub fn debug_(&self) -> String {
         Self::debug(&self.dag, &self.jobs)
     }
@@ -419,6 +434,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
 
     #[allow(clippy::ptr_arg)]
+    #[allow(dead_code)]
     pub fn verify_order_was_topological(&self, order: &Vec<String>) -> bool {
         /*
         Iterate through the edges in G. For each edge, retrieve the index of each of its vertices
@@ -454,6 +470,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         self.jobs_ready_for_cleanup.clone()
     }
 
+    #[allow(dead_code)] // used in testing
     pub fn query_failed(&self) -> HashSet<String> {
         // not worth keeping a list to prevent the scanning
         // called typically only once per graph
@@ -517,7 +534,15 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         //no !!! -> job output.
         //ends with !!! -> the list of named inputs
         //x!!!y -> input x for job y.
-        //todo: consider splitting into multiple?
+        //todo: consider splitting into multiple functions?
+        let mut multi_output_job_filtered_outputs = HashSet::new();
+        for j in self.jobs.iter() {
+            if j.job_id.contains(":::") {
+                for output_name in j.job_id.split(":::") {
+                    multi_output_job_filtered_outputs.insert(output_name.to_string());
+                }
+            }
+        }
         let mut out = self.history.clone();
         let mut out: HashMap<_, _> = out
             .drain()
@@ -531,13 +556,35 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             (Some(node_idx_a), Some(node_idx_b)) => {
                                 self.dag.edge_weight(*node_idx_a, *node_idx_b).is_some()
                             }
-                            _ => true,
+                            _ => {
+                                for output_name in job_id_a.split(":::") {
+                                    if multi_output_job_filtered_outputs.contains(output_name) {
+                                        return false;
+                                    }
+                                }
+
+                                true
+                            }
                         }
                     } else {
                         // a node uplink entry.
+                        for output_name in job_id_a.split(":::") {
+                            if multi_output_job_filtered_outputs.contains(output_name) {
+                                return false;
+                            }
+                        }
+
                         true
                     }
                 } else {
+                    // when MultiFileGeneratingJobs
+                    // get renamed, we need to make sure we don't keep
+                    // old history around
+                    for output_name in k.split(":::") {
+                        if multi_output_job_filtered_outputs.contains(output_name) {
+                            return false;
+                        }
+                    }
                     true // a node entry
                 }
             })
@@ -546,7 +593,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         for (idx, job) in self.jobs.iter().enumerate() {
             //step 1: record what jobs when into this one
 
-            //step 2: record the actualy output of this job
+            //step 2: record the actual output of this job
             // (are we using this anywhere?)
 
             let key = job.job_id.to_string();
@@ -554,7 +601,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             let input_name_key = format!("{}!!!", job.job_id);
             if job_was_success {
                 // if the job did not succeed, we want it to rerun!
-                out.insert(input_name_key, self.name_job_inputs(idx));
+                out.insert(
+                    input_name_key,
+                    self.strategy.get_input_list(idx, &self.dag, &self.jobs),
+                );
 
                 let history = match &job.history_output {
                     Some(new_history) => new_history,
@@ -908,10 +958,12 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 );
                                 match self.history.get(&j.job_id) {
                                     Some(x) => j.history_output = Some(x.to_string()),
-                                    None => 
+                                    None => {
                                         return Err(PPGEvaluatorError::InternalError(format!(
-                                        "Skipped job, but no history was available? {:?}", 
-                                        j)))
+                                            "Skipped job, but no history was available? {:?}",
+                                            j
+                                        )))
+                                    }
                                 }
                             }
                             _ => {
@@ -1185,6 +1237,50 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         downstreams.next().is_some()
     }
 
+    fn try_finding_renamed_multi_output_job(
+        missing_upstream_id: &str,
+        downstream_id: &str,
+        history: &HashMap<String, String>,
+    ) -> Option<String> {
+        // since multi file output jobs change their names
+        // but we only invalidate based on the actual job inputs
+        // we need to rematch them here.
+        // upstream_id is the job we have 'lost' from our set of inputs
+        //
+        let missing_upstream_outputs: HashSet<String> = missing_upstream_id
+            .split(":::")
+            .map(|x| x.to_string())
+            .collect();
+
+        let mut best = None;
+        let mut best_count = 0;
+        let query = format!("!!!{}", downstream_id);
+        for history_entry in history.keys() {
+            if history_entry.ends_with(&query) {
+                let (historical_upstream_id, _downstream_idx) =
+                    history_entry.split_once("!!!").unwrap(); // we know there's !!! in there and at moste once because we check the job_ids
+
+                debug!(
+                    "hunting for old name for {} - considering {}",
+                    missing_upstream_id, historical_upstream_id
+                );
+                let historical_upstream_outputs: HashSet<String> = historical_upstream_id
+                    .split(":::")
+                    .map(|x| x.to_string())
+                    .collect();
+                let overlap = historical_upstream_outputs
+                    .intersection(&missing_upstream_outputs)
+                    .count();
+                if overlap > best_count {
+                    best_count = overlap;
+                    best = Some(historical_upstream_id.to_string())
+                }
+            }
+        }
+
+        best
+    }
+
     fn edge_invalidated(
         dag: &mut GraphType,
         strategy: &dyn PPGEvaluatorStrategy,
@@ -1206,8 +1302,40 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 let downstream_id = &jobs[downstream_idx].job_id;
                 let key = format!("{}!!!{}", upstream_id, downstream_id); //todo: express onlyonce
                 let last_history_value = history.get(&key); //todo: fight alloc
+                let last_history_value: Option<Cow<_>> = match last_history_value {
+                    Some(l) => Some(Cow::from(l)),
+                    None => {
+                        //if upstream_id.contains(":::")
+                        // a 'multi file generating job' in the
+                        // python portion
+                        // the rust part needs to be aware of them for the history
+                        // filtering anyway, so might as well do it here.
+                        // note that a FG can become an MFG and visa versa,
+                        // so skipping out on jobs not containging ":::"
+                        // can't be done.
+                        //{
+                            match Self::try_finding_renamed_multi_output_job(
+                                upstream_id,
+                                downstream_id,
+                                history,
+                            ) {
+                                Some(x) => {
+                                    debug!(
+                                        "No history for {}, but found {} to use instead",
+                                        upstream_id, x
+                                    );
+                                    history.get(&x).map(Cow::from)
+                                }
+                                None => None,
+                            }
+                        /* } else {
+                            None
+                        } */
+                    }
+                };
                 match last_history_value {
                     Some(last_history_value) => {
+                        // debug!("Had last history value: '{}'", last_history_value);
                         let current_value =
                             jobs[upstream_idx].history_output.as_ref().ok_or_else(|| {
                                 PPGEvaluatorError::InternalError(format!(
@@ -1218,22 +1346,26 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         if strategy.is_history_altered(
                             upstream_id,
                             downstream_id,
-                            last_history_value,
+                            &last_history_value,
                             current_value,
                         ) {
                             dag.edge_weight_mut(upstream_idx, downstream_idx)
                                 .unwrap()
                                 .invalidated = Required::Yes;
+
+                            debug!("\t\t\t had history - edge invalidated");
                             Ok(true)
                         } else {
                             dag.edge_weight_mut(upstream_idx, downstream_idx)
                                 .unwrap()
                                 .invalidated = Required::No;
+                            debug!("\t\t\t had history - edge not invalidated");
                             Ok(false)
                         }
                     }
 
                     None => {
+                        debug!("\t\t\t no history - edge invalidated");
                         dag.edge_weight_mut(upstream_idx, downstream_idx)
                             .unwrap()
                             .invalidated = Required::Yes;
@@ -1262,9 +1394,16 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 if
                 // !jobs[upstream_idx as usize].state.is_skipped() &&
                 Self::edge_invalidated(dag, strategy, jobs, history, upstream_idx, node_idx)? {
+                    debug!(
+                        "\t\tEdge invalidated {} {}",
+                        jobs[upstream_idx].job_id, jobs[node_idx].job_id
+                    );
                     invalidated = true
                 } else {
-                    //       debug!("\t\tEdge not invalidated {} {}", jobs[upstream_idx].job_id, jobs[node_idx].job_id);
+                    debug!(
+                        "\t\tEdge not invalidated {} {}",
+                        jobs[upstream_idx].job_id, jobs[node_idx].job_id
+                    );
                 }
             } else if (jobs[upstream_idx as usize].state
                 == JobState::Ephemeral(JobStateEphemeral::ReadyButDelayed))
@@ -1669,15 +1808,6 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             (dag.edge_weight_mut(upstream_idx, node_idx).unwrap()).required = weight
         }
     }
-    fn name_job_inputs(&self, node_idx: NodeIndex) -> String {
-        let mut names = Vec::new();
-        let upstreams = self.dag.neighbors_directed(node_idx, Direction::Incoming);
-        for upstream_idx in upstreams {
-            names.push(&self.jobs[upstream_idx].job_id[..]);
-        }
-        names.sort();
-        names.join("\n")
-    }
 
     fn identify_missing_outputs(&mut self) -> Result<(), PPGEvaluatorError> {
         for &node_idx in self.topo.as_ref().unwrap().iter().rev() {
@@ -1687,7 +1817,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             let historical_input_names = self.history.get(&input_name_key);
             let inputs_changed = match historical_input_names {
                 Some(historical_input_names) => {
-                    *historical_input_names != self.name_job_inputs(node_idx)
+                    *historical_input_names
+                        != self
+                            .strategy
+                            .get_input_list(node_idx, &self.dag, &self.jobs)
                 }
                 None => {
                     // not having an input job history is not itself
@@ -1739,8 +1872,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             if self.history.contains_key(&job.job_id) {
                                 Self::set_upstream_edges(&mut self.dag, node_idx, Required::No)
                             } else {
-                                warn!("output present, but we had no history for {}, redoing", 
-                                      &job.job_id);
+                                warn!(
+                                    "output present, but we had no history for {}, redoing",
+                                    &job.job_id
+                                );
                                 Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
                                 set_node_state!(
                                     job,

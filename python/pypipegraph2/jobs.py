@@ -1,4 +1,5 @@
 from __future__ import annotations
+import atexit
 
 import json
 from multiprocessing import Value
@@ -20,6 +21,7 @@ from collections import namedtuple
 from threading import Lock
 from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
+import ctypes
 
 from . import hashers, exceptions, ppg_traceback
 from .enums import Resources
@@ -40,7 +42,6 @@ python_version = ".".join(
 DependsOnInvariant = namedtuple("DependsOnInvariant", ["invariant", "self"])
 CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
 PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
-
 
 def _normalize_path(path):
     from . import global_pipegraph
@@ -770,7 +771,6 @@ class MultiFileGeneratingJob(Job):
                 ):  # pragma: no cover - coverage doesn't see this, since the spawned job os._exits()
                     try:
                         signal.signal(signal.SIGUSR1, aborted)
-
                         # log_info(f"tempfilename: {stderr.name}")
                         stdout_ = sys.stdout
                         stderr_ = sys.stderr
@@ -2296,7 +2296,9 @@ def PlotJob(  # noqa:C901
 
     return PlotJobTuple(plot_job, cache_job, table_job)
 
+
 _SharedMultiFileGeneratingJob_log_local_lock = Lock()
+
 
 class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
     """A shared MultiFileGeneratingJob.
@@ -2607,7 +2609,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         from . import global_pipegraph
 
         fn = global_pipegraph.history_dir / SharedMultiFileGeneratingJob.log_filename
-        with _SharedMultiFileGeneratingJob_log_local_lock: 
+        with _SharedMultiFileGeneratingJob_log_local_lock:
             if fn.exists():
                 keys = json.loads(fn.read_text())
             else:

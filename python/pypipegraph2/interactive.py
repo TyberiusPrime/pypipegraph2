@@ -52,7 +52,7 @@ class ConsoleInteractive:
         self.last_report_status_args = StatusReport(0, 0, 0, len(runner.jobs), 0)
         self.breaker = os.pipe()
         self.thread = threading.Thread(target=self.loop)
-        self._set_terminal_raw()
+        # self._set_terminal_raw()
         self.stopped = False
         self.leave_thread = False
         self.thread.start()

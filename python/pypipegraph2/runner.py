@@ -1,4 +1,7 @@
 from logging import captureWarnings
+import multiprocessing
+from pathlib import Path
+from multiprocessing import current_process, Pipe
 from . import exceptions
 import sys
 import os
@@ -27,15 +30,101 @@ from collections import deque
 import signal
 import psutil
 import subprocess
+import ctypes
+
+
+watcher_parent_pid = None
+watcher_ignored_processes = None
+watcher_session_id = None
+
+
+def get_same_session_id_processes():
+    for proc in psutil.process_iter():
+        proc_sid = os.getsid(proc.pid)
+        if proc_sid == watcher_session_id:
+            yield proc
+
+
+def kill_process_group_but_ppg_runner():
+    children_to_reap = []
+    my_pid = os.getpid()
+    for proc in get_same_session_id_processes():
+        if not proc in watcher_ignored_processes:
+            children_to_reap.append(proc)
+    for p in children_to_reap:
+        try:
+            log_info(
+                f"Abort: Watcher is terminating child processes {p.pid} {p.name()} {p.status()}"
+            )
+            p.terminate()
+        except psutil.NoSuchProcess:
+            pass
+    gone, alive = psutil.wait_procs(children_to_reap, timeout=2)
+    for p in alive:
+        log_info(f"Abort: Watcher is killing child processes {p.pid} {p.name()} {p.status()}")
+        p.kill()
+    gone, alive = psutil.wait_procs(children_to_reap, timeout=2)
+    if alive:
+        log_info(f"Still alive? {alive}")
+
+
+def watcher_unexpected_death_of_parent(_signum, _frame):
+    log_error(f"Watcher discovered parent process died unexpectedly {os.getpid()}")
+    kill_process_group_but_ppg_runner()
+    Path("debug.txt").write_text("exit watcher after parent death")
+    os._exit(0)
+
+
+def watcher_expected_death_of_parent(_signum, _frame):
+    log_error("Watcher discovered parent process ended regularly")
+    Path("debug.txt").write_text("Watcher discovered parent process ended regularly")
+
+    kill_process_group_but_ppg_runner()
+    Path("debug.txt").write_text("exit watcher")
+    os._exit(0)
+
+
+def spawn_watcher():
+    """The watcher registers to be informed when the parent process dies.
+    It then goes and kills the process group"""
+    global watcher_parent_pid, watcher_ignored_processes, watcher_session_id
+    if watcher_session_id is None:
+        already_a_session = True
+        os.setsid()
+        watcher_session_id = os.getsid(0)
+    recv, send = multiprocessing.Pipe()
+    pid = os.fork()
+    if pid == 0:
+        log_info(f"watcher_session_id {watcher_session_id}")
+        watcher_parent_pid = os.getppid()
+        parent_process = psutil.Process(watcher_parent_pid)
+        # these guys were around before, so we don't kill tehm.
+        watcher_ignored_processes = list(get_same_session_id_processes())
+
+        signal.signal(signal.SIGTERM, watcher_unexpected_death_of_parent)
+        signal.signal(signal.SIGINT, watcher_expected_death_of_parent)
+        prtcl = ctypes.CDLL("libc.so.6")["prctl"]
+        prtcl(1, signal.SIGTERM)  # 1 = PR_SET_PDEATHSIG
+        Path("debug.txt").write_text("watcher loop")
+        log_info("entering watcher loop")
+        send.send_bytes(b"go")
+        send.close()
+        while True:
+            time.sleep(100)
+        Path("debug.txt").write_text("watcher loop left")
+        log_info("watcher done")
+        os._exit(0)
+    else:
+        recv.recv_bytes()
+        recv.close()
+        return pid
+
 
 ljt = log_job_trace
 
 
 ExitNow = "___!!!ExitNow!!___"
-# class ExitNow:
 #   """Token for leave-this-thread-now-signal"""
-
-#   pass
 
 
 class Runner:
@@ -225,12 +314,19 @@ class Runner:
         return dag, pruned
 
     def compare_history(self, job_id_from, job_id_to, last_value, new_value):
+        # called from rust
         return history_is_different(self, job_id_from, job_id_to, last_value, new_value)
+
+    @staticmethod
+    def get_job_inputs_str(job_graph, job_id):
+        # called from rust...
+        inputs = sorted(job_graph.job_inputs[job_id])
+        return "\n".join(inputs)
 
     def build_evaluator(self, history):
         from .pypipegraph2 import PPG2Evaluator
 
-        e = PPG2Evaluator(history, self.compare_history)
+        e = PPG2Evaluator(history, self.compare_history, lambda job_id: self.__class__.get_job_inputs_str(self.job_graph, job_id))
         # todo: see how much we can push into rust of
         # the whole networkx business.
         # no need to keep multiple graphs, I suppose.
@@ -260,7 +356,6 @@ class Runner:
         self.last_job_states = last_job_states
 
         self.history = history  # so the jobs can peak at it and avoid reprocessing
-        children_before_run = self.get_children_processes()
 
         self.evaluator = self.build_evaluator(history)
         self.evaluator_lock = threading.Lock()
@@ -272,6 +367,7 @@ class Runner:
         self.jobs_all_cores_in_flight = 0
         self.job_outcomes = {}
 
+        self.watcher_pid = spawn_watcher()
         self._start_job_executing_threads()
 
         self.jobs_done = 0
@@ -294,31 +390,23 @@ class Runner:
             for t in self.threads:
                 t.join()
             if self.aborted:  # todo: refactor
-                log_error("aborted")
-                children_after_abort = self.get_children_processes()
-                log_debug(f"children after abort {children_after_abort}")
-                children_to_reap = [
-                    x for x in children_after_abort if not x in children_before_run
-                ]
-                log_debug(f"children before {children_before_run}")
-                if children_to_reap:
-                    for p in children_to_reap:
-                        try:
-                            log_info(
-                                f"Abort: Having to terminate/kill child processes {p.pid} {p.name()}"
-                            )
-                            p.terminate()
-                        except psutil.NoSuchProcess:
-                            pass
-                    gone, alive = psutil.wait_procs(children_to_reap, timeout=2)
-                    for p in alive:
-                        p.kill()
+                log_error("run was aborted")
+
+                #           reap_children(children_before_run)
 
             if hasattr(self, "_status"):  # todo: what is this? rich status?
                 print("status stop necessary")
                 self._status.stop()
             # log_info("interactive stop")
             self._interactive_stop()
+            # unregister_reaper(reaper)
+            assert psutil.pid_exists(self.watcher_pid)
+            os.kill(self.watcher_pid, signal.SIGINT)
+            gone, alive = psutil.wait_procs([psutil.Process(self.watcher_pid)], timeout=10)
+            if alive:
+                log_error("Watcher was still hanging around?!")
+            #os.waitpid(self.watcher_pid, 1)
+            log_info("finished waiting for watcher")
 
         for job_id in self.pruned:
             if job_id in self.job_outcomes:
@@ -355,11 +443,6 @@ class Runner:
         log_trace("Left runner.run()")
 
         return self.job_outcomes, self.evaluator.new_history()
-
-    def get_children_processes(self):
-        current_process = psutil.Process()
-        children = current_process.children(recursive=True)
-        return children
 
     def _interactive_start(self):
         """Activate the interactive thread"""
@@ -401,9 +484,9 @@ class Runner:
         """Kill all running jobs and leave runner.
         Called from the interactive interface
         """
+        log_info("runner.abort called")
         self.abort_time = time.time()
         self.aborted = True
-        print("set 2")
         self.check_for_new_jobs.set()
         self.evaluation_done.set()
         for t in self.threads:
@@ -618,7 +701,9 @@ class Runner:
                                         self._start_another_thread()
                         # letting go of evaluator lock
                         if do_sleep:
-                            self.check_for_new_jobs.wait(60) # not sure why we even have a timeout?
+                            self.check_for_new_jobs.wait(
+                                60
+                            )  # not sure why we even have a timeout?
                             self.check_for_new_jobs.clear()
                             continue
                         else:
@@ -714,7 +799,9 @@ class Runner:
                                 if outputs is None and error is None:
                                     # this happes when the job get's terminated by abort
                                     log_error(f"job aborted {job_id}")
-                                    error = exceptions.JobError("Aborted", KeyboardInterrupt())
+                                    error = exceptions.JobError(
+                                        "Aborted", KeyboardInterrupt()
+                                    )
                                     # raise ValueError("Should not happen")
                                 if outputs is not None and set(outputs.keys()) != set(
                                     self.jobs[job_id].outputs
