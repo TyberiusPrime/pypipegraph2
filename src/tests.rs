@@ -148,6 +148,7 @@ pub fn ephemeral_output_already_done() {
     his.insert("in".to_string(), "".to_string());
     his.insert("in!!!".to_string(), "".to_string());
     his.insert("out!!!".to_string(), "in".to_string());
+    his.insert("out".to_string(), "".to_string());
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("out".to_string());
     let mut g = PPGEvaluator::new_with_history(his, strat);
@@ -158,6 +159,26 @@ pub fn ephemeral_output_already_done() {
     assert!(g.query_ready_to_run().is_empty());
     assert!(g.is_finished());
 }
+
+#[test]
+pub fn output_of_leafs_captured() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Ephemeral);
+        g.add_node("B", JobKind::Output);
+        g.depends_on("B", "A");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[""]).unwrap();
+    let history = g.new_history().unwrap();
+    assert!(history.contains_key("A"));
+    assert!(history.contains_key("A!!!"));
+    assert!(history.contains_key("A!!!B"));
+    assert!(history.contains_key("B!!!"));
+    assert!(history.contains_key("B")); //the one we named the test after
+
+}
+
+
 #[test]
 pub fn ephemeral_nested() {
     let mut g = PPGEvaluator::new(StrategyForTesting::new());
@@ -303,7 +324,7 @@ fn mk_history(input: &[((&str, &str), &str)]) -> HashMap<String, String> {
     res.extend(
         input
             .iter()
-            .map(|((a, b), c)| (b.to_string(), c.to_string())),
+            .map(|((a, b), c)| (a.to_string(), c.to_string())),
     );
     res
 }
@@ -1731,10 +1752,45 @@ fn test_correct_storing_of_skipped_ephemerals() {
 
 #[test]
 fn test_if_present_but_history_removed() {
-    todo!()
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Always);
+        g.add_node("B", JobKind::Output);
+        g.depends_on("B", "A");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    assert!(ro.run_counters.get("B") == Some(&1));
+    let g = ro.run(&[]).unwrap();
+    assert!(ro.run_counters.get("B") == Some(&1));
+    ro.history.remove("B");
+    let g = ro.run(&[]).unwrap();
+    assert!(ro.run_counters.get("B") == Some(&2));
 }
 
+/*
 #[test]
 fn test_multi_file_job_gaining_output() {
-    todo!()
+    // the rust engine does not know anything about filenames or jobs with 'multiple' 
+    // outputs
+    // we fake that by delegating to is_history_altered on the python side.
+    // but adding/removing an output will retrigger the downstreams
+    // because the job name changes and we track input job names.
+    // now I suppose we could delegate this to python.
+    // which has the 'filename-dependncy-graph' to actually make the decision, right?, 
+    // I already have that test    todo!()
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A::B", JobKind::Output);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("C", "A::B");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    assert!(ro.run_counters.get("A::B") == Some(&1));
+    let g = ro.run(&[]).unwrap();
+    assert!(ro.run_counters.get("B") == Some(&1));
+    ro.history.remove("B");
+    let g = ro.run(&[]).unwrap();
+    assert!(ro.run_counters.get("B") == Some(&2));
+
 }
+*/

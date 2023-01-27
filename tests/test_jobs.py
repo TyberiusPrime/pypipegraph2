@@ -1843,6 +1843,81 @@ class TestTempFileGeneratingJob:
         assert Path("tf").read_text() == "1"  # same hash, file present
         assert Path("j2").read_text() == "2"
 
+    def test_adding_removing_outputs_does_not_trigger_downstreams_that_depend_on_the_unchanged_inputs(self):
+    
+        def do_a(ofs):
+            counter("a")
+            if isinstance(ofs, Path):
+                ofs = [ofs]
+            for of in ofs:
+                of.write_text(of.name)
+
+        jobA = ppg.MultiFileGeneratingJob(["A", "B"], do_a)
+        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC.depends_on("A")  # note how this depends on the file "A", not the job jobA.
+        ppg.run()
+        assert Path("C").read_text() == "C"
+        assert Path("c").read_text() == "1"
+
+        ppg.new()
+        jobA = ppg.MultiFileGeneratingJob(["A", "B", "D"], do_a)
+        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC.depends_on("A")
+        print("part2")
+        ppg.run()
+        assert Path("D").read_text() == "D"
+        assert Path("C").read_text() == "C"
+        assert Path("a").read_text() == "2"
+        assert Path("c").read_text() == "1"
+
+
+        # now let's take it out again.
+        print("part3")
+        ppg.new()
+        jobA = ppg.MultiFileGeneratingJob(["A", "B"], do_a)
+        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC.depends_on("A")
+        ppg.run()
+        assert Path("D").read_text() == "D"
+        assert Path("C").read_text() == "C"
+        assert Path("a").read_text() == "3"
+        assert Path("c").read_text() == "1"
+
+        # take one out & put one in *at the same time*
+        ppg.new()
+        jobA = ppg.MultiFileGeneratingJob(["A", "B", "E"], do_a)
+        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC.depends_on("A")
+        ppg.run()
+        assert Path("D").read_text() == "D"
+        assert Path("C").read_text() == "C"
+        assert Path("a").read_text() == "4"
+        assert Path("c").read_text() == "1"
+
+
+
+        # now turn it into a FG
+        ppg.new()
+        jobA = ppg.FileGeneratingJob("A", do_a)
+        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC.depends_on("A")
+        ppg.run()
+        assert Path("D").read_text() == "D"
+        assert Path("C").read_text() == "C"
+        assert Path("a").read_text() == "5"
+        assert Path("c").read_text() == "1"
+
+
+        # now turn it into back into a MFG
+        ppg.new()
+        jobA = ppg.MultiFileGeneratingJob(["A", "B"], do_a)
+        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC.depends_on("A")
+        ppg.run()
+        assert Path("D").read_text() == "D"
+        assert Path("C").read_text() == "C"
+        assert Path("a").read_text() == "6"
+        assert Path("c").read_text() == "1"
 
 @pytest.mark.usefixtures("create_out_dir")
 @pytest.mark.usefixtures("ppg2_per_test")
@@ -1919,28 +1994,7 @@ class TestMultiTempFileGeneratingJob:
         with pytest.raises(TypeError):
             ppg.MultiTempFileGeneratingJob(25, lambda of: write("out/A", param))
 
-    def test_adding_another_that_downstream_does_not_depend_on_does_not_retrigger(self):
-        def do_a(ofs):
-            counter('a')
-            for of in ofs:
-                of.write_text(of.name)
-        jobA = ppg.MultiFileGeneratingJob(['A','B'], do_a)
-        jobB = ppg.FileGeneratingJob("C", lambda of: counter('c') and of.write_text(of.name))
-        jobB.depends_on("A") # note how this depends on the file "A", not the job jobA.
-        ppg.run()
-        assert Path('C').read_text() == 'C'
-        assert Path('c').read_text() == '1'
 
-        ppg.new()
-        jobA = ppg.MultiFileGeneratingJob(['A','B','D'], do_a)
-        jobB = ppg.FileGeneratingJob("C", lambda of: counter('c') and of.write_text(of.name))
-        jobB.depends_on("A")
-        ppg.pypipegraph2.enable_logging()
-        ppg.run()
-        assert Path('D').read_text() == 'D'
-        assert Path('C').read_text() == 'C'
-        assert Path('a').read_text() == '2'
-        assert Path('c').read_text() == '1'
 
 
 

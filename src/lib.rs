@@ -36,7 +36,7 @@ pub enum PPGEvaluatorError {
     )]
     InternalError(String),
 }
-pub trait PPGEvaluatorStrategy {
+pub (crate) trait PPGEvaluatorStrategy {
     fn output_already_present(&self, query: &str) -> bool;
     fn is_history_altered(
         &self,
@@ -45,6 +45,13 @@ pub trait PPGEvaluatorStrategy {
         last_recorded_value: &str,
         current_value: &str,
     ) -> bool;
+
+    fn get_input_list(
+        &self,
+        node_idx: engine::NodeIndex,
+        dag: &engine::GraphType,
+        jobs: &[engine::NodeInfo],
+    ) -> String;
 }
 
 #[derive(Clone)]
@@ -74,6 +81,23 @@ impl PPGEvaluatorStrategy for StrategyForTesting {
         current_value: &str,
     ) -> bool {
         last_recorded_value != current_value
+    }
+
+    fn get_input_list(
+        &self,
+        node_idx: engine::NodeIndex,
+        dag: &engine::GraphType,
+        jobs: &[engine::NodeInfo],
+    ) -> String {
+        let mut names = Vec::new();
+        let upstreams = 
+            dag
+            .neighbors_directed(node_idx, petgraph::Direction::Incoming);
+        for upstream_idx in upstreams {
+            names.push(jobs[upstream_idx].get_job_id());
+        }
+        names.sort();
+        names.join("\n")
     }
 }
 
@@ -117,7 +141,7 @@ pub fn start_logging() {
 // simulates a complete (deterministic)
 // run - jobs just register that they've been run,
 // and output a 'dummy' history.
-pub struct TestGraphRunner {
+pub (crate) struct TestGraphRunner {
     #[allow(clippy::type_complexity)]
     pub setup_graph: Box<dyn Fn(&mut PPGEvaluator<StrategyForTesting>)>,
     pub run_counters: HashMap<String, usize>,
@@ -304,6 +328,7 @@ pub fn test_big_graph_in_layers(nodes_per_layer: u32, layers: u32, run_count: u3
 
 struct StrategyForPython {
     history_altered_callback: PyObject,
+    get_job_inputs_str_callback: PyObject,
 }
 
 impl PPGEvaluatorStrategy for StrategyForPython {
@@ -347,6 +372,21 @@ impl PPGEvaluatorStrategy for StrategyForPython {
 
         //last_recorded_value != current_value // todo
     }
+
+    fn get_input_list(
+        &self,
+        node_idx: engine::NodeIndex,
+        _dag: &engine::GraphType,
+        jobs: &[engine::NodeInfo],
+    ) -> String {
+        let job_id = jobs[node_idx as usize].clone_job_id();
+        Python::with_gil(|py| {
+            let res = self.get_job_inputs_str_callback.call1(py, (job_id,));
+            res.expect("input_list_different failed on python side")
+                .extract::<String>(py)
+                .expect("input_list_changed_callback did not return a bool")
+        })
+    }
 }
 
 #[pyclass(name = "PPG2Evaluator")]
@@ -367,6 +407,7 @@ impl PyPPG2Evaluator {
         _py: Python,
         py_history: &PyDict,
         history_compare_callable: PyObject,
+        get_job_inputs_str_callback: PyObject,
     ) -> Result<Self, PyErr> {
         let mut history: HashMap<String, String> = HashMap::new();
         for (k, v) in py_history.iter() {
@@ -379,6 +420,7 @@ impl PyPPG2Evaluator {
                 history,
                 StrategyForPython {
                     history_altered_callback: history_compare_callable,
+                    get_job_inputs_str_callback,
                 },
             ),
         })

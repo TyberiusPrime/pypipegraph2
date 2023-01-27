@@ -41,7 +41,7 @@ class TestResourceCoordinator:
             first_job.start_time - min_start,
             first_job.stop_time - min_start,
             second_job.start_time - min_start,
-            second_job.stop_time - min_start
+            second_job.stop_time - min_start,
         )
         if jobA.start_time is None:
             raise ValueError("JobA did not run")
@@ -400,15 +400,15 @@ class TestCleanup:
         ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
         lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
         assert ec == [
-            1+1,
-            2+1,
-            3+1, # latest
-            3+1,
+            1 + 1,
+            2 + 1,
+            3 + 1,  # latest
+            3 + 1,
         ]
         assert lc == [
             1,
             2,
-            3, # latest exluded by *.log
+            3,  # latest exluded by *.log
             3,
         ]
 
@@ -532,16 +532,22 @@ def test_broken_case_from_delayeddataframe(ppg2_per_test):
     def store(key, value):
         out[key] = value
 
-    a = ppg.CachedDataLoadingJob("a", lambda: "a", lambda value: counter('A') and store("a", value))
+    a = ppg.CachedDataLoadingJob(
+        "a", lambda: "a", lambda value: counter("A") and store("a", value)
+    )
     event = ppg.CachedDataLoadingJob(
-        "event", lambda: counter("EVENT") and "event", lambda value: store("event", value)
+        "event",
+        lambda: counter("EVENT") and "event",
+        lambda value: store("event", value),
     )
     event2 = ppg.CachedDataLoadingJob(
-        "event2", lambda: counter("EVENT2") and "event2", lambda value: store("event2", value)
+        "event2",
+        lambda: counter("EVENT2") and "event2",
+        lambda value: store("event2", value),
     )
     anno_sequence = ppg.CachedDataLoadingJob(
         "anno_sequence",
-        lambda: counter('ANNO_SEQUENCE') and "anno_sequence",
+        lambda: counter("ANNO_SEQUENCE") and "anno_sequence",
         lambda value: store("anno_sequence", value),
     )
     event_seq = ppg.DataLoadingJob(
@@ -566,39 +572,49 @@ def test_broken_case_from_delayeddataframe(ppg2_per_test):
     force_load.depends_on(event.load, event2.load, event2_seq, event_seq)
     ppg.run()
     assert out["event2_seq"] == "event2" + "event" + "anno_sequence"
-    assert read('EVENT') == '1'
-    assert read('EVENT2') == '1'
-    assert read('ANNO_SEQUENCE') == '1'
+    assert read("EVENT") == "1"
+    assert read("EVENT2") == "1"
+    assert read("ANNO_SEQUENCE") == "1"
     ppg.run()
-    assert read('EVENT') == '1'
-    assert read('EVENT2') == '1'
-    assert read('ANNO_SEQUENCE') == '1'
+    assert read("EVENT") == "1"
+    assert read("EVENT2") == "1"
+    assert read("ANNO_SEQUENCE") == "1"
 
 
 def test_strict_mode_two_jobs_same_id(ppg2_per_test):
     ppg.new(run_mode=ppg.RunMode.CONSOLE)
     assert ppg.global_pipegraph.run_mode.is_strict()
     a = lambda of: None
-    ppg.FileGeneratingJob('a', a, depend_on_function=False)
-    ppg.FileGeneratingJob('a', a, depend_on_function=False)
+    ppg.FileGeneratingJob("a", a, depend_on_function=False)
+    ppg.FileGeneratingJob("a", a, depend_on_function=False)
     # the testing is actually on the FunctionInvariant :(
-    ppg.FileGeneratingJob('a', a, depend_on_function=True)
+    ppg.FileGeneratingJob("a", a, depend_on_function=True)
     with pytest.raises(ppg.JobRedefinitionError):
-        ppg.FileGeneratingJob('a', lambda of: of.write_text('h'), depend_on_function=True)
+        ppg.FileGeneratingJob(
+            "a", lambda of: of.write_text("h"), depend_on_function=True
+        )
 
 
 def test_calling_function_difference():
     def gen(x):
-        return lambda: x+5
+        return lambda: x + 5
+
     a = gen(5)
     b = gen(10)
-    r = ppg.FunctionInvariant.debug_function_differences(a,b)
-    assert 'The function closures differed.' in r
-    assert ppg.FunctionInvariant.debug_function_differences(None,None) == "No difference"
-    assert ppg.FunctionInvariant.debug_function_differences(gen,gen) == "The functions were identical"
+    r = ppg.FunctionInvariant.debug_function_differences(a, b)
+    assert "The function closures differed." in r
+    assert (
+        ppg.FunctionInvariant.debug_function_differences(None, None) == "No difference"
+    )
+    assert (
+        ppg.FunctionInvariant.debug_function_differences(gen, gen)
+        == "The functions were identical"
+    )
+
 
 def test_spawned_processes_get_killed_on_abort(ppg2_per_test, job_trace_log):
     import psutil
+
     ppg.new(cores=2)
 
     # this process doesn't get reaped
@@ -606,22 +622,54 @@ def test_spawned_processes_get_killed_on_abort(ppg2_per_test, job_trace_log):
     assert p.pid
 
     def long_running_proc():
-        p = subprocess.Popen(['sleep', '5'], stdin=subprocess.PIPE)
-        Path('pid').write_text(str(p.pid))
+        p = subprocess.Popen(["sleep", "5"], stdin=subprocess.PIPE)
+        Path("pid").write_text(str(p.pid))
         ppg.global_pipegraph.runner.abort()
         p.communicate()
         Path("done").write_text("done")
-    a = ppg.DataLoadingJob('a', long_running_proc)
-    b = ppg.FileGeneratingJob('b', lambda of: of.write_text(str(of))).depends_on(a)
+
+    a = ppg.DataLoadingJob("a", long_running_proc)
+    b = ppg.FileGeneratingJob("b", lambda of: of.write_text(str(of))).depends_on(a)
     with pytest.raises(ppg.JobsFailed):
         ppg.run()
-    assert not Path('done').exists()
-    pid = int(Path('pid').read_text())
-    with pytest.raises(psutil.NoSuchProcess):
-        psutil.Process(pid)
+    assert not Path("done").exists()
+    time.sleep(1)
     assert psutil.pid_exists(p.pid)
+    pid = int(Path("pid").read_text())
+    ok = False
+    try:
+        ok = psutil.Process(pid).status() == "zombie"
+    except psutil.NoSuchProcess:
+        ok = True
+    if not ok:
+        raise ValueError("Process was neither zombie (since parent is dead), nor gone.")
+
     p.communicate()
 
 
+def test_spawned_processes_get_killed_on_catastrophic_process_failure(
+    ppg2_per_test, job_trace_log
+):
+    import psutil
 
+    path = Path(__file__).parent / "test_parent_termination_kills_children"
+    p = subprocess.Popen(["python", path / "stage2.py"])
+    p.communicate()
 
+    for proc in psutil.process_iter(["cmdline"]):
+        if "ppg2_test_parallel_sentinel" in proc.info["cmdline"]:
+            raise ValueError(
+                "children not killed, found a ppg2_test_parallel_sentinel",
+                "pid",
+                proc.pid,
+                "ppid",
+                proc.ppid(),
+            )
+        if "sleep" in proc.info["cmdline"]:
+            raise ValueError(
+                "children not killed, found a sleep",
+                "pid",
+                proc.pid,
+                "ppid",
+                proc.ppid(),
+            )

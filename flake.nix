@@ -156,6 +156,15 @@
           sha256 = "sha256-x7UiibWXcCsLwJNKcYWMXHsqt3pCIbv5NoQdx6iD+2o=";
         };
       };
+    pyprctl = p:
+      p.buildPythonPackage rec {
+        pname = "pyprctl";
+        version = "0.1.3";
+        src = p.fetchPypi {
+          inherit pname version;
+          sha256 = "sha256-H7VNOrAw7ALkr8OPuWYtZjTBKDTpGueVneVqnAn2nCY=";
+        };
+      };
     mypython = pkgs.python39.withPackages (p: [
       #todo: figure out how to derive this from pyproject.toml
       p.pytest
@@ -168,6 +177,8 @@
       p.psutil
       p.networkx
       p.cython
+      p.setproctitle
+      (pyprctl p)
       # for testing...
       ppg1
       plotnine

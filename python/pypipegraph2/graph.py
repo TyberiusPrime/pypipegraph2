@@ -212,6 +212,7 @@ class PyPipeGraph:
         self.do_raise = []
         self._restart_afterwards = False
         ok = False
+
         try:
             result = None
             self._install_signals()
@@ -479,8 +480,9 @@ class PyPipeGraph:
 
         for job_id, job in self.jobs.items():
             upstreams = job.upstreams
-            incoming_edges = sorted([x.job_id for x in upstreams])
-            new[job_id + "!!!"] = "\n".join(incoming_edges)
+            #incoming_edges = sorted([x.job_id for x in upstreams])
+            #"\n".join(incoming_edges)
+            new[job_id + "!!!"] = Runner.get_job_inputs_str(self, job_id)
             new[job_id] = json.dumps(old[job_id][1])  # 1, that's the output hash.
 
             for input_name in self.job_inputs[job_id]:
