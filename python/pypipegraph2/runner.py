@@ -71,22 +71,26 @@ def kill_process_group_but_ppg_runner():
 def watcher_unexpected_death_of_parent(_signum, _frame):
     log_error(f"Watcher discovered parent process died unexpectedly {os.getpid()}")
     kill_process_group_but_ppg_runner()
-    Path("debug.txt").write_text("exit watcher after parent death")
     os._exit(0)
 
 
 def watcher_expected_death_of_parent(_signum, _frame):
     log_error("Watcher discovered parent process ended regularly")
-    Path("debug.txt").write_text("Watcher discovered parent process ended regularly")
-
     kill_process_group_but_ppg_runner()
-    Path("debug.txt").write_text("exit watcher")
     os._exit(0)
 
 
 def spawn_watcher():
     """The watcher registers to be informed when the parent process dies.
-    It then goes and kills the process group"""
+    It then goes and kills the process group,
+    which we use to reliably tag the spawned processes.
+
+    That means you can't spawn a daemon process from a ppg job.
+
+    The watcher also get's a sig_int when the graph execution ends,
+    which also signals it to go and terminate all stragglers.
+
+    """
     global watcher_parent_pid, watcher_ignored_processes, watcher_session_id
     if watcher_session_id is None:
         already_a_session = True
@@ -104,14 +108,13 @@ def spawn_watcher():
         signal.signal(signal.SIGTERM, watcher_unexpected_death_of_parent)
         signal.signal(signal.SIGINT, watcher_expected_death_of_parent)
         prtcl = ctypes.CDLL("libc.so.6")["prctl"]
-        prtcl(1, signal.SIGTERM)  # 1 = PR_SET_PDEATHSIG
-        Path("debug.txt").write_text("watcher loop")
+        PR_SET_PDEATHSIG = 1
+        prtcl(PR_SET_PDEATHSIG, signal.SIGTERM)  # 1 = 
         log_info("entering watcher loop")
         send.send_bytes(b"go")
         send.close()
         while True:
             time.sleep(100)
-        Path("debug.txt").write_text("watcher loop left")
         log_info("watcher done")
         os._exit(0)
     else:
