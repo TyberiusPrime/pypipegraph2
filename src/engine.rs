@@ -99,6 +99,15 @@ impl JobState {
             JobState::Ephemeral(x) => x.is_failed(),
         }
     }
+
+    fn is_upstream_failure(&self) -> bool {
+        match self {
+            JobState::Always(JobStateAlways::FinishedUpstreamFailure) => true,
+            JobState::Output(JobStateOutput::FinishedUpstreamFailure) => true,
+            JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) => true,
+            _ => false,
+        }
+    }
 }
 
 impl JobQueries for JobStateAlways {
@@ -543,6 +552,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 }
             }
         }
+        let failed: HashSet<String> = self.query_failed();
+        dbg!(&failed);
         let mut out = self.history.clone();
         let mut out: HashMap<_, _> = out
             .drain()
@@ -585,6 +596,9 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             return false;
                         }
                     }
+                    /* if failed.contains(k) {
+                        return false;
+                    }; */
                     true // a node entry
                 }
             })
@@ -632,8 +646,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 };
                 out.insert(key, history.to_string());
             } else {
-                out.remove(&job.job_id);
-                out.remove(&input_name_key);
+                //the job did not finish.
+                //but if it failed because of upstream failure,
+                //there is no need to throw away the history!
+                if !job.state.is_upstream_failure() {
+                    out.remove(&job.job_id);
+                    out.remove(&input_name_key);
+                }
             }
         }
         for (a, b, _weight) in self.dag.all_edges() {
@@ -1314,20 +1333,20 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         // so skipping out on jobs not containging ":::"
                         // can't be done.
                         //{
-                            match Self::try_finding_renamed_multi_output_job(
-                                upstream_id,
-                                downstream_id,
-                                history,
-                            ) {
-                                Some(x) => {
-                                    debug!(
-                                        "No history for {}, but found {} to use instead",
-                                        upstream_id, x
-                                    );
-                                    history.get(&x).map(Cow::from)
-                                }
-                                None => None,
+                        match Self::try_finding_renamed_multi_output_job(
+                            upstream_id,
+                            downstream_id,
+                            history,
+                        ) {
+                            Some(x) => {
+                                debug!(
+                                    "No history for {}, but found {} to use instead",
+                                    upstream_id, x
+                                );
+                                history.get(&x).map(Cow::from)
                             }
+                            None => None,
+                        }
                         /* } else {
                             None
                         } */

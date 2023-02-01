@@ -1767,6 +1767,34 @@ fn test_if_present_but_history_removed() {
     assert!(ro.run_counters.get("B") == Some(&2));
 }
 
+#[test]
+fn test_upstream_failure_but_history_still_captured() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Output);
+        g.add_node("B", JobKind::Output);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("B", "A");
+        g.depends_on("C", "B");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    let history = g.new_history().unwrap();
+    assert!(history.contains_key("A"));
+    assert!(history.contains_key("B"));
+    assert!(history.contains_key("C"));
+
+    ro.already_done.remove("A");
+    let g = ro.run(&["A"]).unwrap();
+    assert!(g.query_failed().len() == 1);
+    let history = g.new_history().unwrap();
+    assert!(history.contains_key("B"));
+    assert!(history.contains_key("C"));
+    assert!(!history.contains_key("A"));
+
+
+
+}
+
 /*
 #[test]
 fn test_multi_file_job_gaining_output() {
