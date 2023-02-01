@@ -262,3 +262,15 @@ class ConsoleInteractive:
         print("ok, killing job", job.job_id)
         log_info(f"Command kill {job.job_id} ")
         job.kill_if_running()
+
+    def _cmd_debug(self, args):
+        """Write the debug status from teh evaluator to debug.txt"""
+        from pathlib import Path
+        import pypipegraph2
+        # pypipegraph2.pypipegraph2.enable_logging()
+        filename = Path('debug.txt').absolute()
+        print(f"Writing to {filename}")
+        with open(filename,'w') as op:
+            op.write(self.runner.evaluator.debug())
+        print(f"Debug information written to {filename}")
+
