@@ -430,7 +430,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         for job in jobs.iter() {
             out.push_str(&format!("{}: {:?}\n", job.job_id, job.state));
         }
-        out.push_str("\n\nEdges:\n');
+        out.push_str("\n\nEdges:\n");
         for (upstream_idx, downstream_idx, weight) in dag.all_edges() {
             let upstream_id = &jobs[upstream_idx as usize].job_id;
             let downstream_id = &jobs[downstream_idx as usize].job_id;
