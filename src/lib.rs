@@ -493,6 +493,10 @@ impl PyPPG2Evaluator {
             engine::JobOutputResult::NotDone => Err(PyValueError::new_err("job not done")),
         }
     }
+
+    pub fn debug(&self) -> String{
+        self.evaluator.debug_()
+    }
 }
 
 /// Formats the sum of two numbers as string.

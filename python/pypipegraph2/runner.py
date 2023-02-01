@@ -661,6 +661,12 @@ class Runner:
                                     # this happens when we have more threads than jobs?
                                     # to run at *this* junction.
                                     do_sleep = True
+                                    if not self.jobs_in_flight:
+                                        log_error(
+                                            "Evaluator is not finished, reports no jobs ready to run, but no jobs currently running -> a bug in the state machine. No way forward, aborting graph executing (cleanly)"
+                                        )
+                                        #self.abort()
+
                             else:
                                 ljt(f"to run {rr}")
                                 job_id = rr[0]
