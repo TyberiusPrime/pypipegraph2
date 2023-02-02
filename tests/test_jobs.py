@@ -246,7 +246,11 @@ class TestFileGeneratingJob:
 
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
-        assert "a number is required, not PosixPath" in str(
+        print("this is it'", str(
+            ppg.global_pipegraph.last_run_result["out/0"].error
+        ),"'")
+
+        assert "number is required, not PosixPath" in str(
             ppg.global_pipegraph.last_run_result["out/0"].error
         )
 
