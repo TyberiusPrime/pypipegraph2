@@ -648,9 +648,9 @@ class PyPipeGraph:
 
     def find_job(self, job_or_id_or_path):
         from . jobs import Job
-        if isinstance(job_or_id_or_path), (str, Path)):
-            return self.find_job_from_id(job_or_id_or_path))
-        elif isinstance(job_or_id_or_path), Job):
+        if isinstance(job_or_id_or_path, (str, Path)):
+            return self.find_job_from_id(job_or_id_or_path)
+        elif isinstance(job_or_id_or_path, Job):
             return job_or_id
         else:
             raise TypeError("job was not a Job nor a job_id")
