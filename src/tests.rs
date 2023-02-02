@@ -1783,6 +1783,7 @@ fn test_upstream_failure_but_history_still_captured() {
     assert!(history.contains_key("B"));
     assert!(history.contains_key("C"));
 
+    //start_logging_to_file("shu.txt");
     ro.already_done.remove("A");
     let g = ro.run(&["A"]).unwrap();
     assert!(g.query_failed().len() == 1);
