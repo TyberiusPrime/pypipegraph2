@@ -495,6 +495,11 @@ impl PyPPG2Evaluator {
         self.evaluator.query_ready_to_run().into_iter().collect()
     }
 
+    pub fn jobs_running(&self) -> Vec<String> {
+        self.evaluator.query_jobs_running().into_iter().collect()
+    }
+
+
     pub fn jobs_ready_for_cleanup(&self) -> Vec<String> {
         self.evaluator
             .query_ready_for_cleanup()
@@ -524,6 +529,16 @@ impl PyPPG2Evaluator {
 
     pub fn debug(&self) -> String {
         self.evaluator.debug_()
+    }
+
+    pub fn debug_is_finished(&self) {
+        self.evaluator.debug_is_finished();
+    }
+
+    pub fn reconsider_all_jobs(&mut self) -> Result<(), PyErr> {
+        error!("Reconsidering all jobs!");
+        self.evaluator.reconsider_all_jobs()?;
+        Ok(())
     }
 }
 
