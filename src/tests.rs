@@ -1796,6 +1796,72 @@ fn test_upstream_failure_but_history_still_captured() {
 
 }
 
+
+#[test]
+fn test_field_230202a() {
+    //this is definatly a bug, but 291 is ephemeral, 
+    //so it *shouldn't matter*
+ fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+
+    g.add_node("239", JobKind::Ephemeral);
+    g.add_node("289", JobKind::Output);
+    g.add_node("291", JobKind::Ephemeral);
+
+    let edges = vec![
+    ("239", "291"),
+    ("239", "289"),
+    ("289", "291"),
+    ];
+
+    for (a,b) in edges {
+        if g.contains_node(a) && g.contains_node(b){
+            g.depends_on(b,a);
+            println!("(\"{}\", \"{}\"),", a,b);
+        }
+    }
+
+ }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+
+    let mut g = ro.run(&[]).unwrap();
+    assert!(g.is_finished());
+    }
+
+#[test]
+fn test_field_230202b() {
+    //this is definatly a bug, but 291 is ephemeral, 
+    //so it *shouldn't matter*
+ fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+
+    g.add_node("239", JobKind::Ephemeral);
+    g.add_node("289", JobKind::Output);
+    g.add_node("291", JobKind::Ephemeral);
+    g.add_node("301", JobKind::Output);
+
+    let edges = vec![
+    ("239", "291"),
+    ("239", "289"),
+    ("289", "291"),
+    ("291", "301"),
+    ];
+
+    for (a,b) in edges {
+        if g.contains_node(a) && g.contains_node(b){
+            g.depends_on(b,a);
+            println!("(\"{}\", \"{}\"),", a,b);
+        }
+    }
+
+ }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+
+    let mut g = ro.run(&[]).unwrap();
+    assert!(g.is_finished());
+    }
+
+
 /*
 #[test]
 fn test_multi_file_job_gaining_output() {

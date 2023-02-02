@@ -93,6 +93,7 @@ def spawn_watcher():
     """
     global watcher_parent_pid, watcher_ignored_processes, watcher_session_id
     if watcher_session_id is None:
+        log_info("setting watcher sid")
         already_a_session = True
         os.setsid()
         watcher_session_id = os.getsid(0)
@@ -662,10 +663,19 @@ class Runner:
                                     # to run at *this* junction.
                                     do_sleep = True
                                     if not self.jobs_in_flight:
+                                        log_error(f"jobs the engine considers running {self.evaluator.jobs_running()}")
+                                        log_error(f"The engine considers itself finished = {self.evaluator.is_finished()}")
                                         log_error(
-                                            "Evaluator is not finished, reports no jobs ready to run, but no jobs currently running -> a bug in the state machine. No way forward, aborting graph executing (cleanly)"
+                                            "Evaluator is not finished, reports no jobs ready to run, but no jobs currently running -> a bug in the state machine. No way forward, aborting graph executing (cleanly). Graph written to debug.txt "
                                         )
-                                        #self.abort()
+                                        self.evaluator.debug_is_finished() # if this helps' we're looking at a propagation failure. Somewhere.
+                                        Path("debug.txt").write_text(self.evaluator.debug()) # if this helps' we're looking at a propagation failure. Somewhere.
+                                        # self.evaluator.reconsider_all_jobs() # if this helps' we're looking at a propagation failure. Somewhere.
+                                        # if not self.evaluator.is_finished() and not self.evaluator.jobs_ready_to_run():
+                                        #     #print("goin gdown hard")
+                                        #     #self.interactive._cmd_die(False)
+                                        # else:
+                                        #     log_error("Could recover by doing reconsider_all")
 
                             else:
                                 ljt(f"to run {rr}")
@@ -800,9 +810,6 @@ class Runner:
                             job.stop_time = time.time()
                             job.run_time = job.stop_time - job.start_time
                             # ljt(f"end {job_id} {self.jobs_in_flight}")
-                            self.jobs_in_flight.remove(job_id)
-                            if c > 1:
-                                self.jobs_all_cores_in_flight -= 1
                             # log_trace(f"Leaving thread for {job_id}")
                             with self.evaluator_lock:
                                 if outputs is None and error is None:
@@ -860,6 +867,10 @@ class Runner:
                                         log_error(
                                             f"logging job failure failed {job_id} {e}"
                                         )
+                                self.jobs_in_flight.remove(job_id)
+                                if c > 1:
+                                    self.jobs_all_cores_in_flight -= 1
+
 
                             self.job_outcomes[job_id].run_time = job.run_time
                             self.check_for_new_jobs.set()
