@@ -297,9 +297,7 @@ class Job:
                 if isinstance(other_job, Path):
                     other_job = str(other_job)
                 try:
-                    o_job = global_pipegraph.jobs[
-                        global_pipegraph.outputs_to_job_ids[other_job]
-                    ]
+                    o_job = global_pipegraph.find_job_from_id(other_job)
                 except KeyError as e:
                     raise KeyError(
                         f"Dependency specified via job_id {repr(other_job)}. No such job found"
@@ -2592,7 +2590,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         res[str(self.output_dir_prefix)] = {
             "hash": by_input_key,
             "size": 0,
-            "mtime": time.time(),
+            "mtime": int(time.time()),
         }  # so we can detect if the target changed
 
         # we clean up if we build,
@@ -2777,3 +2775,46 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                         f"Could not find {key} in {self.job_id}. Available {search}"
                     )
         return self._map_filename(self._lookup[key])
+
+
+
+class NotebookInvariant(FileInvariant):
+    """An invariant that checks only the code and markdown from a notebook (not the results)"""
+
+    def calculate(
+        self, file, stat, runner=None
+    ):  # so that FileInvariant and FunctionInvariant can reuse it
+
+        # ppg1 had the option of using an external .md5sum file for the hash
+        # provided the filetime was exactly the same as the files'
+        # it would accept it instead of calculating it's own.
+        # todo:  decide wether we want to keep this here,
+        # or move it into it's own class?
+        # the pro argument is basically, ppg1. compatibility.
+        # the draw back is the complexity for the common case,
+        # and the weakness of the md5 algorithm (can't easily upgrade though)
+
+        if runner is not None:
+            if not hasattr(runner, "_hash_file_cache"):
+                runner._hash_file_cache = {}
+            if file in runner._hash_file_cache:
+                return runner._hash_file_cache[file]
+            else:
+                h = hashers.hash_file(file)
+                runner._hash_file_cache[file] = h
+                return h
+        else:
+            return hashers.hash_str(NotebookInvariant.extract_notebook_content(file))
+
+
+    @staticmethod
+    def extract_notebook_content(file):
+        cells = json.loads(file.read_text())['cells']
+        out = ""
+        for cell in cells:
+            if cell['cell_type'] in ('markdown', 'code'):
+                out += '--\n' + cell['source'][0] + "\n\n"
+        return out
+
+
+

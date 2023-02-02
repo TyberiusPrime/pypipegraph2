@@ -24,6 +24,7 @@ from .jobs import (
     Job,
     JobList,
     SharedMultiFileGeneratingJob,
+    NotebookInvariant
 )
 from .exceptions import (
     PPGException,
@@ -213,6 +214,7 @@ __all__ = [
     "FunctionInvariant",
     "FileInvariant",
     "ParameterInvariant",
+    "NotebookInvariant",
     "JobGeneratingJob",
     "SharedMultiFileGeneratingJob",
     "PPGException",
