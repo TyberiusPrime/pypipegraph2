@@ -640,6 +640,21 @@ class PyPipeGraph:
         self.job_dag.add_node(job.job_id)
         # assert len(self.jobs) == len(self.job_dag) - we verify this when running
 
+
+    def find_job_from_file(self, filename):
+        if isinstance(filename, (Path)):
+            job_id = str(filename)
+        return self.jobs[self.outputs_to_job_ids[filename]]
+
+    def find_job(self, job_or_id_or_path):
+        from . jobs import Job
+        if isinstance(job_or_id_or_path), (str, Path)):
+            return self.find_job_from_id(job_or_id_or_path))
+        elif isinstance(job_or_id_or_path), Job):
+            return job_or_id
+        else:
+            raise TypeError("job was not a Job nor a job_id")
+
     def add_edge(self, upstream_job, downstream_job):
         """Declare a dependency between jobs
 
