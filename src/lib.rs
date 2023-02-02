@@ -6,6 +6,7 @@ use pyo3::types::PyDict;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Once;
 
@@ -36,7 +37,7 @@ pub enum PPGEvaluatorError {
     )]
     InternalError(String),
 }
-pub (crate) trait PPGEvaluatorStrategy {
+pub(crate) trait PPGEvaluatorStrategy {
     fn output_already_present(&self, query: &str) -> bool;
     fn is_history_altered(
         &self,
@@ -90,9 +91,7 @@ impl PPGEvaluatorStrategy for StrategyForTesting {
         jobs: &[engine::NodeInfo],
     ) -> String {
         let mut names = Vec::new();
-        let upstreams = 
-            dag
-            .neighbors_directed(node_idx, petgraph::Direction::Incoming);
+        let upstreams = dag.neighbors_directed(node_idx, petgraph::Direction::Incoming);
         for upstream_idx in upstreams {
             names.push(jobs[upstream_idx].get_job_id());
         }
@@ -137,11 +136,40 @@ pub fn start_logging() {
         });
     }
 }
+pub fn start_logging_to_file(filename: impl AsRef<Path>) {
+    let start_time = std::time::Instant::now();
+    if !LOGGER_INIT.is_completed() {
+        LOGGER_INIT.call_once(move || {
+            let fh = std::fs::File::create(filename).expect("Could not open log file");
+            let start_time2 = start_time;
+            env_logger::builder()
+                .filter_level(log::LevelFilter::Debug)
+                .format(move |buf, record| {
+                    let filename = record
+                        .file()
+                        .unwrap_or("unknown")
+                        .trim_start_matches("src/");
+                    let ff = format!("{:15}:{:5} | {:5} |", filename, record.line().unwrap_or(0), record.level());
+                    writeln!(
+                        buf,
+                        "{}\t{:.4}ms | {}",
+                        ff,
+                        (std::time::Instant::now() - start_time2).as_millis(),
+                        //chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
+                        record.args()
+                    )
+                })
+                .is_test(true)
+                .target(env_logger::Target::Pipe(Box::new(fh)))
+                .init()
+        })
+    }
+}
 
 // simulates a complete (deterministic)
 // run - jobs just register that they've been run,
 // and output a 'dummy' history.
-pub (crate) struct TestGraphRunner {
+pub(crate) struct TestGraphRunner {
     #[allow(clippy::type_complexity)]
     pub setup_graph: Box<dyn Fn(&mut PPGEvaluator<StrategyForTesting>)>,
     pub run_counters: HashMap<String, usize>,
@@ -494,7 +522,7 @@ impl PyPPG2Evaluator {
         }
     }
 
-    pub fn debug(&self) -> String{
+    pub fn debug(&self) -> String {
         self.evaluator.debug_()
     }
 }
@@ -506,11 +534,19 @@ fn enable_logging() -> PyResult<()> {
     error!("hello from rust");
     Ok(())
 }
+/// Formats the sum of two numbers as string.
+#[pyfunction]
+fn enable_logging_to_file(filename: &str) -> PyResult<()> {
+    start_logging_to_file(filename);
+    error!("hello from rust");
+    Ok(())
+}
 
 /// A Python module implemented in Rust.
 #[pymodule]
 fn pypipegraph2(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(enable_logging, m)?)?;
+    m.add_function(wrap_pyfunction!(enable_logging_to_file, m)?)?;
     m.add_class::<PyPPG2Evaluator>()?;
     Ok(())
 }
