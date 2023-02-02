@@ -297,7 +297,7 @@ class Job:
                 if isinstance(other_job, Path):
                     other_job = str(other_job)
                 try:
-                    o_job = global_pipegraph.find_job_from_id(other_job)
+                    o_job = global_pipegraph.find_job_from_file(other_job)
                 except KeyError as e:
                     raise KeyError(
                         f"Dependency specified via job_id {repr(other_job)}. No such job found"
