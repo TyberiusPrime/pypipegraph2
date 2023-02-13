@@ -12,6 +12,11 @@ crate-type = ["cdylib", "rlib"]
 name = "ppg2_profileing"
 path = "src/main.rs"
 
+[[bin]]
+name = "ppg2_fuzzying"
+path = "src/fuzzying.rs"
+
+
 [dependencies]
 pyo3 = { version = "0.15.1", features = ["extension-module"] }
 petgraph = "0.6.2"
@@ -20,7 +25,7 @@ log = "0.4.14"
 # ctrlc = {version="3.2.1", features = ["termination"] }
 colored = "2.0.0"
 thiserror = "1.0.37"
-
+itertools = "0.10.5"
 
 [package.metadata.maturin]
 python-source = "python"

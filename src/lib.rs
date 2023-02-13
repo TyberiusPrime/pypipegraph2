@@ -18,7 +18,7 @@ mod engine;
 #[cfg(test)]
 mod tests;
 
-use engine::{JobKind, PPGEvaluator};
+pub use engine::{JobKind, PPGEvaluator};
 
 static LOGGER_INIT: Once = Once::new();
 
@@ -37,7 +37,7 @@ pub enum PPGEvaluatorError {
     )]
     InternalError(String),
 }
-pub(crate) trait PPGEvaluatorStrategy {
+pub trait PPGEvaluatorStrategy {
     fn output_already_present(&self, query: &str) -> bool;
     fn is_history_altered(
         &self,
@@ -169,7 +169,7 @@ pub fn start_logging_to_file(filename: impl AsRef<Path>) {
 // simulates a complete (deterministic)
 // run - jobs just register that they've been run,
 // and output a 'dummy' history.
-pub(crate) struct TestGraphRunner {
+pub struct TestGraphRunner {
     #[allow(clippy::type_complexity)]
     pub setup_graph: Box<dyn Fn(&mut PPGEvaluator<StrategyForTesting>)>,
     pub run_counters: HashMap<String, usize>,
@@ -200,7 +200,8 @@ impl TestGraphRunner {
         &mut self,
         jobs_to_fail: &[&str],
     ) -> Result<PPGEvaluator<StrategyForTesting>, PPGEvaluatorError> {
-        debug!("GOGOGO");
+        debug!("");
+        debug!("GOGOGO ----------------------------------------------------------------");
         let strat = StrategyForTesting::new();
         for k in self.already_done.iter() {
             strat.already_done.borrow_mut().insert(k.to_string());
@@ -216,6 +217,8 @@ impl TestGraphRunner {
         while !g.is_finished() {
             let to_run = g.query_ready_to_run();
             if to_run.is_empty() {
+                start_logging();
+                debug!("{}", g.debug_());
                 g.debug_is_finished();
             }
             assert!(!to_run.is_empty());
