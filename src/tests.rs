@@ -175,9 +175,7 @@ pub fn output_of_leafs_captured() {
     assert!(history.contains_key("A!!!B"));
     assert!(history.contains_key("B!!!"));
     assert!(history.contains_key("B")); //the one we named the test after
-
 }
-
 
 #[test]
 pub fn ephemeral_nested() {
@@ -737,31 +735,6 @@ fn test_bigish_linear_graph() {
 }
 
 #[test]
-fn test_ephemeral_one_ephemeral_two_downstreams() {
-    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
-        g.add_node("TA", JobKind::Ephemeral);
-        g.add_node("B", JobKind::Output);
-        g.add_node("C", JobKind::Output);
-        g.depends_on("B", "TA");
-        g.depends_on("C", "TA");
-    }
-    let mut ro = TestGraphRunner::new(Box::new(create_graph));
-    let g = ro.run(&Vec::new()).unwrap();
-    let new_history = g.new_history().unwrap();
-    assert!(new_history.contains_key("TA"));
-    assert!(new_history.contains_key("B"));
-    assert!(new_history.contains_key("C"));
-    assert!(ro.run_counters.get("TA") == Some(&1));
-    assert!(ro.run_counters.get("B") == Some(&1));
-    assert!(ro.run_counters.get("C") == Some(&1));
-
-    let g = ro.run(&Vec::new()).unwrap();
-    assert!(ro.run_counters.get("TA") == Some(&1));
-    assert!(ro.run_counters.get("B") == Some(&1));
-    assert!(ro.run_counters.get("C") == Some(&1));
-}
-
-#[test]
 fn test_ephemeral_triangle_just() {
     /* ↓ ←➔ ↑
       *
@@ -836,6 +809,7 @@ fn test_ephemeral_triangle_plus() {
         .insert("E".to_string(), "trigger_inval".to_string());
     let g = ro.run(&Vec::new()).unwrap();
 
+    dbg!(&ro.run_counters);
     assert!(ro.run_counters.get("TA") == Some(&2));
     assert!(ro.run_counters.get("TB") == Some(&2));
     assert!(ro.run_counters.get("TC") == Some(&2));
@@ -1215,6 +1189,32 @@ fn test_two_ephemerals_one_output_crosslinked() {
     assert!(ro.run_counters.get("B") == Some(&1));
     assert!(ro.run_counters.get("C") == Some(&1));
 }
+
+/* #[test] some as test_one_ephemeral_two_outputs part 1 & 2
+fn test_ephemeral_one_ephemeral_two_downstreams() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("TA", JobKind::Ephemeral);
+        g.add_node("B", JobKind::Output);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("B", "TA");
+        g.depends_on("C", "TA");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&Vec::new()).unwrap();
+    let new_history = g.new_history().unwrap();
+    assert!(new_history.contains_key("TA"));
+    assert!(new_history.contains_key("B"));
+    assert!(new_history.contains_key("C"));
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+
+    let g = ro.run(&Vec::new()).unwrap();
+    assert!(ro.run_counters.get("TA") == Some(&1));
+    assert!(ro.run_counters.get("B") == Some(&1));
+    assert!(ro.run_counters.get("C") == Some(&1));
+} */
+
 
 #[test]
 fn test_one_ephemeral_two_outputs() {
@@ -1773,8 +1773,10 @@ fn test_upstream_failure_but_history_still_captured() {
         g.add_node("A", JobKind::Output);
         g.add_node("B", JobKind::Output);
         g.add_node("C", JobKind::Output);
+        g.add_node("D:E:F", JobKind::Output);
         g.depends_on("B", "A");
         g.depends_on("C", "B");
+        g.depends_on("D:E:F", "B");
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&[]).unwrap();
@@ -1782,6 +1784,7 @@ fn test_upstream_failure_but_history_still_captured() {
     assert!(history.contains_key("A"));
     assert!(history.contains_key("B"));
     assert!(history.contains_key("C"));
+    assert!(history.contains_key("D:E:F"));
 
     //start_logging_to_file("shu.txt");
     ro.already_done.remove("A");
@@ -1790,10 +1793,34 @@ fn test_upstream_failure_but_history_still_captured() {
     let history = g.new_history().unwrap();
     assert!(history.contains_key("B"));
     assert!(history.contains_key("C"));
+
+    assert!(history.contains_key("B!!!"));
+    assert!(history.contains_key("C!!!"));
+    assert!(history.contains_key("D:E:F"));
+    assert!(history.contains_key("D:E:F!!!"));
+
     assert!(!history.contains_key("A"));
+    assert!(!history.contains_key("A!!!"));
 
+    assert!(history.contains_key("A!!!B"));
+    assert!(history.contains_key("B!!!C"));
+    assert!(history.contains_key("B!!!D:E:F"));
+}
+#[test]
 
-
+fn test_fuzz_0() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Output);
+        g.add_node("N2", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N2", "N1");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    start_logging();
+    let g = ro.run(&[]).unwrap();
+    let g = ro.run(&[]).unwrap();
 }
 
 
@@ -1861,17 +1888,105 @@ fn test_field_230202b() {
     assert!(g.is_finished());
     }
 
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+
+    let mut g = ro.run(&[]).unwrap();
+    assert!(g.is_finished());
+    }
+
+#[test]
+fn test_field_230202b() {
+    //this is definatly a bug, but 291 is ephemeral, 
+    //so it *shouldn't matter*
+ fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+
+    g.add_node("239", JobKind::Ephemeral);
+    g.add_node("289", JobKind::Output);
+    g.add_node("291", JobKind::Ephemeral);
+    g.add_node("301", JobKind::Output);
+
+    let edges = vec![
+    ("239", "291"),
+    ("239", "289"),
+    ("289", "291"),
+    ("291", "301"),
+    ];
+
+    for (a,b) in edges {
+        if g.contains_node(a) && g.contains_node(b){
+            g.depends_on(b,a);
+            println!("(\"{}\", \"{}\"),", a,b);
+        }
+    }
+
+
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+
+    let mut g = ro.run(&[]).unwrap();
+    assert!(g.is_finished());
+    }
+
+    
+    
+fn test_fuzz_0() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Output);
+        g.add_node("N2", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N2", "N1");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    start_logging();
+    let g = ro.run(&[]).unwrap();
+    let g = ro.run(&[]).unwrap();
+}
+
+#[test]
+fn test_fuzz_1() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Output);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N2", "N1");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    let g = ro.run(&[]).unwrap();
+}
+#[test]
+fn test_fuzz_2() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Always);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.depends_on("N3", "N2");
+        g.depends_on("N3", "N1");
+        g.depends_on("N2", "N0");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    start_logging();
+    let g = ro.run(&[]).unwrap();
+    let g = ro.run(&[]).unwrap();
+}
+
 
 /*
 #[test]
 fn test_multi_file_job_gaining_output() {
-    // the rust engine does not know anything about filenames or jobs with 'multiple' 
+    // the rust engine does not know anything about filenames or jobs with 'multiple'
     // outputs
     // we fake that by delegating to is_history_altered on the python side.
     // but adding/removing an output will retrigger the downstreams
     // because the job name changes and we track input job names.
     // now I suppose we could delegate this to python.
-    // which has the 'filename-dependncy-graph' to actually make the decision, right?, 
+    // which has the 'filename-dependncy-graph' to actually make the decision, right?,
     // I already have that test    todo!()
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("A::B", JobKind::Output);
