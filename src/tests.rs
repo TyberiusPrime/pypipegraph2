@@ -1215,7 +1215,6 @@ fn test_ephemeral_one_ephemeral_two_downstreams() {
     assert!(ro.run_counters.get("C") == Some(&1));
 } */
 
-
 #[test]
 fn test_one_ephemeral_two_outputs() {
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
@@ -1973,6 +1972,27 @@ fn test_fuzz_2() {
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     start_logging();
     let g = ro.run(&[]).unwrap();
+    let g = ro.run(&[]).unwrap();
+}
+
+#[test]
+fn test_fuzz_3() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Always);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Output);
+        g.depends_on("N4", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N1");
+        g.depends_on("N4", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N3");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    start_logging_to_file("debug.log");
     let g = ro.run(&[]).unwrap();
 }
 

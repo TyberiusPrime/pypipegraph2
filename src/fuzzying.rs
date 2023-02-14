@@ -91,7 +91,7 @@ impl AllEdges {
 fn main() {
     println!("running fuzz test.");
 
-    let node_count = 3;
+    let node_count = 5;
 
     let mut n = AllNodes::new(node_count);
     let mut count = 0;
@@ -101,14 +101,20 @@ fn main() {
         let mut m = AllEdges::new(node_count);
         loop {
             {
-                let n2 = n.clone();
-                let m2 = m.clone();
-                let mut t = TestGraphRunner::new(Box::new(move |g| {
-                    n2.apply(g);
-                    m2.apply(g);
-                }));
-                t.run(&[]).unwrap();
-                t.run(&[]).expect("failuer");
+                if count > 42108 {
+                    println!("{}", count);
+                    let n2 = n.clone();
+                    let m2 = m.clone();
+                    let mut t = TestGraphRunner::new(Box::new(move |g| {
+                        n2.apply(g);
+                        m2.apply(g);
+                    }));
+                    println!("one");
+                    let g = t.run(&[]).unwrap();
+                    println!("{}", g.debug_());
+                    println!("two");
+                    t.run(&[]).expect("failure");
+                }
                 count += 1;
             }
             if !m.advance() {
