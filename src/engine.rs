@@ -192,6 +192,7 @@ pub struct NodeInfo {
     job_id: String,
     state: JobState,
     history_output: Option<String>,
+    last_considered_in_gen: usize,
 }
 
 impl NodeInfo {
@@ -280,6 +281,8 @@ macro_rules! reconsider_job {
         $jobs: expr,
         $node_idx: expr,
         $new_signals: expr
+        $gen: expr
+        do only add if node gen is older than gen
     ) => {
         let mut do_add = true;
         for s in $new_signals.iter() {
@@ -290,6 +293,8 @@ macro_rules! reconsider_job {
                 );
                 do_add = false;
                 break;
+            }
+            if s.gen == gen {
             }
         }
         if do_add {
@@ -319,6 +324,7 @@ pub struct PPGEvaluator<T: PPGEvaluatorStrategy> {
     jobs_ready_for_cleanup: HashSet<String>,
     topo: Option<Vec<NodeIndex>>,
     signals: VecDeque<Signal>,
+    gen: usize,
 }
 
 impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
@@ -341,6 +347,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             jobs_ready_for_cleanup: HashSet::new(),
             topo: None,
             signals: VecDeque::new(),
+            gen: 0,
         }
     }
 
@@ -367,6 +374,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             job_id: job_id.to_string(),
             state,
             history_output: None,
+            last_considered_in_gen: 0,
         };
         let idx = self.jobs.len() as NodeIndex;
         if self
@@ -854,6 +862,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
     }
 
+    fn next_gen(&mut self) {
+        self.gen += 1;
+    }
+
     pub fn event_now_running(&mut self, job_id: &str) -> Result<(), PPGEvaluatorError> {
         let idx = self.job_id_to_node_idx.get(job_id).expect("Unknown job id");
         let j = &mut self.jobs[*idx as usize];
@@ -861,11 +873,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             JobState::Always(JobStateAlways::ReadyToRun) => {
                 self.jobs_ready_to_run.remove(job_id);
                 set_node_state!(j, JobState::Always(JobStateAlways::Running));
+                self.next_gen();
                 Ok(())
             }
             JobState::Output(JobStateOutput::ReadyToRun) => {
                 self.jobs_ready_to_run.remove(job_id);
                 set_node_state!(j, JobState::Output(JobStateOutput::Running));
+                self.next_gen();
                 Ok(())
             }
             JobState::Ephemeral(JobStateEphemeral::ReadyToRun(validation_status)) => {
@@ -874,6 +888,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     j,
                     JobState::Ephemeral(JobStateEphemeral::Running(validation_status))
                 );
+                self.next_gen();
                 Ok(())
             }
             _ => Err(PPGEvaluatorError::APIError(format!(
@@ -1007,6 +1022,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         JobState::Always(state) => match state {
                             JobStateAlways::Undetermined => {
                                 set_node_state!(j, JobState::Always(JobStateAlways::ReadyToRun));
+                                self.next_gen();
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(
@@ -1017,6 +1033,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         JobState::Output(state) => match state {
                             JobStateOutput::NotReady(ValidationStatus::Invalidated) => {
                                 set_node_state!(j, JobState::Output(JobStateOutput::ReadyToRun));
+                                self.next_gen();
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(format!(
@@ -1033,6 +1050,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                         ValidationStatus::Invalidated
                                     ))
                                 );
+                                self.next_gen();
                             }
                             // validated happens when the job is required
                             JobStateEphemeral::NotReady(ValidationStatus::Validated)
@@ -1043,6 +1061,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                         ValidationStatus::Validated
                                     ))
                                 );
+                                self.next_gen();
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(format!(
@@ -1073,6 +1092,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     j,
                                     JobState::Output(JobStateOutput::FinishedSkipped)
                                 );
+                                self.next_gen();
                                 match self.history.get(&j.job_id) {
                                     Some(x) => j.history_output = Some(x.to_string()),
                                     None => {
@@ -1082,8 +1102,12 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                         )))
                                     }
                                 }
-                                Self::reconsider_delayed_upstreams(&mut self.dag, &mut self.jobs, node_idx, &mut new_signals);
-
+                                Self::reconsider_delayed_upstreams(
+                                    &mut self.dag,
+                                    &mut self.jobs,
+                                    node_idx,
+                                    &mut new_signals,
+                                );
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(format!(
@@ -1099,6 +1123,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     j,
                                     JobState::Ephemeral(JobStateEphemeral::FinishedSkipped,)
                                 );
+                                self.next_gen();
                                 j.history_output = self.history.get(&j.job_id).cloned();
                             }
                             JobStateEphemeral::NotReady(ValidationStatus::Invalidated) => {
@@ -1106,6 +1131,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     j,
                                     JobState::Ephemeral(JobStateEphemeral::FinishedSkipped,)
                                 );
+                                self.next_gen();
                                 j.history_output = self.history.get(&j.job_id).cloned();
                                 // yes the assert would be better above the state setting
                                 // but the borrow checker disagrees
@@ -1151,9 +1177,11 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     match j.state {
                         JobState::Always(JobStateAlways::Running) => {
                             set_node_state!(j, JobState::Always(JobStateAlways::FinishedSuccess));
+                            self.next_gen();
                         }
                         JobState::Output(JobStateOutput::Running) => {
                             set_node_state!(j, JobState::Output(JobStateOutput::FinishedSuccess));
+                            self.next_gen();
                         }
                         JobState::Ephemeral(JobStateEphemeral::Running(_)) => {
                             set_node_state!(
@@ -1162,6 +1190,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     JobStateEphemeral::FinishedSuccessNotReadyForCleanup,
                                 )
                             );
+                            self.next_gen();
                         }
                         _ => {
                             return Err(PPGEvaluatorError::InternalError(format!(
@@ -1177,15 +1206,18 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     match j.state {
                         JobState::Always(JobStateAlways::Running) => {
                             set_node_state!(j, JobState::Always(JobStateAlways::FinishedFailure));
+                            self.next_gen();
                         }
                         JobState::Output(JobStateOutput::Running) => {
                             set_node_state!(j, JobState::Output(JobStateOutput::FinishedFailure));
+                            self.next_gen();
                         }
                         JobState::Ephemeral(JobStateEphemeral::Running(_)) => {
                             set_node_state!(
                                 j,
                                 JobState::Ephemeral(JobStateEphemeral::FinishedFailure)
                             );
+                            self.next_gen();
                         }
                         _ => {
                             return Err(PPGEvaluatorError::InternalError(format!(
@@ -1217,18 +1249,21 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 j,
                                 JobState::Always(JobStateAlways::FinishedUpstreamFailure)
                             );
+                            self.next_gen();
                         }
                         JobState::Output(JobStateOutput::NotReady(_)) => {
                             set_node_state!(
                                 j,
                                 JobState::Output(JobStateOutput::FinishedUpstreamFailure)
                             );
+                            self.next_gen();
                         }
                         JobState::Ephemeral(JobStateEphemeral::NotReady(_)) => {
                             set_node_state!(
                                 j,
                                 JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure,)
                             );
+                            self.next_gen();
                         }
                         _ => {
                             return Err(PPGEvaluatorError::InternalError(format!(
@@ -1266,6 +1301,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 j,
                                 JobState::Ephemeral(JobStateEphemeral::FinishedSuccessCleanedUp,)
                             );
+                            self.next_gen();
                             self.jobs_ready_for_cleanup.remove(&j.job_id);
                         }
                         _ => {
@@ -1330,7 +1366,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     ValidationStatus::Unknown | ValidationStatus::Invalidated => return Ok(false),
                     ValidationStatus::Validated => {}
                 },
-                JobState::Output(JobStateOutput::FinishedSkipped) => {},
+                JobState::Output(JobStateOutput::FinishedSkipped) => {}
                 _ => {
                     return Err(PPGEvaluatorError::InternalError(format!(
                         "should not happen 1272 {:?}",
@@ -1558,6 +1594,11 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             }
 
             else {
+                debug!(
+                    "\t\t edge Counted as not done {} {}",
+                    jobs[upstream_idx].job_id, jobs[node_idx].job_id
+                );
+
                 not_done += 1;
             }
         }
@@ -1655,6 +1696,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                             jobs[node_idx as usize],
                                             JobState::Output(JobStateOutput::NotReady(solid_vs),)
                                         );
+                                        self.next_gen();
 
                                         Self::propagate_job_required(dag, jobs, node_idx)
                                     }
@@ -1730,6 +1772,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             jobs[node_idx as usize],
                             JobState::Ephemeral(JobStateEphemeral::ReadyButDelayed)
                         );
+                        self.next_gen();
 
                         reconsider_job!(jobs, node_idx, new_signals);
                     } else {
@@ -1792,6 +1835,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 jobs[node_idx as usize],
                                 JobState::Ephemeral(JobStateEphemeral::NotReady(solid_vs),)
                             );
+                            self.next_gen();
                             // not the most elegant control flow, but ok.
                             //
                             reconsider_job!(jobs, node_idx, new_signals);
@@ -1838,9 +1882,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     JobState::Output(JobStateOutput::NotReady(ValidationStatus::Unknown)) => {
                         return Ok(Required::Unknown)
                     }
-                    JobState::Output(JobStateOutput::FinishedSkipped) => {
-                        return Ok(Required::No)
-                    }
+                    JobState::Output(JobStateOutput::FinishedSkipped) => return Ok(Required::No),
                     JobState::Ephemeral(JobStateEphemeral::NotReady(ValidationStatus::Unknown)) => {
                         return Ok(Required::Unknown)
                     }
@@ -1942,6 +1984,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             jobs[upstream_idx],
                             JobState::Ephemeral(JobStateEphemeral::FinishedSuccessReadyForCleanup,)
                         );
+                        self.next_gen();
                         jobs_ready_for_cleanup.insert(jobs[upstream_idx].job_id.clone());
                     } else {
                         debug!(
@@ -1952,6 +1995,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             jobs[upstream_idx],
                             JobState::Ephemeral(JobStateEphemeral::FinishedSuccessSkipCleanup,)
                         );
+                        self.next_gen();
                     }
                 }
             }
