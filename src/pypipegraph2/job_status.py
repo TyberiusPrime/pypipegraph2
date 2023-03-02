@@ -222,7 +222,7 @@ class JobStatus:
         # )
         # a bit of bug defense spray...
         if (
-            self.update_counter > len(self.runner.jobs) + 1
+            self.update_counter > len(self.runner.jobs) * 3 + 1
         ):  # seems like a reasonable upper bound
             raise ValueError('Updating this much points to a bug')
         self.update_counter += 1
