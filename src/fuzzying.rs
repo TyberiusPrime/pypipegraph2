@@ -163,16 +163,21 @@ fn main() {
         let mut m = AllEdges::new(node_count);
         loop {
             {
+                //we can't justh throw up a million threads...
+                //but a 100 should be able to saturate the CPU
                 if threads.len() > max_thread_count {
-                    let t: JoinHandle<_> = threads.pop_front().unwrap();
-                    match t.join() {
-                        Ok(_) => {}
-                        Err(e) => println!("A thread failed. {:?}", e),
+                    while threads.len() > max_thread_count - 20 {
+                        //epmirical...
+                        let t: JoinHandle<_> = threads.pop_front().unwrap();
+                        match t.join() {
+                            Ok(_) => {}
+                            Err(e) => println!("A thread failed. {:?}", e),
+                        }
                     }
                 }
                 if count >= start {
                     if (count % 1000) == 0 {
-                        let rate = count as f32 / start_time.elapsed().as_secs_f32();
+                        let rate = (count - start) as f32 / start_time.elapsed().as_secs_f32();
                         let remaining_seconds = (total - count - start) as f32 / rate;
                         println!(
                             "{} tested. {:.2}%. Rate: {:.2}/s. Errors: {}, Remaining: {:.2}s",
@@ -190,9 +195,11 @@ fn main() {
                     let error_count = error_count.clone();
                     threads.push_back(std::thread::spawn(move || {
                         let res = std::panic::catch_unwind(|| {
+                            let n2b = n2.clone();
+                            let m2b = m2.clone();
                             let mut t = TestGraphRunner::new(Box::new(move |g| {
-                                n2.apply(g);
-                                m2.apply(g);
+                                n2b.apply(g);
+                                m2b.apply(g);
                             }));
                             let g = t.run(&[]);
                             match g {
@@ -220,8 +227,16 @@ fn main() {
                             Ok(_) => {}
                             Err(e) => {
                                 println!("Caught panic! at count {}: {:?}", inner_count, e);
+                                *error_count.lock().unwrap() += 1;
+                                let t = TestGraphRunner::new(Box::new(move |g| {
+                                    n2.apply(g);
+                                    m2.apply(g);
+                                }));
+
+                                let d = t.debug_();
+                                println!("{}", d);
+                                write_error_to_file(inner_count, &d[..]);
                             }
-                                    *error_count.lock().unwrap() += 1;
                         }
                     }));
                 }

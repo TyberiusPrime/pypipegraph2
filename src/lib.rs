@@ -201,6 +201,14 @@ impl TestGraphRunner {
         }
     }
 
+    pub fn debug_(&self) -> String {
+        let strat = StrategyForTesting::new();
+        let mut g = PPGEvaluator::new_with_history(self.history.clone(), strat);
+
+        (self.setup_graph)(&mut g);
+        g.debug_()
+    }
+
     pub fn run(
         &mut self,
         jobs_to_fail: &[&str],
