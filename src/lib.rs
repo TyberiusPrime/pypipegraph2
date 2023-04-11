@@ -242,9 +242,9 @@ impl TestGraphRunner {
         while !g.is_finished() {
             let to_run = g.query_ready_to_run();
             if to_run.is_empty() {
-                start_logging();
-                debug!("{}", g.debug_());
-                g.debug_is_finished();
+                //  start_logging();
+                // debug!("{}", g.debug_());
+                //g.debug_is_finished();
             }
             assert!(!to_run.is_empty());
             for job_id in to_run.iter() {
@@ -256,7 +256,10 @@ impl TestGraphRunner {
                 self.run_order.push(job_id.to_string());
                 *self.run_counters.entry(job_id.clone()).or_insert(0) += 1;
                 if jobs_to_fail.contains(&&job_id[..]) {
-                    g.event_job_finished_failure(job_id).unwrap();
+                    match g.event_job_finished_failure(job_id) {
+                        Ok(_) => {}
+                        Err(e) => return Err(RunError(g, e.into())),
+                    }
                 } else {
                     match g.event_job_finished_success(
                         job_id,

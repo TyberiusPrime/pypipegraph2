@@ -7,8 +7,8 @@
 * that's all the DAGs, or at least their iso-equivalences)
 *
 *  At 6 that's already a lot of nodes,
-*  but it does finish in under 10 minutes in release.
-*  Running at a cool 40k iterations on my desktop.
+*  but it does finish in under 3 minutes in release.
+*  Running at a cool 400k iterations on my desktop.
 *
 *  5 is       248.832 variations
    6 is    23.887.872
@@ -17,17 +17,15 @@
 use std::{
     sync::{Arc, Mutex},
     thread,
-    thread::JoinHandle,
 };
 
 use pypipegraph2::{JobKind, PPGEvaluator, StrategyForTesting, TestGraphRunner};
 
 use backtrace::Backtrace;
-use log::debug;
 use std::cell::RefCell;
 
 thread_local! {
-    static Backtrace: RefCell<Option<Backtrace>> = RefCell::new(None);
+    static BACKTRACE: RefCell<Option<Backtrace>> = RefCell::new(None);
 }
 
 #[derive(Clone)]
@@ -134,7 +132,10 @@ impl AllEdges {
 
 fn write_error_to_file(node_count: usize, edge_count: usize, message: &str) {
     std::fs::write(
-        format!("fuzzying_error_{}_{}.txt", node_count, edge_count),
+        format!(
+            "iteration_without_fail_error_{}_{}.txt",
+            node_count, edge_count
+        ),
         message,
     )
     .ok();
@@ -143,7 +144,7 @@ fn write_error_to_file(node_count: usize, edge_count: usize, message: &str) {
 fn main() {
     std::panic::set_hook(Box::new(|_| {
         let trace = Backtrace::new();
-        Backtrace.with(move |b| b.borrow_mut().replace(trace));
+        BACKTRACE.with(move |b| b.borrow_mut().replace(trace));
     }));
 
     println!("running fuzz test.");
@@ -159,7 +160,7 @@ fn main() {
 
     //
 
-    let mut n = AllNodes::new(problem_size);
+    let n = AllNodes::new(problem_size);
     let node_total = n.len();
     let edges_per_node_variation = {
         let m = AllEdges::new(problem_size);
@@ -173,7 +174,7 @@ fn main() {
         total
     };
     let start_time = std::time::Instant::now();
-    let mut errors: Arc<Mutex<Vec<(usize, usize)>>> = Arc::new(Mutex::new(Vec::new()));
+    let errors: Arc<Mutex<Vec<(usize, usize)>>> = Arc::new(Mutex::new(Vec::new()));
 
     let mut threads = Vec::new();
     let max_thread_count = num_cpus::get(); //system cpu count ;
@@ -281,7 +282,7 @@ if (edge_count == 24) {
                                 "Fuzzying error at node_count {node_count}, edge_count: {edge_count}\nerror: {:?}",
                                 msg
                             );
-                            let b = Backtrace.with(|b| b.borrow_mut().take()).unwrap();
+                            let b = BACKTRACE.with(|b| b.borrow_mut().take()).unwrap();
                             d.push_str(&format!("Backtrace: {:?}", b));
                             d.push_str(&t.debug_());
                             println!("{}", d);
