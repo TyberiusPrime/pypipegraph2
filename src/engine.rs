@@ -299,8 +299,7 @@ macro_rules! reconsider_job {
             if $gen > last_considered_in_gen {
                 $new_signals.push(NewSignal!(SignalKind::ConsiderJob, $node_idx, $jobs));
                 $jobs[$node_idx].last_considered_in_gen = $gen;
-            } else 
-            {
+            } else {
                 debug!("not adding signal, was already considered in this gen");
             }
         }
@@ -1043,7 +1042,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(
-                                    "unexpected".to_string(),
+                                        format!("Unexpected state. Job {:?} was in state {:?} when it should have been in state Undetermined", j, j.state)
                                 ))
                             }
                         },
@@ -1181,7 +1180,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
                     for downstream_idx in downstreams {
                         reconsider_job!(self.jobs, downstream_idx, new_signals, self.gen.get());
-                        error!("Here new signals be empty");
+                        debug!("reconsidering lead to no update, all current gen");
                         //assert!(!new_signals.is_empty());
                     }
                     Self::consider_upstreams_for_cleanup(
@@ -1677,7 +1676,9 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
         match jobs[node_idx as usize].state {
             JobState::Always(JobStateAlways::Undetermined) => {
+
                 if Self::all_upstreams_done(dag, jobs, node_idx) {
+                    Self::remove_consider_signals(new_signals, node_idx);
                     new_signals.push(NewSignal!(SignalKind::JobReadyToRun, node_idx, jobs));
                 }
             }
@@ -1740,7 +1741,12 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                         | JobState::Ephemeral(JobStateEphemeral::NotReady(
                                             ValidationStatus::Validated,
                                         )) => {
-                                            reconsider_job!(jobs, upstream_idx, new_signals, gen.get());
+                                            reconsider_job!(
+                                                jobs,
+                                                upstream_idx,
+                                                new_signals,
+                                                gen.get()
+                                            );
                                         }
                                         _ => {}
                                     }
@@ -1769,7 +1775,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         if Self::all_upstreams_done(dag, jobs, node_idx) {
                             new_signals.push(NewSignal!(SignalKind::JobReadyToRun, node_idx, jobs))
                         } else {
-                            Self::reconsider_delayed_upstreams(dag, jobs, node_idx, new_signals, gen);
+                            Self::reconsider_delayed_upstreams(
+                                dag,
+                                jobs,
+                                node_idx,
+                                new_signals,
+                                gen,
+                            );
                             //debug!("{}", Self::debug(dag, jobs));
                             //new_signals.push(NewSignal!(SignalKind::JobMustBeDone,node_idx,
                             //jobs));
@@ -1933,7 +1945,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
         node_idx: NodeIndex,
         new_signals: &mut Vec<Signal>,
-        gen: &Generation   ,
+        gen: &Generation,
     ) {
         let downstreams = dag.neighbors_directed(node_idx, Direction::Outgoing);
         for downstream_idx in downstreams {
@@ -1956,7 +1968,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 JobState::Ephemeral(state) => match state {
                     JobStateEphemeral::NotReady(_) => {
                         //new_signals.push(NewSignal!(SignalKind::ConsiderJob,upstream_idx, jobs));
-                        Self::reconsider_delayed_upstreams(dag, jobs, upstream_idx, new_signals, gen);
+                        Self::reconsider_delayed_upstreams(
+                            dag,
+                            jobs,
+                            upstream_idx,
+                            new_signals,
+                            gen,
+                        );
                     }
                     JobStateEphemeral::ReadyButDelayed => {
                         reconsider_job!(jobs, upstream_idx, new_signals, gen.get());

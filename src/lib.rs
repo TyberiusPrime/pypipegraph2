@@ -37,6 +37,7 @@ pub enum PPGEvaluatorError {
     )]
     InternalError(String),
 }
+
 pub trait PPGEvaluatorStrategy {
     fn output_already_present(&self, query: &str) -> bool;
     fn is_history_altered(
@@ -55,7 +56,7 @@ pub trait PPGEvaluatorStrategy {
     ) -> String;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StrategyForTesting {
     pub already_done: Rc<RefCell<HashSet<String>>>,
 }
@@ -171,6 +172,17 @@ pub fn start_logging_to_file(filename: impl AsRef<Path>) {
     }
 }
 
+pub struct RunError(
+    pub engine::PPGEvaluator<StrategyForTesting>,
+    pub PPGEvaluatorError,
+);
+
+impl std::fmt::Debug for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunError").field("error", &self.1).finish()
+    }
+}
+
 // simulates a complete (deterministic)
 // run - jobs just register that they've been run,
 // and output a 'dummy' history.
@@ -212,10 +224,7 @@ impl TestGraphRunner {
     pub fn run(
         &mut self,
         jobs_to_fail: &[&str],
-    ) -> Result<
-        PPGEvaluator<StrategyForTesting>,
-        (PPGEvaluator<StrategyForTesting>, PPGEvaluatorError),
-    > {
+    ) -> Result<PPGEvaluator<StrategyForTesting>, RunError> {
         debug!("");
         debug!("GOGOGO ----------------------------------------------------------------");
         let strat = StrategyForTesting::new();
@@ -242,7 +251,7 @@ impl TestGraphRunner {
                 debug!("Running {}", job_id);
                 match g.event_now_running(job_id) {
                     Ok(_) => {}
-                    Err(e) => return Err((g, e.into())),
+                    Err(e) => return Err(RunError(g, e.into())),
                 }
                 self.run_order.push(job_id.to_string());
                 *self.run_counters.entry(job_id.clone()).or_insert(0) += 1;
@@ -271,7 +280,7 @@ impl TestGraphRunner {
             }
             counter -= 1;
             if counter == 0 {
-                return Err((
+                return Err(RunError(
                     g,
                     PPGEvaluatorError::APIError(format!(
                         "run out of room, you nested them more than {} deep?",
@@ -291,7 +300,7 @@ impl TestGraphRunner {
         for (k, v) in {
             match g.new_history() {
                 Ok(x) => x,
-                Err(e) => return Err((g, e)),
+                Err(e) => return Err(RunError(g, e)),
             }
         }
         .iter()

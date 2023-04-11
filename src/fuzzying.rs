@@ -21,6 +21,13 @@ use std::{
 
 use pypipegraph2::{JobKind, PPGEvaluator, StrategyForTesting, TestGraphRunner};
 
+use backtrace::Backtrace;
+use std::cell::RefCell;
+
+thread_local! {
+    static Backtrace: RefCell<Option<Backtrace>> = RefCell::new(None);
+}
+
 #[derive(Clone)]
 struct AllNodes {
     state: Vec<u8>,
@@ -128,6 +135,11 @@ fn write_error_to_file(count: usize, message: &str) {
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|_| {
+        let trace = Backtrace::new();
+        Backtrace.with(move |b| b.borrow_mut().replace(trace));
+    }));
+
     println!("running fuzz test.");
     //read first command line argument into integer
     let args: Vec<String> = std::env::args().collect();
@@ -178,7 +190,7 @@ fn main() {
                 if count >= start {
                     if (count % 1000) == 0 {
                         let rate = (count - start) as f32 / start_time.elapsed().as_secs_f32();
-                        let remaining_seconds = (total - count - start) as f32 / rate;
+                        let remaining_seconds = (total - count) as f32 / rate;
                         println!(
                             "{} tested. {:.2}%. Rate: {:.2}/s. Errors: {}, Remaining: {:.2}s",
                             count,
@@ -225,15 +237,26 @@ fn main() {
                         });
                         match res {
                             Ok(_) => {}
-                            Err(e) => {
-                                println!("Caught panic! at count {}: {:?}", inner_count, e);
+                            Err(info) => {
+                                let msg = match info.downcast_ref::<&'static str>() {
+                                    Some(s) => *s,
+                                    None => match info.downcast_ref::<String>() {
+                                        Some(s) => &s[..],
+                                        None => "Box<dyn Any>",
+                                    },
+                                };
+
+                                println!("Caught panic! at count {}: {:?}", inner_count, info);
                                 *error_count.lock().unwrap() += 1;
                                 let t = TestGraphRunner::new(Box::new(move |g| {
                                     n2.apply(g);
                                     m2.apply(g);
                                 }));
 
-                                let d = t.debug_();
+                                let mut d = format!("Fuzzying error at count {}, node_count: {node_count}\nerror: {:?}", inner_count, msg);
+                                let b = Backtrace.with(|b| b.borrow_mut().take()).unwrap();
+                                d.push_str(&format!("Backtrace: {:?}", b));
+                                d.push_str(&t.debug_());
                                 println!("{}", d);
                                 write_error_to_file(inner_count, &d[..]);
                             }
@@ -252,16 +275,24 @@ fn main() {
             break;
         }
     }
-    let stop_time = std::time::Instant::now();
+    println!("waiting for threads to finish");
+    for t in threads.into_iter() {
+        t.join().ok();
+    }
+    println!("joined all");
+
     if *error_count.lock().unwrap() > 0 {
         panic!("{} errors occured", error_count.lock().unwrap());
+    } else {
+        println!("no errors occured");
     }
-    let duration = stop_time.duration_since(start_time);
+    let duration = start_time.elapsed();
+    let rate = (count - start) as f32 / duration.as_secs_f32();
     println!(
         "tested {} variations in {}s. Rate: {}",
         count,
         duration.as_secs(),
-        count / (duration.as_secs() as usize)
+        rate
     );
     println!("done running fuzz {count}");
 }
