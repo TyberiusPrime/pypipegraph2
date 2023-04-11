@@ -1,5 +1,6 @@
 use pypipegraph2::{
-    JobKind, PPGEvaluator, PPGEvaluatorStrategy, StrategyForTesting, TestGraphRunner, start_logging_to_file
+    start_logging_to_file, JobKind, PPGEvaluator, PPGEvaluatorStrategy, StrategyForTesting,
+    TestGraphRunner,
 };
 fn test_fuzz_3() {
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
@@ -23,8 +24,6 @@ fn test_fuzz_3() {
     let g = ro.run(&[]).unwrap();
     println!("done");
 }
-
-
 
 fn main() {
     println!("running big graph");

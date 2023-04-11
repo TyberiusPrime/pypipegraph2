@@ -74,7 +74,7 @@ class TestCoreLock:
         def inner(c):
             with mylock.using(1):
                 if c == 1:
-                    raise ValueError()
+                    raise ValueError("This should show up in the pytest warnings summary")
                 counter.append(c)
 
         for i in range(5):

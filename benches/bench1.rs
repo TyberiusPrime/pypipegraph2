@@ -11,7 +11,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| test_big_linear_graph_half_ephemeral(black_box(1000)))
     });
     c.bench_function("test_big_graph_in_layers", |b| {
-        b.iter(|| test_big_graph_in_layers(black_box(10), black_box(10),1))
+        b.iter(|| test_big_graph_in_layers(black_box(10), black_box(10), 1))
     });
 }
 

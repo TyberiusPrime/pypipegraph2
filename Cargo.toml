@@ -16,6 +16,11 @@ path = "src/main.rs"
 name = "ppg2_iterations_without_fail"
 path = "src/main_iterations_without_fail.rs"
 
+[[bin]]
+name = "ppg2_iterations_with_fail"
+path = "src/main_iterations_with_fail.rs"
+
+
 
 [dependencies]
 pyo3 = { version = "0.15.1", features = ["extension-module"] }
