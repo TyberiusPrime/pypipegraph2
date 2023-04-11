@@ -1929,6 +1929,39 @@ fn test_fuzz_3() {
     let g = ro.run(&[]).unwrap();
 }
 
+#[test]
+fn test_fuzz_4() {
+    //always can go from undetermined to ready to run when it's getting validated
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("0", JobKind::Ephemeral);
+        g.add_node("1", JobKind::Output);
+        g.add_node("2", JobKind::Output);
+        g.add_node("3", JobKind::Ephemeral);
+        g.add_node("4", JobKind::Output);
+        g.add_node("5", JobKind::Always);
+        let edges = vec![
+            ("1", "0"),
+            ("4", "0"),
+            ("2", "1"),
+            ("4", "1"),
+            ("5", "1"),
+            ("5", "2"),
+            ("4", "3"),
+            ("5", "4"),
+        ];
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(a, b);
+            }
+        }
+    }
+
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    start_logging();
+    let g = ro.run(&[]).unwrap();
+    let g = ro.run(&[]).unwrap();
+}
+
 /*
 #[test]
 fn test_multi_file_job_gaining_output() {
