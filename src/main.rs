@@ -1,6 +1,5 @@
 use pypipegraph2::{
-    start_logging_to_file, JobKind, PPGEvaluator, PPGEvaluatorStrategy, StrategyForTesting,
-    TestGraphRunner,
+    start_logging_to_file, JobKind, PPGEvaluator, StrategyForTesting, TestGraphRunner,
 };
 fn test_fuzz_3() {
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
@@ -18,10 +17,10 @@ fn test_fuzz_3() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     println!("first run");
-    let g = ro.run(&[]).unwrap();
+    let _g = ro.run(&[]).unwrap();
     start_logging_to_file("debug.log");
     println!("second run");
-    let g = ro.run(&[]).unwrap();
+    let _g = ro.run(&[]).unwrap();
     println!("done");
 }
 
