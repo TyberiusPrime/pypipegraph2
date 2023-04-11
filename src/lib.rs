@@ -149,7 +149,12 @@ pub fn start_logging_to_file(filename: impl AsRef<Path>) {
                         .file()
                         .unwrap_or("unknown")
                         .trim_start_matches("src/");
-                    let ff = format!("{:15}:{:5} | {:5} |", filename, record.line().unwrap_or(0), record.level());
+                    let ff = format!(
+                        "{:15}:{:5} | {:5} |",
+                        filename,
+                        record.line().unwrap_or(0),
+                        record.level()
+                    );
                     writeln!(
                         buf,
                         "{}\t{:.4}ms | {}",
@@ -199,7 +204,10 @@ impl TestGraphRunner {
     pub fn run(
         &mut self,
         jobs_to_fail: &[&str],
-    ) -> Result<PPGEvaluator<StrategyForTesting>, PPGEvaluatorError> {
+    ) -> Result<
+        PPGEvaluator<StrategyForTesting>,
+        (PPGEvaluator<StrategyForTesting>, PPGEvaluatorError),
+    > {
         debug!("");
         debug!("GOGOGO ----------------------------------------------------------------");
         let strat = StrategyForTesting::new();
@@ -224,7 +232,10 @@ impl TestGraphRunner {
             assert!(!to_run.is_empty());
             for job_id in to_run.iter() {
                 debug!("Running {}", job_id);
-                g.event_now_running(job_id)?;
+                match g.event_now_running(job_id) {
+                    Ok(_) => {}
+                    Err(e) => return Err((g, e.into())),
+                }
                 self.run_order.push(job_id.to_string());
                 *self.run_counters.entry(job_id.clone()).or_insert(0) += 1;
                 if jobs_to_fail.contains(&&job_id[..]) {
@@ -252,10 +263,13 @@ impl TestGraphRunner {
             }
             counter -= 1;
             if counter == 0 {
-                return Err(PPGEvaluatorError::APIError(format!(
-                    "run out of room, you nested them more than {} deep?",
-                    self.allowed_nesting
-                )));
+                return Err((
+                    g,
+                    PPGEvaluatorError::APIError(format!(
+                        "run out of room, you nested them more than {} deep?",
+                        self.allowed_nesting
+                    )),
+                ));
             }
 
             for c in g.query_ready_for_cleanup() {
@@ -266,7 +280,14 @@ impl TestGraphRunner {
         }
 
         self.history.clear();
-        for (k, v) in g.new_history()?.iter() {
+        for (k, v) in {
+            match g.new_history() {
+                Ok(x) => x,
+                Err(e) => return Err((g, e)),
+            }
+        }
+        .iter()
+        {
             self.history.insert(k.clone(), v.clone());
         }
         for k in already_done2.take().into_iter() {
@@ -501,7 +522,6 @@ impl PyPPG2Evaluator {
     pub fn jobs_running(&self) -> Vec<String> {
         self.evaluator.query_jobs_running().into_iter().collect()
     }
-
 
     pub fn jobs_ready_for_cleanup(&self) -> Vec<String> {
         self.evaluator

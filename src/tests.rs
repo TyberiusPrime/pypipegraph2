@@ -1822,126 +1822,59 @@ fn test_fuzz_0() {
     let g = ro.run(&[]).unwrap();
 }
 
-
 #[test]
 fn test_field_230202a() {
-    //this is definatly a bug, but 291 is ephemeral, 
+    //this is definatly a bug, but 291 is ephemeral,
     //so it *shouldn't matter*
- fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
-
-    g.add_node("239", JobKind::Ephemeral);
-    g.add_node("289", JobKind::Output);
-    g.add_node("291", JobKind::Ephemeral);
-
-    let edges = vec![
-    ("239", "291"),
-    ("239", "289"),
-    ("289", "291"),
-    ];
-
-    for (a,b) in edges {
-        if g.contains_node(a) && g.contains_node(b){
-            g.depends_on(b,a);
-            println!("(\"{}\", \"{}\"),", a,b);
-        }
-    }
-
- }
-    let mut ro = TestGraphRunner::new(Box::new(create_graph));
-    let g = ro.run(&[]).unwrap();
-
-    let mut g = ro.run(&[]).unwrap();
-    assert!(g.is_finished());
-    }
-
-#[test]
-fn test_field_230202b() {
-    //this is definatly a bug, but 291 is ephemeral, 
-    //so it *shouldn't matter*
- fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
-
-    g.add_node("239", JobKind::Ephemeral);
-    g.add_node("289", JobKind::Output);
-    g.add_node("291", JobKind::Ephemeral);
-    g.add_node("301", JobKind::Output);
-
-    let edges = vec![
-    ("239", "291"),
-    ("239", "289"),
-    ("289", "291"),
-    ("291", "301"),
-    ];
-
-    for (a,b) in edges {
-        if g.contains_node(a) && g.contains_node(b){
-            g.depends_on(b,a);
-            println!("(\"{}\", \"{}\"),", a,b);
-        }
-    }
-
- }
-    let mut ro = TestGraphRunner::new(Box::new(create_graph));
-    let g = ro.run(&[]).unwrap();
-
-    let mut g = ro.run(&[]).unwrap();
-    assert!(g.is_finished());
-    }
-
-    let mut ro = TestGraphRunner::new(Box::new(create_graph));
-    let g = ro.run(&[]).unwrap();
-
-    let mut g = ro.run(&[]).unwrap();
-    assert!(g.is_finished());
-    }
-
-#[test]
-fn test_field_230202b() {
-    //this is definatly a bug, but 291 is ephemeral, 
-    //so it *shouldn't matter*
- fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
-
-    g.add_node("239", JobKind::Ephemeral);
-    g.add_node("289", JobKind::Output);
-    g.add_node("291", JobKind::Ephemeral);
-    g.add_node("301", JobKind::Output);
-
-    let edges = vec![
-    ("239", "291"),
-    ("239", "289"),
-    ("289", "291"),
-    ("291", "301"),
-    ];
-
-    for (a,b) in edges {
-        if g.contains_node(a) && g.contains_node(b){
-            g.depends_on(b,a);
-            println!("(\"{}\", \"{}\"),", a,b);
-        }
-    }
-
-
-    let mut ro = TestGraphRunner::new(Box::new(create_graph));
-    let g = ro.run(&[]).unwrap();
-
-    let mut g = ro.run(&[]).unwrap();
-    assert!(g.is_finished());
-    }
-
-    
-    
-fn test_fuzz_0() {
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
-        g.add_node("N0", JobKind::Ephemeral);
-        g.add_node("N1", JobKind::Output);
-        g.add_node("N2", JobKind::Output);
-        g.depends_on("N1", "N0");
-        g.depends_on("N2", "N0");
-        g.depends_on("N2", "N1");
+        g.add_node("239", JobKind::Ephemeral);
+        g.add_node("289", JobKind::Output);
+        g.add_node("291", JobKind::Ephemeral);
+
+        let edges = vec![("239", "291"), ("239", "289"), ("289", "291")];
+
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(b, a);
+                println!("(\"{}\", \"{}\"),", a, b);
+            }
+        }
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
-    start_logging();
     let g = ro.run(&[]).unwrap();
-    let g = ro.run(&[]).unwrap();
+
+    let mut g = ro.run(&[]).unwrap();
+    assert!(g.is_finished());
+}
+
+#[test]
+fn test_field_230202b() {
+    //this is definatly a bug, but C is ephemeral,
+    //so it *shouldn't matter*
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Ephemeral);
+        g.add_node("B", JobKind::Output);
+        g.add_node("C", JobKind::Ephemeral);
+        g.add_node("D", JobKind::Output);
+
+        let edges = vec![("A", "C"), ("A", "B"), ("B", "C"), ("C", "D")];
+
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(b, a);
+                println!("(\"{}\", \"{}\"),", a, b);
+            }
+        }
+    }
+
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let mut g = ro.run(&[]).unwrap();
+    assert!(g.is_finished());
+
+    let mut g = ro.run(&[]).unwrap();
+    assert!(g.is_finished());
+
+    println!("done");
 }
 
 #[test]
@@ -1995,7 +1928,6 @@ fn test_fuzz_3() {
     start_logging_to_file("debug.log");
     let g = ro.run(&[]).unwrap();
 }
-
 
 /*
 #[test]
