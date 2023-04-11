@@ -212,7 +212,7 @@ macro_rules! set_node_state {
         $gen: expr
         ) => {
         debug!(
-            "\tUpdating {} from {:?} to {:?}",
+            "\tset_node_state {} from {:?} to {:?}",
             $node.job_id, $node.state, $new_state
         );
         match ($node.state, $new_state) {
@@ -486,7 +486,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
 
         out.push_str("\n\nin code: \n");
-        for (job_idx, job) in jobs.iter().enumerate() {
+        for (_job_idx, job) in jobs.iter().enumerate() {
             out.push_str(&format!(
                 "g.add_node(\"{}\", JobKind::{});\n",
                 job.job_id,
@@ -1177,7 +1177,12 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
                     for downstream_idx in downstreams {
                         reconsider_job!(self.jobs, downstream_idx, new_signals, self.gen.get());
-                        debug!("reconsidering lead to no update, all current gen");
+                        if new_signals.is_empty() {
+                            debug!(
+                                "reconsidering lead to no update, all current gen {}",
+                                self.gen.get()
+                            );
+                        }
                         //assert!(!new_signals.is_empty());
                     }
                     Self::consider_upstreams_for_cleanup(
@@ -1403,7 +1408,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 },
                 JobState::Output(JobStateOutput::FinishedUpstreamFailure)
                 | JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure)
-                | JobState::Always(JobStateAlways::FinishedUpstreamFailure) => {}
+                //unreachable - above | JobState::Always(JobStateAlways::FinishedUpstreamFailure) 
+                => {}
                 JobState::Output(JobStateOutput::FinishedSkipped) => {}
                 _ => {
                     return Err(PPGEvaluatorError::InternalError(format!(
@@ -1915,6 +1921,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     ) -> Result<Required, PPGEvaluatorError> {
         let downstreams = dag.neighbors_directed(node_idx, Direction::Outgoing);
         for downstream_idx in downstreams {
+            error!(
+                "downstream_requirement_status {}->{}: {:?} {:?}",
+                jobs[node_idx].job_id,
+                jobs[downstream_idx].job_id,
+                dag.edge_weight(node_idx, downstream_idx).unwrap().required,
+                jobs[downstream_idx].state
+            );
             match dag.edge_weight(node_idx, downstream_idx).unwrap().required {
                 Required::Unknown => return Ok(Required::Unknown),
                 Required::Yes => return Ok(Required::Yes),
@@ -1925,21 +1938,30 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     )) => {}
 
                     JobState::Output(JobStateOutput::NotReady(ValidationStatus::Invalidated)) => {
-                        return Ok(Required::Yes)
+                        error!("\tRequired::Yes");
+                        return Ok(Required::Yes);
                     }
                     JobState::Ephemeral(JobStateEphemeral::NotReady(
                         ValidationStatus::Invalidated,
-                    )) => return Ok(Required::Yes),
+                    )) => {
+                        error!("\tRequired::Yes");
+                        return Ok(Required::Yes);
+                    }
 
                     JobState::Output(JobStateOutput::NotReady(ValidationStatus::Unknown)) => {
-                        return Ok(Required::Unknown)
+                        error!("\tRequired::Unknown");
+                        return Ok(Required::Unknown);
                     }
+                    JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) => {}
                     JobState::Output(JobStateOutput::FinishedSkipped)
                     | JobState::Output(JobStateOutput::FinishedUpstreamFailure) => {
-                        return Ok(Required::No)
+                        //why would this short circuit?
+                        //error!("\tRequired::No");
+                        //return Ok(Required::No)
                     }
                     JobState::Ephemeral(JobStateEphemeral::NotReady(ValidationStatus::Unknown)) => {
-                        return Ok(Required::Unknown)
+                        error!("\tRequired::Unknown");
+                        return Ok(Required::Unknown);
                     }
                     _ => {
                         return Err(PPGEvaluatorError::InternalError(format!(
@@ -2109,7 +2131,9 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 debug!("Input to job {} changed.", job.job_id);
                 Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
                 match job.state {
-                    JobState::Always(JobStateAlways::Undetermined) => {}
+                    JobState::Always(JobStateAlways::Undetermined) => {
+                        Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes)
+                    }
                     JobState::Output(JobStateOutput::NotReady(ValidationStatus::Unknown)) => {
                         set_node_state!(
                             job,
@@ -2135,6 +2159,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     }
                 }
             } else {
+                debug!("Input to job {} *un*changed.", job.job_id);
                 match job.state {
                     JobState::Always(_) => {
                         Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes)

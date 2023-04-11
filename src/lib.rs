@@ -246,6 +246,9 @@ impl TestGraphRunner {
                 // debug!("{}", g.debug_());
                 //g.debug_is_finished();
             }
+            if to_run.is_empty() {
+                g.debug_is_finished();
+            }
             assert!(!to_run.is_empty());
             for job_id in to_run.iter() {
                 debug!("Running {}", job_id);
