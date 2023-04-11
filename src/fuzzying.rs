@@ -206,7 +206,7 @@ fn main() {
                     let eta = (node_total - done) as f64 / rate;
                     println!(
                         "done: {} of {}, elapsed: {}s. Rate {:.2}, estimated remaining: {:.2} s",
-                        done, total, elapsed, rate * edges_per_node_variation as f64, eta
+                        done, node_total, elapsed, rate * edges_per_node_variation as f64, eta
                     );
                 } else
                 {
