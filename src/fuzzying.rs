@@ -16,12 +16,14 @@
 */
 use std::{
     sync::{Arc, Mutex},
+    thread,
     thread::JoinHandle,
 };
 
 use pypipegraph2::{JobKind, PPGEvaluator, StrategyForTesting, TestGraphRunner};
 
 use backtrace::Backtrace;
+use log::debug;
 use std::cell::RefCell;
 
 thread_local! {
@@ -82,7 +84,7 @@ impl AllNodes {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct AllEdges {
     state: Vec<u8>,
     node_count: usize,
@@ -130,8 +132,12 @@ impl AllEdges {
     }
 }
 
-fn write_error_to_file(count: usize, message: &str) {
-    std::fs::write(format!("fuzzying_error_{}.txt", count), message).ok();
+fn write_error_to_file(node_count: usize, edge_count: usize, message: &str) {
+    std::fs::write(
+        format!("fuzzying_error_{}_{}.txt", node_count, edge_count),
+        message,
+    )
+    .ok();
 }
 
 fn main() {
@@ -143,156 +149,170 @@ fn main() {
     println!("running fuzz test.");
     //read first command line argument into integer
     let args: Vec<String> = std::env::args().collect();
-    let start = args
+    let problem_size = args
         .get(1)
-        .unwrap_or(&"0".to_string())
+        .unwrap_or(&"5".to_string())
         .parse::<usize>()
-        .unwrap_or(0);
+        .unwrap_or(5);
 
-    let node_count = 6;
+    //let problem_size = 6;
 
     //
 
-    let mut n = AllNodes::new(node_count);
+    let mut n = AllNodes::new(problem_size);
+    let node_total = n.len();
+    let edges_per_node_variation = {
+        let m = AllEdges::new(problem_size);
+        m.len()
+    };
     let total = {
-        let m = AllEdges::new(node_count);
-        let nv = n.len();
-        let ev = m.len();
-
-        println!("node variations: {}", nv);
-        println!("edge variations: {}", ev);
-        let total = ev * nv;
+        println!("node variations: {}", node_total);
+        println!("edge variations: {}", edges_per_node_variation);
+        let total = edges_per_node_variation * node_total;
         println!("Together: {}", total);
         total
     };
     let start_time = std::time::Instant::now();
-    let mut count = 0;
-    let error_count: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
-    let mut threads = std::collections::VecDeque::new();
-    let max_thread_count = 100;
+    let mut errors: Arc<Mutex<Vec<(usize, usize)>>> = Arc::new(Mutex::new(Vec::new()));
 
-    loop {
-        let mut m = AllEdges::new(node_count);
-        loop {
-            {
-                //we can't justh throw up a million threads...
-                //but a 100 should be able to saturate the CPU
-                if threads.len() > max_thread_count {
-                    while threads.len() > max_thread_count - 20 {
-                        //epmirical...
-                        let t: JoinHandle<_> = threads.pop_front().unwrap();
-                        match t.join() {
-                            Ok(_) => {}
-                            Err(e) => println!("A thread failed. {:?}", e),
-                        }
-                    }
+    let mut threads = Vec::new();
+    let max_thread_count = num_cpus::get(); //system cpu count ;
+    let done_count: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
+
+    let chunk_size = n.len() / max_thread_count;
+    //now space from 0... n.len() into max_thread_count chunks
+    let starts = (0..max_thread_count)
+        .map(|i| i * chunk_size)
+        .collect::<Vec<_>>();
+    println!("{:?}, chunk_size {}", starts, chunk_size);
+
+    for start in starts {
+        let mut n = n.clone();
+        let errors = errors.clone();
+        let done_count = done_count.clone();
+        threads.push(thread::spawn(move || {
+            let mut node_count = 0;
+
+            while node_count < start {
+                n.advance();
+                node_count += 1;
+            }
+            while node_count < start + chunk_size {
+                *done_count.lock().unwrap() += 1;
+                if start == 0 {
+                    let done = *done_count.lock().unwrap();
+                    let elapsed = start_time.elapsed().as_secs().max(1);
+                    let rate = done as f64 / elapsed as f64;
+                    let eta = (node_total - done) as f64 / rate;
+                    println!(
+                        "done: {} of {}, elapsed: {}s. Rate {:.2}, estimated remaining: {:.2} s",
+                        done, total, elapsed, rate * edges_per_node_variation as f64, eta
+                    );
+                } else
+                {
                 }
-                if count >= start {
-                    if (count % 1000) == 0 {
-                        let rate = (count - start) as f32 / start_time.elapsed().as_secs_f32();
-                        let remaining_seconds = (total - count) as f32 / rate;
-                        println!(
-                            "{} tested. {:.2}%. Rate: {:.2}/s. Errors: {}, Remaining: {:.2}s",
-                            count,
-                            count as f32 / total as f32 * 100.,
-                            rate,
-                            *error_count.lock().unwrap(),
-                            remaining_seconds
-                        );
-                    }
-                    let n2 = n.clone();
-                    let m2 = m.clone();
-                    //spawn in seperate thread
-                    let inner_count = count;
-                    let error_count = error_count.clone();
-                    threads.push_back(std::thread::spawn(move || {
-                        let res = std::panic::catch_unwind(|| {
-                            let n2b = n2.clone();
-                            let m2b = m2.clone();
-                            let mut t = TestGraphRunner::new(Box::new(move |g| {
-                                n2b.apply(g);
-                                m2b.apply(g);
-                            }));
-                            let g = t.run(&[]);
-                            match g {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    println!("error at count {}: {}", e.1, inner_count);
-                                    let d = e.0.debug_();
-                                    println!("{}", d);
-                                    write_error_to_file(inner_count, &d[..]);
-                                    *error_count.lock().unwrap() += 1;
-                                }
-                            }
-                            match t.run(&[]) {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    println!("error at count {} 2nd stage: {}", e.1, inner_count);
-                                    let d = e.0.debug_();
-                                    println!("{}", d);
-                                    write_error_to_file(inner_count, &d[..]);
-                                    *error_count.lock().unwrap() += 1;
-                                }
-                            }
-                        });
-                        match res {
+                let mut m = AllEdges::new(problem_size);
+                let mut edge_count = 0;
+                loop {
+                    let n2b = n.clone();
+                    let m2b = m.clone();
+                    let res = std::panic::catch_unwind(|| {
+                        let mut t = TestGraphRunner::new(Box::new(move |g| {
+                            n2b.apply(g);
+                            m2b.apply(g);
+                        }));
+                        let g = t.run(&[]);
+                        /*if (edge_count == 23) {
+                            panic!("twentythree");
+                        }
+if (edge_count == 24) {
+                            panic!("twentyfour");
+                        }
+                        */
+
+                        match g {
                             Ok(_) => {}
-                            Err(info) => {
-                                let msg = match info.downcast_ref::<&'static str>() {
-                                    Some(s) => *s,
-                                    None => match info.downcast_ref::<String>() {
-                                        Some(s) => &s[..],
-                                        None => "Box<dyn Any>",
-                                    },
-                                };
-
-                                println!("Caught panic! at count {}: {:?}", inner_count, info);
-                                *error_count.lock().unwrap() += 1;
-                                let t = TestGraphRunner::new(Box::new(move |g| {
-                                    n2.apply(g);
-                                    m2.apply(g);
-                                }));
-
-                                let mut d = format!("Fuzzying error at count {}, node_count: {node_count}\nerror: {:?}", inner_count, msg);
-                                let b = Backtrace.with(|b| b.borrow_mut().take()).unwrap();
-                                d.push_str(&format!("Backtrace: {:?}", b));
-                                d.push_str(&t.debug_());
+                            Err(e) => {
+                                println!(
+                                    "error at node_count: {}, edge_count: {}",
+                                    node_count, edge_count
+                                );
+                                let d = e.0.debug_();
                                 println!("{}", d);
-                                write_error_to_file(inner_count, &d[..]);
+                                write_error_to_file(node_count, edge_count, &d[..]);
+                                errors.lock().unwrap().push((node_count, edge_count));
                             }
                         }
-                    }));
-                }
-                count += 1;
-            }
-            if !m.advance() {
-                break;
-            }
-        }
+                        match t.run(&[]) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                println!(
+                                    "error at node_count: {}, edge_count: {}",
+                                    node_count, edge_count
+                                );
+                                let d = e.0.debug_();
+                                println!("{}", d);
+                                write_error_to_file(node_count, edge_count, &d[..]);
+                                errors.lock().unwrap().push((node_count, edge_count));
+                            }
+                        }
+                    });
+                    match res {
+                        Ok(_) => {}
+                        Err(info) => {
+                            let msg = match info.downcast_ref::<&'static str>() {
+                                Some(s) => *s,
+                                None => match info.downcast_ref::<String>() {
+                                    Some(s) => &s[..],
+                                    None => "Box<dyn Any>",
+                                },
+                            };
 
-        let b = n.advance();
-        if !b {
-            break;
-        }
+                            println!("Caught panic! at node_count {}, edge_count: {}: error {:?}", node_count, edge_count, msg);
+                            errors.lock().unwrap().push((node_count, edge_count));
+                            let n2 = n.clone();
+                            let m2 = m.clone();
+                            let t = TestGraphRunner::new(Box::new(move |g| {
+                                n2.apply(g);
+                                m2.apply(g);
+                            }));
+
+                            let mut d = format!(
+                                "Fuzzying error at node_count {node_count}, edge_count: {edge_count}\nerror: {:?}",
+                                msg
+                            );
+                            let b = Backtrace.with(|b| b.borrow_mut().take()).unwrap();
+                            d.push_str(&format!("Backtrace: {:?}", b));
+                            d.push_str(&t.debug_());
+                            println!("{}", d);
+                            write_error_to_file(node_count, edge_count, &d[..]);
+                        }
+                    }
+                    if !m.advance() {
+                        break;
+                    };
+                    edge_count += 1;
+                }
+                node_count += 1;
+                if !n.advance() {
+                    break;
+                };
+            }
+        }));
     }
+
     println!("waiting for threads to finish");
     for t in threads.into_iter() {
-        t.join().ok();
+        t.join().unwrap();
     }
     println!("joined all");
-
-    if *error_count.lock().unwrap() > 0 {
-        panic!("{} errors occured", error_count.lock().unwrap());
-    } else {
-        println!("no errors occured");
-    }
-    let duration = start_time.elapsed();
-    let rate = (count - start) as f32 / duration.as_secs_f32();
+    let elapsed = start_time.elapsed().as_secs_f32();
+    let rate = total as f32 / elapsed;
     println!(
-        "tested {} variations in {}s. Rate: {}",
-        count,
-        duration.as_secs(),
+        "done running fuzz. Variations: {} (expected: {}). Time: {:.2}s. Rate {:.2}/s",
+        total,
+        node_total * edges_per_node_variation,
+        elapsed,
         rate
     );
-    println!("done running fuzz {count}");
 }
