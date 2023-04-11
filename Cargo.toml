@@ -13,8 +13,8 @@ name = "ppg2_profileing"
 path = "src/main.rs"
 
 [[bin]]
-name = "ppg2_fuzzying"
-path = "src/fuzzying.rs"
+name = "ppg2_iterations_without_fail"
+path = "src/main_iterations_without_fail.rs"
 
 
 [dependencies]
