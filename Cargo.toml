@@ -27,6 +27,7 @@ colored = "2.0.0"
 thiserror = "1.0.37"
 itertools = "0.10.5"
 backtrace = "0.3.67"
+num_cpus = "1.15.0"
 
 [package.metadata.maturin]
 python-source = "python"
