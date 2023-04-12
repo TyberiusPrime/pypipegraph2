@@ -856,11 +856,25 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
 
     fn prune_leave_ephemerals(&mut self) {
+        //option: speed up by looking at the edges once,
+        //finding those that have no-no-ephemeral downstreams,
         let mut ephemerals: HashSet<NodeIndex> = self
             .dag
             .nodes()
             .filter(|idx| match self.jobs[*idx as usize].state {
-                JobState::Ephemeral(_) => true,
+                JobState::Ephemeral(_) => {
+                    let downstreams = self.dag.neighbors_directed(*idx, Direction::Outgoing);
+                    for downstream_idx in downstreams {
+                        match self.jobs[downstream_idx as usize].state {
+                            JobState::Ephemeral(_) => {}
+                            _ => {
+                                return false;
+                            }
+                        }
+                    }
+                    //only keep them if they have no downstreams, or only ephemeral downstreams
+                    true
+                }
                 _ => false,
             })
             .collect();
@@ -1019,10 +1033,17 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     fn process_signals(&mut self, depth: u32) -> Result<(), PPGEvaluatorError> {
         debug!("");
         debug!("Process signals, depth {}", depth);
+        let res = self.inner_process_signals(depth);
+        debug!("Leaving process signals, {}", depth);
+        res
+    }
+
+    fn inner_process_signals(&mut self, depth: u32) -> Result<(), PPGEvaluatorError> {
         if depth > 1500 {
             return Err(PPGEvaluatorError::InternalError("Depth ConsiderJob loop. Either pathological input, or bug. Aborting to avoid stack overflow".to_string()));
         }
         let mut new_signals = Vec::new();
+        let mut ignore_consider_signals = HashSet::new();
         for signal in self.signals.drain(..) {
             debug!("");
             debug!(
@@ -1052,7 +1073,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(format!(
-                                    "unexpected was {:?}",
+                                    "unexpected was 1 {:?}",
                                     j
                                 )))
                             }
@@ -1078,7 +1099,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(format!(
-                                    "unexpected was {:?}",
+                                    "unexpected was 2 {:?}",
                                     j
                                 )))
                             }
@@ -1125,7 +1146,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(format!(
-                                    "unexpected was {:?}",
+                                    "unexpected was 3 {:?}",
                                     j
                                 )))
                             }
@@ -1158,7 +1179,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             }
                             _ => {
                                 return Err(PPGEvaluatorError::InternalError(format!(
-                                    "unexpected was {:?}",
+                                    "unexpected was 4 {:?}",
                                     j
                                 )))
                             }
@@ -1221,7 +1242,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         }
                         _ => {
                             return Err(PPGEvaluatorError::InternalError(format!(
-                                "unexpected was {:?}",
+                                "unexpected was 5 {:?}",
                                 j
                             )))
                         }
@@ -1254,7 +1275,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         }
                         _ => {
                             return Err(PPGEvaluatorError::InternalError(format!(
-                                "unexpected was {:?}",
+                                "unexpected was 6 {:?}",
                                 j
                             )))
                         }
@@ -1300,7 +1321,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         }
                         _ => {
                             return Err(PPGEvaluatorError::InternalError(format!(
-                                "unexpected was {:?}",
+                                "unexpected was 7 {:?}",
                                 j
                             )))
                         }
@@ -1308,12 +1329,16 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     new_signals.push(NewSignal!(SignalKind::JobDone, node_idx, self.jobs));
                     let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
                     for downstream_idx in downstreams {
+                        //if there's a consider signal, it's not valid anymore
                         Self::remove_consider_signals(&mut new_signals, downstream_idx);
+                        ignore_consider_signals.insert(downstream_idx);
+
                         new_signals.push(NewSignal!(
                             SignalKind::JobUpstreamFailure,
                             downstream_idx,
                             self.jobs
                         ));
+                        debug!("Signals after: {:?}", new_signals);
                     }
                     //what about ephemeral upstreams that are now known to be unecessary?
                     Self::reconsider_ephemeral_upstreams(
@@ -1325,6 +1350,14 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     );
                 }
                 SignalKind::ConsiderJob => {
+                    if ignore_consider_signals.contains(&node_idx) {
+                        ignore_consider_signals.remove(&node_idx);
+                        debug!(
+                            "Ignored ConsiderJob for {}, was in ignore_consider_signals",
+                            node_idx
+                        );
+                        continue;
+                    }
                     Self::signal_consider_job(
                         &self.strategy,
                         &mut self.dag,
@@ -1333,6 +1366,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         node_idx,
                         &mut new_signals,
                         &mut self.gen,
+                        &mut ignore_consider_signals
                     )?;
                 }
                 SignalKind::JobCleanedUp => {
@@ -1348,7 +1382,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         }
                         _ => {
                             return Err(PPGEvaluatorError::InternalError(format!(
-                                "unexpected was {:?}",
+                                "unexpected was 8 {:?}",
                                 j
                             )))
                         }
@@ -1367,7 +1401,6 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         if !self.signals.is_empty() {
             self.process_signals(depth + 1)?;
         }
-        debug!("Leaving process signals, {}", depth);
         Ok(())
     }
 
@@ -1616,9 +1649,16 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 || (jobs[upstream_idx as usize].state
                     == JobState::Output(JobStateOutput::NotReady(ValidationStatus::Validated)))
             {
-                if
+                if jobs[upstream_idx as usize].state.is_upstream_failure() {
+                    //this happens when the upstream job was UpstreamFailed,
+                    //we do at this point have  JobUpstreamFailure(node_idx),
+                    //but there's a ConsiderJob still in the self.signals
+                    //that remove_consider_signals did not remove - since it was not in the *new*
+                    //signals.
+                    //return Ok(ValidationStatus::Unknown);
+                }
                 // !jobs[upstream_idx as usize].state.is_skipped() &&
-                Self::edge_invalidated(dag, strategy, jobs, history, upstream_idx, node_idx)? {
+                if Self::edge_invalidated(dag, strategy, jobs, history, upstream_idx, node_idx)? {
                     debug!(
                         "\t\tEdge invalidated {}({})-> {}({})",
                         jobs[upstream_idx].job_id, upstream_idx, jobs[node_idx].job_id, node_idx
@@ -1691,6 +1731,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         node_idx: NodeIndex,
         new_signals: &mut Vec<Signal>,
         gen: &mut Generation,
+        ignore_consider_signals: &mut HashSet<NodeIndex>,
     ) -> Result<(), PPGEvaluatorError> {
         //let j = &jobs[node_idx as usize];
         /* debug!(
@@ -1704,6 +1745,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             JobState::Always(JobStateAlways::Undetermined) => {
                 if Self::all_upstreams_done(dag, jobs, node_idx) {
                     Self::remove_consider_signals(new_signals, node_idx);
+                    ignore_consider_signals.insert(node_idx);
                     new_signals.push(NewSignal!(SignalKind::JobReadyToRun, node_idx, jobs));
                 }
             }
@@ -1739,6 +1781,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                             },
                                         );
                                         Self::remove_consider_signals(new_signals, node_idx);
+                                        ignore_consider_signals.insert(node_idx);
                                         new_signals.push(NewSignal!(
                                             SignalKind::JobFinishedSkip,
                                             node_idx,
@@ -1787,6 +1830,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     }
                     ValidationStatus::Invalidated => {
                         if Self::all_upstreams_done(dag, jobs, node_idx) {
+                            Self::remove_consider_signals(new_signals, node_idx);
+                            ignore_consider_signals.insert(node_idx);
                             new_signals.push(NewSignal!(SignalKind::JobReadyToRun, node_idx, jobs))
                         } else {
                             Self::reconsider_delayed_upstreams(
@@ -1810,6 +1855,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         if Self::has_downstreams(dag, node_idx)
                             && !Self::_job_and_downstreams_are_ephemeral(dag, jobs, node_idx)
                         {
+                            Self::remove_consider_signals(new_signals, node_idx);
+                            ignore_consider_signals.insert(node_idx);
                             new_signals.push(NewSignal!(SignalKind::JobReadyToRun, node_idx, jobs));
                         } else {
                             new_signals.push(NewSignal!(
@@ -1864,6 +1911,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         if Self::any_downstream_required(dag, jobs, node_idx) {
                             debug!("\tA downstream was required");
                             Self::remove_consider_signals(new_signals, node_idx);
+                            ignore_consider_signals.insert(node_idx);
                             new_signals.push(NewSignal!(SignalKind::JobReadyToRun, node_idx, jobs));
                         } else if Self::all_downstreams_validated_or_upstream_failed(
                             //upstream failed on a downstream also means I'm not necessary
@@ -1871,6 +1919,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         )? {
                             debug!("\tAll downstreams validated");
                             Self::remove_consider_signals(new_signals, node_idx);
+                            ignore_consider_signals.insert(node_idx);
                             new_signals.push(NewSignal!(
                                 SignalKind::JobFinishedSkip,
                                 node_idx,
@@ -2102,6 +2151,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
 
     fn identify_missing_outputs(&mut self) -> Result<(), PPGEvaluatorError> {
+        // this has to be in (inverse) topological order
+        // because we need to set the required edges.
         for &node_idx in self.topo.as_ref().unwrap().iter().rev() {
             let job = &self.jobs[node_idx as usize];
 

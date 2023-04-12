@@ -2123,30 +2123,146 @@ fn test_fuzz_8() {
     }
     ro.setup_graph = Box::new(create_graph2);
     let g = ro.run(&["N1"]).unwrap();
-} /*
-  #[test]
-  fn test_multi_file_job_gaining_output() {
-      // the rust engine does not know anything about filenames or jobs with 'multiple'
-      // outputs
-      // we fake that by delegating to is_history_altered on the python side.
-      // but adding/removing an output will retrigger the downstreams
-      // because the job name changes and we track input job names.
-      // now I suppose we could delegate this to python.
-      // which has the 'filename-dependncy-graph' to actually make the decision, right?,
-      // I already have that test    todo!()
-      fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
-          g.add_node("A::B", JobKind::Output);
-          g.add_node("C", JobKind::Output);
-          g.depends_on("C", "A::B");
-      }
-      let mut ro = TestGraphRunner::new(Box::new(create_graph));
-      let g = ro.run(&[]).unwrap();
-      assert!(ro.run_counters.get("A::B") == Some(&1));
-      let g = ro.run(&[]).unwrap();
-      assert!(ro.run_counters.get("B") == Some(&1));
-      ro.history.remove("B");
-      let g = ro.run(&[]).unwrap();
-      assert!(ro.run_counters.get("B") == Some(&2));
+}
 
-  }
-  */
+#[test]
+fn test_fuzz_9() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Output);
+        g.add_node("N2", JobKind::Output);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Output);
+        //g.add_node("N5", JobKind::Output);
+        let edges = vec![
+            ("N1", "N0"),
+            ("N4", "N0"),
+            ("N2", "N1"),
+            ("N4", "N1"),
+            ("N5", "N1"),
+            ("N5", "N2"),
+            ("N4", "N3"),
+            ("N5", "N4"),
+        ];
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(a, b);
+            }
+        }
+    }
+
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+
+    fn create_graph2(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Output);
+        g.add_node("N2", JobKind::Output);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Output);
+        g.add_node("N5", JobKind::Output);
+        let edges = vec![
+            ("N1", "N0"),
+            ("N4", "N0"),
+            ("N2", "N1"),
+            ("N4", "N1"),
+            ("N5", "N1"),
+            ("N5", "N2"),
+            ("N4", "N3"),
+            ("N5", "N4"),
+        ];
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(a, b);
+            }
+        }
+    }
+
+    ro.setup_graph = Box::new(create_graph2);
+    let g = ro.run(&["N5"]).unwrap();
+}
+
+#[test]
+fn test_fuzz_10() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Ephemeral);
+        //g.add_node("N1", JobKind::Output);
+        g.add_node("N2", JobKind::Always);
+        g.add_node("N3", JobKind::Output);
+        g.add_node("N4", JobKind::Output);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.add_node("N6", JobKind::Output);
+        let edges = vec![
+            ("N3", "N0"),
+            ("N6", "N0"),
+            ("N2", "N1"),
+            ("N3", "N2"),
+            ("N4", "N3"),
+            ("N5", "N4"),
+            ("N6", "N5"),
+        ];
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(a, b);
+            }
+        }
+    }
+
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    fn create_graph2(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Output);
+        g.add_node("N2", JobKind::Always);
+        g.add_node("N3", JobKind::Output);
+        g.add_node("N4", JobKind::Output);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.add_node("N6", JobKind::Output);
+        let edges = vec![
+            ("N3", "N0"),
+            ("N6", "N0"),
+            ("N2", "N1"),
+            ("N3", "N2"),
+            ("N4", "N3"),
+            ("N5", "N4"),
+            ("N6", "N5"),
+        ];
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(a, b);
+            }
+        }
+    }
+    start_logging();
+
+    ro.setup_graph = Box::new(create_graph2);
+    let g = ro.run(&["N1"]).unwrap();
+}
+
+/*
+#[test]
+fn test_multi_file_job_gaining_output() {
+    // the rust engine does not know anything about filenames or jobs with 'multiple'
+    // outputs
+    // we fake that by delegating to is_history_altered on the python side.
+    // but adding/removing an output will retrigger the downstreams
+    // because the job name changes and we track input job names.
+    // now I suppose we could delegate this to python.
+    // which has the 'filename-dependncy-graph' to actually make the decision, right?,
+    // I already have that test    todo!()
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A::B", JobKind::Output);
+        g.add_node("C", JobKind::Output);
+        g.depends_on("C", "A::B");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    assert!(ro.run_counters.get("A::B") == Some(&1));
+    let g = ro.run(&[]).unwrap();
+    assert!(ro.run_counters.get("B") == Some(&1));
+    ro.history.remove("B");
+    let g = ro.run(&[]).unwrap();
+    assert!(ro.run_counters.get("B") == Some(&2));
+
+}
+*/
