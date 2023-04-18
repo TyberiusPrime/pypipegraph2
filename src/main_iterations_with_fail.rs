@@ -211,6 +211,14 @@ fn main() {
         .unwrap_or(&"5".to_string())
         .parse::<usize>()
         .unwrap_or(5);
+    let skip = args
+        .get(2)
+        .unwrap_or(&"0".to_string())
+        .parse::<usize>()
+        .unwrap_or(0);
+    println!("problem size: {}", problem_size);
+    println!("skipping {}", skip);
+
 
     //let problem_size = 6;
 
@@ -236,6 +244,7 @@ fn main() {
     let done_count: Arc<Mutex<usize>> = Arc::new(Mutex::new(0));
 
     let chunk_size = all_nodes.len() / max_thread_count;
+    println!("chunk size: {}", chunk_size);
     //now space from 0... n.len() into max_thread_count chunks
     let starts = (0..max_thread_count)
         .map(|i| i * chunk_size)
@@ -249,7 +258,7 @@ fn main() {
         threads.push(thread::spawn(move || {
             let mut node_count = 0;
 
-            while node_count < start {
+            while node_count < start + skip {
                 all_nodes.advance();
                 node_count += 1;
             }

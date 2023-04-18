@@ -2239,6 +2239,61 @@ fn test_fuzz_10() {
     let g = ro.run(&["N1"]).unwrap();
 }
 
+#[test]
+fn test_fuzz_11() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        //g.add_node("N0", JobKind::Always);
+        g.add_node("N1", JobKind::Always);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Output);
+        g.add_node("N4", JobKind::Always);
+        g.add_node("N5", JobKind::Always);
+        g.add_node("N6", JobKind::Output);
+        let edges = vec![
+            ("N1", "N0"),
+            ("N3", "N1"),
+            ("N3", "N2"),
+            ("N6", "N2"),
+            ("N4", "N3"),
+            ("N5", "N4"),
+            ("N6", "N5"),
+        ];
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(a, b);
+            }
+        }
+    }
+
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    fn create_graph2(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Always);
+        g.add_node("N1", JobKind::Always);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Output);
+        g.add_node("N4", JobKind::Always);
+        g.add_node("N5", JobKind::Always);
+        g.add_node("N6", JobKind::Output);
+        let edges = vec![
+            ("N1", "N0"),
+            ("N3", "N1"),
+            ("N3", "N2"),
+            ("N6", "N2"),
+            ("N4", "N3"),
+            ("N5", "N4"),
+            ("N6", "N5"),
+        ];
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(a, b);
+            }
+        }
+    }
+
+    ro.setup_graph = Box::new(create_graph2);
+    let g = ro.run(&["N0"]).unwrap();
+}
 /*
 #[test]
 fn test_multi_file_job_gaining_output() {
