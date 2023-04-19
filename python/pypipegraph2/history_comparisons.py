@@ -11,7 +11,7 @@ ljt = log_job_trace
 def history_is_different(runner, job_upstream_id, job_downstream_id, str_last, str_now):
     # note that at this point, we already know str_last != str_now,
     # that was tested in rust
-    log_error(f"history is maybe different {job_upstream_id} {job_downstream_id} {str_last == str_now}")
+    #log_error(f"history is maybe different {job_upstream_id} {job_downstream_id} {str_last == str_now}")
     job_upstream = runner.jobs[job_upstream_id]
     obj_last = json.loads(str_last)
     obj_now = json.loads(str_now)
