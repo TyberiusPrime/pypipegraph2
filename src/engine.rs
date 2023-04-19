@@ -1582,6 +1582,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     &jobs[upstream_idx]
                                 ))
                             })?;
+                        /*
                         if *current_value != last_history_value {
                             info!(
                                 "history maybe altered {}->{} {}_{}.log",
@@ -1598,6 +1599,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             )
                             .unwrap();
                         }
+                        */
                         if strategy.is_history_altered(
                             upstream_id,
                             downstream_id,
