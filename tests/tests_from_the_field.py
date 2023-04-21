@@ -1593,7 +1593,9 @@ class TestsFromTheField:
 
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+                ppg.global_pipegraph.jobs[a].depends_on(
+                    ppg.global_pipegraph.jobs[b]
+                )
 
         ppg.run()
         ppg.run()
@@ -1647,44 +1649,42 @@ class TestsFromTheField:
             == ppg.enums.JobOutcome.Skipped
         )
 
+    def test_cleanup_already_decided_to_skip_upstream_failed(self):
+        # debugged job CleanUp:cache/lanes/test/input.fastq
+        # this makes the TF run.
+        job_1 = ppg.FileGeneratingJob("1", dummy_fg, depend_on_function=False)
+        # this one introduceds a cleanup.
+        job_2 = ppg.TempFileGeneratingJob("2", dummy_fg, depend_on_function=False)
 
-def gen_20211221(func):
+        job_8 = ppg.FileGeneratingJob("8", dummy_fg, depend_on_function=False)
 
-    global do_fail
+        # this one we have fail in the second round
+        job_11 = ppg.FileGeneratingJob("11", dummy_fg, depend_on_function=True)
 
-    def dummy_fg_fail(of):
-        global do_fail
-        if do_fail[0]:
-            raise ValueError()
-        of.parent.mkdir(exist_ok=True, parents=True)
-        of.write_text("fg")
+        cjobs_by_no = {}
+        for k, v in locals().items():
+            if k.startswith("job_"):
+                no = k[k.find("_") + 1 :]
+                cjobs_by_no[no] = v
+        edges = []
+        ea = edges.append
+        ea(("1", "2"))
+        ea(("8", "11"))
+        ea(("8", "2"))
+        for (a, b) in edges:
+            if a in cjobs_by_no and b in cjobs_by_no:
+                cjobs_by_no[a].depends_on(cjobs_by_no[b])
+                # print(f"ea(('{a}', '{b}'))")
 
-    # debugged job PIGenes_KD5MA closest genes_parent
-    # debugged job load_cache/GenomicRegions/H4ac_ISX_specific/calc
+        ppg.run()
 
-    job_650 = ppg.DataLoadingJob("650", lambda: 35, depend_on_function=False)
-    # debugged job cache/GenomicRegions/H4ac_ISX_specific/calc
-    job_651 = ppg.FileGeneratingJob("651", dummy_fg_fail, depend_on_function=False)
-    job_651.depends_on(ppg.FunctionInvariant("shu", func))
-    job_661 = ppg.DataLoadingJob("661", lambda: 35, depend_on_function=False)
-    job_1079 = ppg.FileGeneratingJob("1079", dummy_fg, depend_on_function=False)
-    job_1096 = ppg.DataLoadingJob("1096", lambda: 35, depend_on_function=False)
+        # now make it fail
+        ppg.new() # log_level=6)
+        # as above
+        job_1 = ppg.FileGeneratingJob("1", dummy_fg, depend_on_function=False)
+        job_2 = ppg.TempFileGeneratingJob("2", dummy_fg, depend_on_function=False)
+        job_8 = ppg.FileGeneratingJob("8", dummy_fg, depend_on_function=False)
 
-    cjobs_by_no = {}
-    for k, v in locals().items():
-        if k.startswith("job_"):
-            no = k[k.find("_") + 1 :]
-            cjobs_by_no[no] = v
-    edges = []
-    ea = edges.append
-    ea(("1079", "1096"))
-    ea(("1096", "650"))
-    ea(("1096", "661"))
-    ea(("650", "651"))
-    for (a, b) in edges:
-        if a in cjobs_by_no and b in cjobs_by_no:
-            cjobs_by_no[a].depends_on(cjobs_by_no[b])
-            # print(f"ea(('{a}', '{b}'))")
         # make this one fail.
         job_11 = ppg.FileGeneratingJob("11", dummy_fg_raising, depend_on_function=True)
         for (a, b) in edges:
