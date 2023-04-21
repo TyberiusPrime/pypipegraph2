@@ -28,6 +28,20 @@ dependencies = [
 	"networkx",
 ]
 
+
+[project.opetional-dependencies]
+dev = [
+	"flake8"
+	"pytest",
+	"pytest-cov",
+]
+
+test = [
+	"flake8"
+	"pytest",
+	"pytest-cov",
+]
+
 [project.license]
 text = """
 MIT License
