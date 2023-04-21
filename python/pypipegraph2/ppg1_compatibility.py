@@ -11,7 +11,10 @@ import pypipegraph2 as ppg2
 import pypipegraph2.testing
 import wrapt
 import importlib
-from .util import log_info, log_error, log_warning, log_debug, log_job_trace
+from .util import (
+    # log_info, log_error, log_warning, log_debug,
+    log_job_trace,
+)
 
 
 old_entries = {}
@@ -177,7 +180,7 @@ class Util:
         if file_size > 200 * 1024 * 1024:  # pragma: no cover
             print("Taking md5 of large file", filename)
         with open(filename, "rb") as op:
-            block_size = 1024 ** 2 * 10
+            block_size = 1024**2 * 10
             block = op.read(block_size)
             _hash = hashlib.md5()
             while block:
@@ -287,11 +290,11 @@ def new_pipegraph(
     _add_graph_comp(res)
     return res
 
+
 def _add_graph_comp(graph):
     graph.cache_folder = graph.cache_dir  # ppg1 compatibility
     graph.rc = FakeRC()
     util.global_pipegraph = graph
-
 
 
 def run_pipegraph(*args, **kwargs):
@@ -307,9 +310,12 @@ def _ignore_code_changes(job):
         log_job_trace(f"ignoring changes for {job.job_id}")
         util.global_pipegraph.job_dag.remove_edge(job.func_invariant.job_id, job.job_id)
 
-        if hasattr(job.func_invariant, 'usage_counter'):
+        if hasattr(job.func_invariant, "usage_counter"):
             job.func_invariant.usage_counter -= 1
-        if not hasattr(job.func_invariant, 'usage_counter') or job.func_invariant.usage_counter == 0:
+        if (
+            not hasattr(job.func_invariant, "usage_counter")
+            or job.func_invariant.usage_counter == 0
+        ):
             util.global_pipegraph.job_dag.remove_node(job.func_invariant.job_id)
             for k in job.func_invariant.outputs:
                 util.global_pipegraph.job_inputs[job.job_id].remove(k)

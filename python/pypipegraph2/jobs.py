@@ -1,12 +1,7 @@
 from __future__ import annotations
-import atexit
-
 import json
-from multiprocessing import Value
 import signal
-
 import time
-import tempfile
 import pickle
 import os
 import dis
@@ -21,15 +16,19 @@ from collections import namedtuple
 from threading import Lock
 from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
-import ctypes
 
 from . import hashers, exceptions, ppg_traceback
 from .enums import Resources
 from .util import escape_logging
 import hashlib
 import shutil
-from .util import log_info, log_error, log_warning, log_debug, log_trace, log_job_trace
-from .history_comparisons import history_is_different
+from .util import (
+    log_info,
+    log_error,
+    log_warning,  # log_debug,
+    log_trace,
+    log_job_trace,
+)
 
 module_type = type(sys)
 is_hex_re = re.compile("^[a-fA-F0-9]+$")
@@ -42,6 +41,7 @@ python_version = ".".join(
 DependsOnInvariant = namedtuple("DependsOnInvariant", ["invariant", "self"])
 CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
 PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
+
 
 def _normalize_path(path):
     from . import global_pipegraph
@@ -496,8 +496,6 @@ class Job:
                 nodes.append(
                     f"job_{counter[0]} = ppg.AttributeLoadingJob('{counter[0]}', DummyObject(), 'attr_{counter[0]}', lambda: None, depend_on_function=False) #{j.job_id}"
                 )
-            elif isinstance(j, _FileCleanupJob):
-                pass  # they will get auto generated
             else:
                 raise ValueError(j)
             node_to_counters[node] = counter[0]
@@ -566,7 +564,7 @@ def dummy_fg(of):
             lines += edges
             lines += ["", "ppg.run()", "ppg.run"]
 
-            op.write("\n".join("        " + l for l in lines))
+            op.write("\n".join(["        "] + (ll for ll in lines)))
 
 
 class MultiFileGeneratingJob(Job):
@@ -1400,14 +1398,14 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                         in_a += f"\t{id(xc)} {type(xc) }{_safe_str(xc)[:40]}\n"
                         try:
                             set_a.add(xc)
-                        except:  # pragma: no cover
+                        except:  # noqa: E722  pragma: no cover
                             pass
                     for x in b.__closure__:
                         xc = x.cell_contents
                         in_b += f"\t{id(xc)} {type(xc)} {_safe_str(xc)[:40]}\n"
                         try:
                             set_b.add(xc)
-                        except:  # pragma: no cover
+                        except:  # noqa: E722 pragma: no cover
                             pass
                     only_in_a = sorted(_safe_str(xc) for xc in set_a.difference(set_b))
                     only_in_b = sorted(_safe_str(xc) for xc in set_b.difference(set_a))
@@ -2777,7 +2775,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         return self._map_filename(self._lookup[key])
 
 
-
 class NotebookInvariant(FileInvariant):
     """An invariant that checks only the code and markdown from a notebook (not the results)"""
 
@@ -2806,15 +2803,11 @@ class NotebookInvariant(FileInvariant):
         else:
             return hashers.hash_str(NotebookInvariant.extract_notebook_content(file))
 
-
     @staticmethod
     def extract_notebook_content(file):
-        cells = json.loads(file.read_text())['cells']
+        cells = json.loads(file.read_text())["cells"]
         out = ""
         for cell in cells:
-            if cell['cell_type'] in ('markdown', 'code'):
-                out += '--\n' + cell['source'][0] + "\n\n"
+            if cell["cell_type"] in ("markdown", "code"):
+                out += "--\n" + cell["source"][0] + "\n\n"
         return out
-
-
-

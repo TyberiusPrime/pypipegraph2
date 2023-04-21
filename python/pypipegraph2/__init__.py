@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-__version__ = '3.0.0'
+__version__ = "3.0.0"
 
 from pathlib import Path
 import logging
-from loguru import logger
 import contextlib
 from .graph import PyPipeGraph, ALL_CORES
 from .jobs import (
@@ -24,7 +23,7 @@ from .jobs import (
     Job,
     JobList,
     SharedMultiFileGeneratingJob,
-    NotebookInvariant
+    NotebookInvariant,
 )
 from .exceptions import (
     PPGException,
@@ -43,6 +42,8 @@ from .exceptions import (
 )
 from .enums import Resources, RunMode
 from . import util
+from .util import assert_uniqueness_of_object
+from .pypipegraph2 import enable_logging as enable_rust_logging
 
 reuse_last_or_default = object()
 default = object()
@@ -191,10 +192,6 @@ def unreplace_ppg1():
     ppg1_compatibility.unreplace_ppg1()
 
 
-from .util import assert_uniqueness_of_object
-from .pypipegraph2 import enable_logging as enable_rust_logging
-
-
 __all__ = [
     "new",
     "run",
@@ -228,6 +225,7 @@ __all__ = [
     "RunFailedInternally",
     "JobsFailed",
     "JobError",
+    "HistoryLoadingFailed",
     "JobEvaluationFailed",
     "Resources",
     "RunMode",
@@ -235,5 +233,5 @@ __all__ = [
     "unreplace_ppg1",
     "inside_ppg",
     "assert_uniqueness_of_object",
-    "enable_rust_logging"
+    "enable_rust_logging",
 ]

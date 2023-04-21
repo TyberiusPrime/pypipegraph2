@@ -44,7 +44,8 @@ class TestResourceCoordinator:
             resource_coordinator=ppg.resource_coordinators.LocalSystem(
                 max_cores_to_use=3, interactive=False
             ),
-            # ppg2: needs 3 cores. Two cores, second job is at 2-1 = 1 core, can still run...
+            # ppg2: needs 3 cores.
+            # Two cores, second job is at 2-1 = 1 core, can still run...
             dump_graph=False,
         )
         jobA = ppg.FileGeneratingJob(
@@ -91,8 +92,12 @@ class TestResourceCoordinator:
             quiet=True,
             dump_graph=False,
         )
-        jobA = ppg.FileGeneratingJob("out/A", lambda: time.sleep(.5) or write("out/A", "A"))
-        jobB = ppg.FileGeneratingJob("out/B", lambda: time.sleep(.5) or write("out/B", "B"))
+        jobA = ppg.FileGeneratingJob(
+            "out/A", lambda: time.sleep(0.5) or write("out/A", "A")
+        )
+        jobB = ppg.FileGeneratingJob(
+            "out/B", lambda: time.sleep(0.5) or write("out/B", "B")
+        )
         jobA.cores_needed = 1
         jobB.cores_needed = 1
         now = time.time()
@@ -393,7 +398,7 @@ def test_stat_cache(ppg1_compatibility_test):
         ppg.util.stat("out/A")  # cache invalidated
 
 
-@pytest.mark.skip  #  ppg2 has it's own test suite
+@pytest.mark.skip  # ppg2 has it's own test suite
 def test_interactive_import(ppg1_compatibility_test):
     # just so at least the import part of interactive is under coverage
     import pypipegraph.interactive  # noqa:F401
@@ -446,7 +451,8 @@ def test_dataloading_job_changing_cwd(ppg1_compatibility_test):
     a = ppg.FileGeneratingJob("a", lambda: Path("a").write_text("hello"))
     b = ppg.DataLoadingJob("b", load)
     a.depends_on(b)
-    # ppg2 no longer allows this, it's basically the thing it can't recover from (multithreaded and cwd changes = boom
+    # ppg2 no longer allows this, it's basically the thing it can't
+    # recover from (multithreaded and cwd changes = boom
     with pytest.raises(ppg.RuntimeError):
         ppg.run_pipegraph()
     assert not Path("a").exists()
@@ -468,7 +474,8 @@ def test_job_generating_job_changing_cwd(ppg1_compatibility_test):
     a = ppg.FileGeneratingJob("a", lambda: Path("a").write_text("hello"))
     b = ppg.JobGeneratingJob("b", load)
     a.depends_on(b)
-    # ppg2 no longer allows this, it's basically the thing it can't recover from (multithreaded and cwd changes = boom
+    # ppg2 no longer allows this, it's basically the thing it can't recover
+    # from (multithreaded and cwd changes = boom
     with pytest.raises(ppg.RuntimeError):
         ppg.run_pipegraph()
     assert not Path("a").exists()
@@ -486,7 +493,7 @@ def test_inheritance_of_filegen(ppg1_compatibility_test, job_trace_log):
 
             super().__init__(filename, wrapper)
 
-    a = MyJob("a", lambda of: of.write_text("hello"))
+    MyJob("a", lambda of: of.write_text("hello"))
     ppg.run_pipegraph()
     assert read("a") == "hello"
     assert read("counter") == "a"

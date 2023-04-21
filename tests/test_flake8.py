@@ -4,7 +4,6 @@ import unittest
 from pathlib import Path
 
 
-@pytest.mark.skip
 class Flake8TestCase(unittest.TestCase):
     def test_flake8(self):
         p = subprocess.Popen(

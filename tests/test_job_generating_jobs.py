@@ -337,4 +337,3 @@ class TestJobGeneratingJob:
     #     c = ppg.JobGeneratingJob('c', jj('c'))
     #     d = ppg.JobGeneratingJob('d', jj('d'))
     #     ppg.run()
-

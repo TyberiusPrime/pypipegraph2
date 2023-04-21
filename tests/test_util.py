@@ -119,10 +119,8 @@ class TestUtils:
         # no dedup on this.
         assert list(ppg.util.flatten_jobs(res)) == [j1, j2, j3, j1]
 
-
     def test_inside_ppg(self):
         assert ppg.global_pipegraph is not None
         assert ppg.inside_ppg()
         ppg.global_pipegraph = None
         assert not ppg.inside_ppg()
-

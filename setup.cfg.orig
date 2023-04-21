@@ -1,8 +1,11 @@
-
 [metadata]
 name = pypipegraph2
 description = Advanced python 'what changed and what do we need to do' tracking
+<<<<<<< HEAD
+version = 2.5.0
+=======
 version = 3.0.0
+>>>>>>> c52e07c (Bump version to 3.0.0, extend readme)
 author = Florian Finkernagel
 author-email = finkernagel@imt.uni-marburg.de
 license = mit
@@ -86,8 +89,4 @@ exclude =
 	dist
 	.eggs
 	docs/conf.py
-max-line-length = 88
-select = C,E,F,W,B,B950
-extend-ignore = E203, E501
-ignore=E713,W503,F841
 

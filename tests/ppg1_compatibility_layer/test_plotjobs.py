@@ -73,7 +73,8 @@ if has_pyggplot:  # noqa C901
 
             of = "out/test.png"
             p = ppg.PlotJob(of, calc, plot)
-            #ppg2 has no add_fiddle p.add_fiddle(lambda p: dp(p).scale_x_continuous(trans="log10").pd)
+            # ppg2 has no add_fiddle
+            # p.add_fiddle(lambda p: dp(p).scale_x_continuous(trans="log10").pd)
             p.add_another_plot("out/test2.png", plot2)
             ppg.run_pipegraph()
             assert magic(of).find(b"PNG image") != -1
@@ -257,7 +258,9 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "A"
             assert read("out/plot") == "BB"
 
-        def test_no_rerun_if_ignore_code_changes_and_plot_changes(self, ppg1_compatibility_test):
+        def test_no_rerun_if_ignore_code_changes_and_plot_changes(
+            self, ppg1_compatibility_test
+        ):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -270,13 +273,14 @@ if has_pyggplot:  # noqa C901
 
             of = "out/test.png"
             job = ppg.PlotJob(of, calc, plot)
-            job.ignore_code_changes()  # ppg2. otherwise the missing dependency triggers! 
+            job.ignore_code_changes()  # ppg2.otherwise a missing dependency triggers!
             ppg.run_pipegraph()
             assert magic(of).find(b"PNG image") != -1
             assert read("out/calc") == "A"
             assert read("out/plot") == "B"
 
             from loguru import logger
+
             logger.error("Round two")
             ppg1_compatibility_test.new_pipegraph()
 
@@ -316,7 +320,10 @@ if has_pyggplot:  # noqa C901
                 append("out/calc", "A")
                 x = 5  # noqa: E157,F841
                 return pd.DataFrame(
-                    {"X": list(range(0+x, 100+x)), "Y": list(range(50, 150))} # must change actual output
+                    {
+                        "X": list(range(0 + x, 100 + x)),
+                        "Y": list(range(50, 150)),
+                    }  # must change actual output
                 )
 
             ppg.PlotJob(of, calc2, plot)
@@ -325,7 +332,9 @@ if has_pyggplot:  # noqa C901
             assert read("out/calc") == "AA"
             assert read("out/plot") == "BB"
 
-        def test_no_rerun_if_calc_change_but_ignore_codechanges(self, ppg1_compatibility_test):
+        def test_no_rerun_if_calc_change_but_ignore_codechanges(
+            self, ppg1_compatibility_test
+        ):
             def calc():
                 append("out/calc", "A")
                 return pd.DataFrame(
@@ -338,7 +347,8 @@ if has_pyggplot:  # noqa C901
 
             of = "out/test.png"
             job = ppg.PlotJob(of, calc, plot)
-            job.ignore_code_changes()  # ppg2  must always not have code changes otherwise the missing dependency triggers
+            job.ignore_code_changes()  # ppg2  must always not have code changes
+            # otherwise the missing dependency triggers
             ppg.run_pipegraph()
             assert magic(of).find(b"PNG image") != -1
             assert read("out/calc") == "A"
@@ -373,8 +383,8 @@ if has_pyggplot:  # noqa C901
             job = ppg.PlotJob(of, calc, plot)
             dep = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "A"))
             job.depends_on(dep)
-            #assert dep in job.cache_job.prerequisites
-            assert ppg.util.global_pipegraph.has_edge(dep,job.cache_job.lfg) # ppg2
+            # assert dep in job.cache_job.prerequisites
+            assert ppg.util.global_pipegraph.has_edge(dep, job.cache_job.lfg)  # ppg2
 
         def test_raises_if_calc_returns_non_df(self):
             def calc():
@@ -391,8 +401,13 @@ if has_pyggplot:  # noqa C901
                 raise ValueError("should not be reached")
             except ppg.RuntimeError:
                 pass
-            assert isinstance(ppg.util.global_pipegraph.last_run_result[job.cache_job.lfg.job_id].error.args[0], ppg.JobContractError)
-            #assert isinstance(job.cache_job.exception, ppg.JobContractError)
+            assert isinstance(
+                ppg.util.global_pipegraph.last_run_result[
+                    job.cache_job.lfg.job_id
+                ].error.args[0],
+                ppg.JobContractError,
+            )
+            # assert isinstance(job.cache_job.exception, ppg.JobContractError)
 
         def test_raises_if_plot_returns_non_plot(self):
             # import pyggplot
@@ -454,10 +469,11 @@ if has_pyggplot:  # noqa C901
             with pytest.raises(ppg.RuntimeError):
                 ppg.run_pipegraph()
             assert not os.path.exists("out/test.png")
-            #assert isinstance(p.exception, ValueError) # ppg2
+            # assert isinstance(p.exception, ValueError) # ppg2
             import pickle
+
             assert isinstance(p.cache_job.exception, pickle.UnpicklingError)
-            #assert "Unpickling error in file" in str(p.exception)
+            # assert "Unpickling error in file" in str(p.exception)
             assert "Unpickling error in file" in str(p.cache_job.exception)
 
         def test_add_another_not_returning_plot(self):
@@ -474,13 +490,13 @@ if has_pyggplot:  # noqa C901
 
             of = "out/test.png"
             p = ppg.PlotJob(of, calc, plot)
-            #ppg2 has no add_fiddle p.add_fiddle(lambda p: p.scale_x_log10())
+            # ppg2 has no add_fiddle p.add_fiddle(lambda p: p.scale_x_log10())
             p2 = p.add_another_plot("out/test2.png", plot2)
             with pytest.raises(ppg.RuntimeError):
                 ppg.run_pipegraph()
             assert isinstance(p2.exception, ppg.JobContractError)
 
-    @pytest.mark.skip # no combinedplotjob
+    @pytest.mark.skip  # no combinedplotjob
     @pytest.mark.usefixtures("ppg1_compatibility_test")
     class TestCombinedPlotJobs:
         def test_complete(self):

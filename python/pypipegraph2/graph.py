@@ -1,4 +1,3 @@
-from multiprocessing.sharedctypes import Value
 from typing import Optional, Union, Dict
 import gzip
 import threading
@@ -18,11 +17,17 @@ from pathlib import Path
 from loguru import logger
 
 from . import exceptions
-from .runner import Runner, JobOutcome
-from .util import CPUs, console, log_job_trace
-from .enums import RunMode
+from .runner import Runner
+from .enums import RunMode, JobOutcome
 from .exceptions import JobsFailed, _RunAgain
-from .util import log_info, log_error, log_warning, log_debug, log_trace
+from .util import (
+    CPUs,
+    log_info,
+    log_error,
+    log_warning,
+    # log_debug,
+    log_trace,
+)
 from . import util
 from rich.logging import RichHandler
 from rich.console import Console
@@ -375,7 +380,7 @@ class PyPipeGraph:
                 shutil.rmtree(f)
 
     def _link_errors(self):
-        self._link_latest(self.error_dir, f"*", "latest", True)
+        self._link_latest(self.error_dir, "*", "latest", True)
 
     def _log_runtimes(self, job_results, run_start_time):
         """Log the runtimes to a file (ever growing. But only runtimes over a threshold)"""
@@ -476,12 +481,10 @@ class PyPipeGraph:
         # for job_id in self.jobs.keys():
         # new[job_id] = json.dumps(old[job_id], indent=2)
 
-        import pprint
-
         for job_id, job in self.jobs.items():
             upstreams = job.upstreams
-            #incoming_edges = sorted([x.job_id for x in upstreams])
-            #"\n".join(incoming_edges)
+            # incoming_edges = sorted([x.job_id for x in upstreams])
+            # "\n".join(incoming_edges)
             new[job_id + "!!!"] = Runner.get_job_inputs_str(self, job_id)
             new[job_id] = json.dumps(old[job_id][1])  # 1, that's the output hash.
 
@@ -640,18 +643,18 @@ class PyPipeGraph:
         self.job_dag.add_node(job.job_id)
         # assert len(self.jobs) == len(self.job_dag) - we verify this when running
 
-
     def find_job_from_file(self, filename):
         if isinstance(filename, Path):
             filename = str(filename)
         return self.jobs[self.outputs_to_job_ids[filename]]
 
     def find_job(self, job_or_id_or_path):
-        from . jobs import Job
+        from .jobs import Job
+
         if isinstance(job_or_id_or_path, (str, Path)):
             return self.find_job_from_file(job_or_id_or_path)
         elif isinstance(job_or_id_or_path, Job):
-            return job_or_id
+            return job_or_id_or_path
         else:
             raise TypeError("job was not a Job nor a job_id")
 

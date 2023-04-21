@@ -1,7 +1,5 @@
-from logging import captureWarnings
 import multiprocessing
 from pathlib import Path
-from multiprocessing import current_process, Pipe
 from . import exceptions
 import sys
 import os
@@ -13,23 +11,27 @@ from .util import escape_logging
 from .enums import (
     JobOutcome,
     RunMode,
-    Resources,
 )
 from .exceptions import _RunAgain
 from .parallel import CoreLock, async_raise, FakeLock
-from threading import ExceptHookArgs, Thread
+from threading import Thread
 from . import ppg_traceback
 import threading
-from rich.console import Console
 from .interactive import ConsoleInteractive, StatusReport
-from .util import log_info, log_error, log_warning, log_debug, log_trace, log_job_trace
+from .util import (
+    log_info,
+    log_error,
+    # log_warning,
+    # log_debug,
+    log_trace,
+    log_job_trace,
+)
 import copy
 from .job_status import RecordedJobOutcome
 from .history_comparisons import history_is_different
 from collections import deque
 import signal
 import psutil
-import subprocess
 import ctypes
 
 
@@ -61,7 +63,9 @@ def kill_process_group_but_ppg_runner():
             pass
     gone, alive = psutil.wait_procs(children_to_reap, timeout=2)
     for p in alive:
-        log_info(f"Abort: Watcher is killing child processes {p.pid} {p.name()} {p.status()}")
+        log_info(
+            f"Abort: Watcher is killing child processes {p.pid} {p.name()} {p.status()}"
+        )
         p.kill()
     gone, alive = psutil.wait_procs(children_to_reap, timeout=2)
     if alive:
@@ -110,7 +114,7 @@ def spawn_watcher():
         signal.signal(signal.SIGINT, watcher_expected_death_of_parent)
         prtcl = ctypes.CDLL("libc.so.6")["prctl"]
         PR_SET_PDEATHSIG = 1
-        prtcl(PR_SET_PDEATHSIG, signal.SIGTERM)  # 1 = 
+        prtcl(PR_SET_PDEATHSIG, signal.SIGTERM)  # 1 =
         log_info("entering watcher loop")
         send.send_bytes(b"go")
         send.close()
@@ -154,7 +158,7 @@ class Runner:
             self.jobs = job_graph.jobs.copy()
             self.job_inputs = copy.deepcopy(
                 job_graph.job_inputs
-            )  #  job_graph.job_inputs.copy()
+            )  # job_graph.job_inputs.copy()
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
             self.next_job_number = self.job_graph.next_job_number
             self.core_lock = CoreLock(job_graph.cores)
@@ -195,7 +199,7 @@ class Runner:
             assert len(job_numbers) == len(self.jobs)
             if len(self.jobs) - len(self.pruned) != len(self.dag):
                 raise NotImplementedError(
-                    f"Mismatch between len(self.jobs) {len(self.jobs)} - prune_counter {prune_counter} and len(self.dag) {len(self.dag)}"
+                    f"Mismatch between len(self.jobs) {len(self.jobs)} - prune_counter {len(self.pruned)} and len(self.dag) {len(self.dag)}"
                 )
 
             log_job_trace(
@@ -330,7 +334,11 @@ class Runner:
     def build_evaluator(self, history):
         from .pypipegraph2 import PPG2Evaluator
 
-        e = PPG2Evaluator(history, self.compare_history, lambda job_id: self.__class__.get_job_inputs_str(self.job_graph, job_id))
+        e = PPG2Evaluator(
+            history,
+            self.compare_history,
+            lambda job_id: self.__class__.get_job_inputs_str(self.job_graph, job_id),
+        )
         # todo: see how much we can push into rust of
         # the whole networkx business.
         # no need to keep multiple graphs, I suppose.
@@ -406,10 +414,12 @@ class Runner:
             # unregister_reaper(reaper)
             assert psutil.pid_exists(self.watcher_pid)
             os.kill(self.watcher_pid, signal.SIGINT)
-            gone, alive = psutil.wait_procs([psutil.Process(self.watcher_pid)], timeout=10)
+            gone, alive = psutil.wait_procs(
+                [psutil.Process(self.watcher_pid)], timeout=10
+            )
             if alive:
                 log_error("Watcher was still hanging around?!")
-            #os.waitpid(self.watcher_pid, 1)
+            # os.waitpid(self.watcher_pid, 1)
             log_info("finished waiting for watcher")
 
         for job_id in self.pruned:
@@ -663,13 +673,19 @@ class Runner:
                                     # to run at *this* junction.
                                     do_sleep = True
                                     if not self.jobs_in_flight:
-                                        log_error(f"jobs the engine considers running {self.evaluator.jobs_running()}")
-                                        log_error(f"The engine considers itself finished = {self.evaluator.is_finished()}")
+                                        log_error(
+                                            f"jobs the engine considers running {self.evaluator.jobs_running()}"
+                                        )
+                                        log_error(
+                                            f"The engine considers itself finished = {self.evaluator.is_finished()}"
+                                        )
                                         log_error(
                                             "Evaluator is not finished, reports no jobs ready to run, but no jobs currently running -> a bug in the state machine. No way forward, aborting graph executing (cleanly). Graph written to debug.txt "
                                         )
-                                        self.evaluator.debug_is_finished() # if this helps' we're looking at a propagation failure. Somewhere.
-                                        Path("debug.txt").write_text(self.evaluator.debug()) # if this helps' we're looking at a propagation failure. Somewhere.
+                                        self.evaluator.debug_is_finished()  # if this helps' we're looking at a propagation failure. Somewhere.
+                                        Path("debug.txt").write_text(
+                                            self.evaluator.debug()
+                                        )  # if this helps' we're looking at a propagation failure. Somewhere.
                                         # self.evaluator.reconsider_all_jobs() # if this helps' we're looking at a propagation failure. Somewhere.
                                         # if not self.evaluator.is_finished() and not self.evaluator.jobs_ready_to_run():
                                         #     #print("goin gdown hard")
@@ -870,7 +886,6 @@ class Runner:
                                 self.jobs_in_flight.remove(job_id)
                                 if c > 1:
                                     self.jobs_all_cores_in_flight -= 1
-
 
                             self.job_outcomes[job_id].run_time = job.run_time
                             self.check_for_new_jobs.set()

@@ -1,8 +1,8 @@
+from pathlib import Path
+
+
 class Dummy(object):
     pass
-
-
-from pathlib import Path
 
 
 def write(filename, text):
@@ -40,4 +40,5 @@ def counter(filename):
 def force_load(job):
     """Force the loading of a Dataloading job that has no other dependents"""
     import pypipegraph2 as ppg
-    ppg.JobGeneratingJob(job.job_id + '_gen', lambda: None).depends_on(job)
+
+    ppg.JobGeneratingJob(job.job_id + "_gen", lambda: None).depends_on(job)

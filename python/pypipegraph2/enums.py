@@ -4,9 +4,9 @@ from enum import Enum, auto
 class JobOutcome(Enum):
     NotYet = auto()  # default
     Success = auto()
-    Skipped = auto() 
-    Failed = auto() # todo rename to Failure
-    UpstreamFailed = auto() # rename to UpstreamFailure 
+    Skipped = auto()
+    Failed = auto()  # todo rename to Failure
+    UpstreamFailed = auto()  # rename to UpstreamFailure
     Pruned = auto()
 
 

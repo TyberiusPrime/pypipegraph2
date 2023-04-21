@@ -44,6 +44,7 @@ class JobEvaluationFailed(PPGException):
 
 class RunFailed(FatalGraphException):
     """The execution failed outside of the scope of a single job"""
+
     pass
 
 
@@ -85,6 +86,7 @@ class JobError(PPGException):
 
     def __repr__(self):
         return str(self)
+
 
 class JobCanceled(PPGException):
     pass

@@ -53,5 +53,6 @@ ppg.run()
 stop = time.time()
 
 print(
-    f"took {stop-start:.2f}. If this is close to {timeout * jobcount}, all is well. If it's more, we have an ordering problem"
+    f"took {stop-start:.2f}. If this is close to {timeout * jobcount}, all is well. "
+    "If it's more, we have an ordering problem"
 )

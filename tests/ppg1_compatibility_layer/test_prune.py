@@ -61,10 +61,10 @@ class TestPruning:
         assert Path("D").read_text() == "D"
         assert not Path("B").exists()
         assert not Path("C").exists()
-        #assert c._pruned == b.job_id ppg3
+        # assert c._pruned == b.job_id ppg3
         assert c.prune_reason == b.job_id
 
-    @pytest.mark.skip # no FinalJob in ppg2
+    @pytest.mark.skip  # no FinalJob in ppg2
     def test_pruning_does_not_prune_final_jobs(self):
         ppg.FileGeneratingJob("A", lambda: write("A", "A"))
         b = ppg.FileGeneratingJob("B", lambda: write("B", "B"))
@@ -75,7 +75,7 @@ class TestPruning:
         assert Path("C").read_text() == "C"
         assert not Path("B").exists()
 
-    @pytest.mark.skip # no FinalJob in ppg2
+    @pytest.mark.skip  # no FinalJob in ppg2
     def test_pruning_final_jobs_directly(self):
         ppg.FileGeneratingJob("A", lambda: write("A", "A"))
         ppg.FileGeneratingJob("B", lambda: write("B", "B"))

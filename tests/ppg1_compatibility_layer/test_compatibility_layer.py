@@ -39,7 +39,7 @@ class TestcompatibilityLayerMore:
 
     def test_fg_did_not_create_its_file(self):
         j = ppg1.FileGeneratingJob("test_file_gen", lambda: 55)  # old school callback
-        j2 = ppg1.FileGeneratingJob(
+        ppg1.FileGeneratingJob(
             "test_file_gen_does", lambda: Path("test_file_gen_does").write_text("A")
         )  # old school callback
         with pytest.raises(ppg2.JobsFailed):
@@ -47,7 +47,7 @@ class TestcompatibilityLayerMore:
         assert "did not create" in str(j.exception)
 
     def test_multifilegenerating_without_arguments(self):
-        j1 = ppg1.MultiFileGeneratingJob(
+        ppg1.MultiFileGeneratingJob(
             ["out/A", "out/B"], lambda: write("out/A", "A") or write("out/B", "B")
         )
         j2 = ppg1.MultiFileGeneratingJob(["out/C", "out/D"], lambda: 55)
@@ -87,7 +87,7 @@ class TestcompatibilityLayerMore:
         assert list(b.prerequisites) == [a]
 
     def test_depends_on_file_param_returns_wrapped(self):
-        a = ppg1.FileGeneratingJob("a", lambda of: counter(of))
+        a = ppg1.FileGeneratingJob("a", lambda of: write(of))
         Path("input").write_text("hello")
         b = a.depends_on_file("input").invariant
         assert isinstance(b, ppg2.ppg1_compatibility.FileInvariant)
@@ -121,7 +121,7 @@ class TestcompatibilityLayerMore:
         )  # is a wrapped function
 
         with pytest.raises(TypeError):
-            c = ppg1.FileGeneratingJob("c", all_default_args)
+            ppg1.FileGeneratingJob("c", all_default_args)
         ppg1.new_pipegraph()
         a = ppg1.MultiFileGeneratingJob(["a"], no_args)
         assert hasattr(
@@ -131,7 +131,7 @@ class TestcompatibilityLayerMore:
         assert not hasattr(
             b.generating_function, "wrapped_function"
         )  # is a wrapped function
-        c = ppg1.MultiFileGeneratingJob(
+        ppg1.MultiFileGeneratingJob(
             ["c"], all_default_args
         )  # mfg never passed [output_files]
         assert hasattr(
@@ -139,12 +139,14 @@ class TestcompatibilityLayerMore:
         )  # is a wrapped function
 
     def test_rc_cores_available(self):
-        assert ppg1.util.global_pipegraph.rc.cores_available == ppg2.global_pipegraph.cores
+        assert (
+            ppg1.util.global_pipegraph.rc.cores_available == ppg2.global_pipegraph.cores
+        )
 
     def test_ignore_code_changes_changes_both_dag_and_jobs(self):
-        a = ppg1.FileGeneratingJob('a', lambda of: of.write_text('a'))
-        assert len(ppg2.global_pipegraph.jobs) == 2 # the fg, and teh FI
-        assert len(ppg2.global_pipegraph.job_dag) == 2 # the fg, and teh FI
+        a = ppg1.FileGeneratingJob("a", lambda of: of.write_text("a"))
+        assert len(ppg2.global_pipegraph.jobs) == 2  # the fg, and teh FI
+        assert len(ppg2.global_pipegraph.job_dag) == 2  # the fg, and teh FI
         a.ignore_code_changes()
-        assert len(ppg2.global_pipegraph.jobs) == 1 # the fg, and teh FI
-        assert len(ppg2.global_pipegraph.job_dag) == 1 # the fg, and teh FI
+        assert len(ppg2.global_pipegraph.jobs) == 1  # the fg, and teh FI
+        assert len(ppg2.global_pipegraph.job_dag) == 1  # the fg, and teh FI

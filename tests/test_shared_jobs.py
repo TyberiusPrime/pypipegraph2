@@ -38,8 +38,8 @@ class TestSharedJob:
             of.write_text(read(job.files[1]))
             counter("d")
 
-        fc = ppg.FileGeneratingJob("C", followup_c).depends_on(job)
-        fd = ppg.FileGeneratingJob("D", followup_d).depends_on(job.files[1])
+        ppg.FileGeneratingJob("C", followup_c).depends_on(job)
+        ppg.FileGeneratingJob("D", followup_d).depends_on(job.files[1])
 
         ppg.util.log_error("one")
         ppg.run()
@@ -71,8 +71,8 @@ class TestSharedJob:
         job = ppg.SharedMultiFileGeneratingJob(
             "out", ["a", "b"], doit, depend_on_function=False, remove_unused=False
         )
-        fc = ppg.FileGeneratingJob("C", followup_c).depends_on(job)
-        fd = ppg.FileGeneratingJob("D", followup_d).depends_on(job.files[1])
+        ppg.FileGeneratingJob("C", followup_c).depends_on(job)
+        ppg.FileGeneratingJob("D", followup_d).depends_on(job.files[1])
 
         job.depends_on(ppg.ParameterInvariant("E", "f"))
         ppg.util.log_error("three")
@@ -144,7 +144,7 @@ class TestSharedJob:
         )
         c = ppg.SharedMultiFileGeneratingJob("out2", ["c"], func_c)
         c.depends_on(job)
-        d = ppg.FileGeneratingJob(
+        ppg.FileGeneratingJob(
             "d", lambda of: counter("d") and of.write_text(read(c[0]) + "d")
         ).depends_on(c)
         ppg.run()
@@ -180,14 +180,10 @@ class TestSharedJob:
         )
         c = ppg.SharedMultiFileGeneratingJob("out2", ["c"], func_c)
         c.depends_on(job)
-        d = ppg.FileGeneratingJob(
+        ppg.FileGeneratingJob(
             "d", lambda of: counter("d") and of.write_text(read(c[0]) + "d")
         ).depends_on(c)
-        import subprocess
-
         # subprocess.check_call(["fd", "-L"])
-        import time
-
         ppg.util.log_error("last before bookm")
         ppg.run()
 
@@ -323,7 +319,7 @@ class TestSharedJob:
             job.target_folder
         try:
             ppg.run()
-        except Exception as e:
+        except Exception:
             print("stdout", job.stdout)
             print("stderr", job.stderr)
             raise
@@ -384,7 +380,7 @@ class TestSharedJob:
 
     def test_shared_job_with_dict_file_def(self):
         def doit(output_files, prefix):
-            count = counter("doit")
+            counter("doit")
             write(output_files["a"], "file_a")
 
         job = ppg.SharedMultiFileGeneratingJob("out", {"a": "file_a"}, doit)
@@ -621,8 +617,6 @@ class TestSharedJob:
 
     def test_local_log_usage(self):
         def load():
-            import json
-
             fn = (
                 ppg.global_pipegraph.history_dir
                 / ppg.SharedMultiFileGeneratingJob.log_filename
@@ -684,6 +678,6 @@ class TestSharedJob:
             for f in output_files:
                 f.write_text(f.name + count)
 
-        a = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit)
+        ppg.SharedMultiFileGeneratingJob("out", ["a"], doit)
         with pytest.raises(ppg.JobOutputConflict):
-            b = ppg.SharedMultiFileGeneratingJob("out", ["b"], doit)
+            ppg.SharedMultiFileGeneratingJob("out", ["b"], doit)

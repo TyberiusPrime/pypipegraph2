@@ -1,6 +1,5 @@
 import pytest
 import os
-from pathlib import Path
 from .shared import read, write, append
 import pickle
 
@@ -254,7 +253,7 @@ if has_pyggplot:  # noqa C901
             # note that you already need to ignore the function here
             # otherwise, the fact that the function is now *missing*
             # would trigger downstream
-            job = ppg.PlotJob(of, calc, plot, depend_on_function=False)
+            ppg.PlotJob(of, calc, plot, depend_on_function=False)
             ppg.run()
             assert magic(of).find(b"PNG image") != -1
             assert read("out/calc") == "A"
@@ -320,7 +319,7 @@ if has_pyggplot:  # noqa C901
                 return dp(df).p9().add_point("X", "Y")
 
             of = "out/test.png"
-            job = ppg.PlotJob(of, calc, plot, depend_on_function=False)
+            ppg.PlotJob(of, calc, plot, depend_on_function=False)
             ppg.run()
             assert magic(of).find(b"PNG image") != -1
             assert read("out/calc") == "A"

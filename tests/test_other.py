@@ -475,7 +475,9 @@ class TestModifyDag:
             depend_on_function=False,
         )
         a2.depends_on(a1)
-        b = ppg.DataLoadingJob("b", lambda: _no_such_thing, depend_on_function=False)
+        b = ppg.DataLoadingJob(
+            "b", lambda: _no_such_thing, depend_on_function=False  # noqa: F821
+        )
         a1.depends_on(b)
         a2.depends_on(b)
         log_info("now run")
@@ -584,7 +586,7 @@ def test_broken_case_from_delayeddataframe(ppg2_per_test):
 def test_strict_mode_two_jobs_same_id(ppg2_per_test):
     ppg.new(run_mode=ppg.RunMode.CONSOLE)
     assert ppg.global_pipegraph.run_mode.is_strict()
-    a = lambda of: None
+    a = lambda of: None  # noqa: E731
     ppg.FileGeneratingJob("a", a, depend_on_function=False)
     ppg.FileGeneratingJob("a", a, depend_on_function=False)
     # the testing is actually on the FunctionInvariant :(

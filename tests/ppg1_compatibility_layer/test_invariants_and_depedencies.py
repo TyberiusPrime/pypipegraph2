@@ -676,7 +676,7 @@ class TestInvariant:
             ppg.run_pipegraph()
         assert read("out/b") == "a"  # job was not run
 
-    # ppg2_rust 
+    # ppg2_rust
     # def test_invariant_loading_issues_on_value_undepickableclass(self):
     #     import tempfile
     #     import pickle
@@ -988,9 +988,7 @@ class TestFunctionInvariant:
                 append("out/" + self.letter, "A")
 
             def get_job(self):
-                job = ppg.FileGeneratingJob(
-                    "out/" + self.letter, self.write
-                )
+                job = ppg.FileGeneratingJob("out/" + self.letter, self.write)
                 job.depends_on(ppg.FunctionInvariant("shu.sha", self.sha))
                 return job
 
@@ -1812,7 +1810,6 @@ class TestDependency:
         assert read("out/A") == "ABC"
 
     def test_dependency_placeholder_dynamic_auto_invariants(self):
-        from loguru import logger
 
         jobA = ppg.FileGeneratingJob(
             "out/A", lambda: write("out/A", "A" + read("out/B"))
@@ -1823,7 +1820,10 @@ class TestDependency:
             print()
 
             # ppg2
-            assert ppg.util.global_pipegraph.has_edge("FITestDependency.test_dependency_placeholder_dynamic_auto_invariants.<locals>.check_function_invariant", "out/B")
+            assert ppg.util.global_pipegraph.has_edge(
+                "FITestDependency.test_dependency_placeholder_dynamic_auto_invariants.<locals>.check_function_invariant",
+                "out/B",
+            )
 
         def gen_deps():
             jobB = ppg.FileGeneratingJob("out/B", check_function_invariant)
@@ -1897,7 +1897,7 @@ class TestFunctionInvariantDisChanges_BetweenVersions:
              22 CALL_FUNCTION            1
              24 RETURN_VALUE"""
         # fmt: off
-        py373 = (  # noqa: F841
+        py373 = (  # noqa: F841, E501
             """  2           0 LOAD_CLOSURE             0 (arg2)
               2 BUILD_TUPLE              1
               4 LOAD_CONST               1 (<code object <lambda> at 0x7fd895ea9030, file "<stdin>", line 2>)
@@ -2077,7 +2077,6 @@ RETURN_VALUE"""
 # ppg2: actual ppg2 source is without final newline. tests adjusted.
 class TestCythoncompatibility:
     def test_just_a_function(self):
-        import pypipegraph2 as ppg2
         import cython
 
         src = """
@@ -2094,7 +2093,6 @@ def b():
         assert actual == should
 
     def test_nested_function(self):
-        import pypipegraph2 as ppg2
         import cython
 
         src = """
@@ -2113,7 +2111,6 @@ def c():
         assert actual == should
 
     def test_class(self):
-        import pypipegraph2 as ppg2
         import cython
 
         src = """
@@ -2131,7 +2128,6 @@ def c():
         assert actual == should
 
     def test_class_inner_function(self):
-        import pypipegraph2 as ppg2
         import cython
 
         src = """

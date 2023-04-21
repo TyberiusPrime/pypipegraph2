@@ -11,17 +11,17 @@ class TestBuildInCompabilty:
 
 _cytohn_func_counter = 0
 
+
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestCythonCompability:
-
     def source_via_func_invariant(self, name, func):
         global _cytohn_func_counter
-        _cytohn_func_counter =+ 1
-        r = ppg.FunctionInvariant(name + str(_cytohn_func_counter), func).run(None, None)
+        _cytohn_func_counter = +1
+        r = ppg.FunctionInvariant(name + str(_cytohn_func_counter), func).run(
+            None, None
+        )
         print(r)
-        return r[
-            "FI" + name + str(_cytohn_func_counter)
-        ]["source"]
+        return r["FI" + name + str(_cytohn_func_counter)]["source"]
 
     def test_just_a_function(self):
         import cython
@@ -50,10 +50,7 @@ def b():
         assert actual == should
 
         actual = self.source_via_func_invariant("b", func2)
-        should = """    def b():
-        shu = 55
-    
-        return shu"""
+        should = '    def b():\n        shu = 55\n    \n        return shu'
         assert actual == should
 
         ppg.FunctionInvariant("a", func)  # not a redefinition

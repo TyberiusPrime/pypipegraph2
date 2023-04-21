@@ -1,7 +1,6 @@
 import subprocess
 import sys
 import os
-import time
 from pathlib import Path
 import psutil
 

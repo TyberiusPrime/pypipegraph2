@@ -44,13 +44,13 @@ class TestJobGeneratingJob:
         assert read("out/B") == "B"
         assert read("out/C") == "C"
 
-    @pytest.mark.skip # we only support 1, all, or almost all cores now.
+    @pytest.mark.skip  # we only support 1, all, or almost all cores now.
     def test_raises_if_needs_more_cores_than_we_have(self):
         def gen():
             jobA = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "A"))
             jobA.cores_needed = 20000
 
-        j = ppg.JobGeneratingJob("genjob", gen)
+        ppg.JobGeneratingJob("genjob", gen)
         try:
             ppg.run_pipegraph()
             raise ValueError("should not be reached")
@@ -61,7 +61,7 @@ class TestJobGeneratingJob:
         assert jobGenerated.failed
         assert jobGenerated.error_reason == "Needed to much memory/cores"
 
-    @pytest.mark.skip # we don't support ram limits
+    @pytest.mark.skip  # we don't support ram limits
     def test_raises_if_needs_more_ram_than_we_have(self):
         def gen():
             jobA = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "A"))
@@ -78,7 +78,7 @@ class TestJobGeneratingJob:
         assert jobGenerated.failed
         assert jobGenerated.error_reason == "Needed to much memory/cores"
 
-    @pytest.mark.skip # we don't support ram limits
+    @pytest.mark.skip  # we don't support ram limits
     def test_with_memory_needed(self):
         jobA = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "A"))
         jobA.memory_needed = 1024
@@ -217,7 +217,7 @@ class TestJobGeneratingJob:
         def inner():
             ppg.JobGeneratingJob("out/a", "shu")
 
-        #assertRaises(ValueError, inner)
+        # assertRaises(ValueError, inner)
         assertRaises(TypeError, inner)
 
     def test_passing_non_string_as_jobid(self):
@@ -226,7 +226,7 @@ class TestJobGeneratingJob:
 
         assertRaises(TypeError, inner)
 
-    def test_generated_jobs_that_can_not_run_right_away_because_of_dataloading_do_not_crash(
+    def test_generated_jobs_that_can_not_run_right_away_because_of_dataloading_do_not_crash(  # noqa: E501
         self,
     ):
         o = Dummy()
@@ -244,7 +244,7 @@ class TestJobGeneratingJob:
         assert read("out/C") == "Ashu"
         assert read("out/D") == "Bshu"
 
-    #ppg2 name no longer applies
+    # ppg2 name no longer applies
     def test_filegen_invalidated_jobgen_created_filegen_later_also_invalidated(
         self, ppg1_compatibility_test
     ):
@@ -272,9 +272,9 @@ class TestJobGeneratingJob:
         ppg.JobGeneratingJob("b", gen)
         ppg.run_pipegraph()
         assert read("out/Ac") == "AA"
-        assert read("out/Cx") == "C" # ppg2 - not rebuild. out/A did not chaneg! 
+        assert read("out/Cx") == "C"  # ppg2 - not rebuild. out/A did not chaneg!
 
-    @pytest.mark.skip # ppg2: no longer forbidden.
+    @pytest.mark.skip  # ppg2: no longer forbidden.
     def test_raises_if_generating_within_dataload(self):
         ppg.util.global_pipegraph.quiet = False
         write_job = ppg.FileGeneratingJob("out/A", lambda: write("out/A", "aa"))
@@ -300,8 +300,8 @@ class TestJobGeneratingJob:
         ppg.run_pipegraph()
         assert read("out/C") == "c"
 
-    @pytest.mark.skip # you may muck up the graph as you wish in ppg2. We don't look at it
-    # till we run it again
+    @pytest.mark.skip  # you may muck up the graph as you wish in ppg2.
+    # We don't look at it till we run it again
     def test_jobgenerating_is_not_dependency_injection(self):
         old = ppg.FileGeneratingJob("out/D", lambda: write("out/D", "D"))
 
@@ -380,19 +380,19 @@ class TestJobGeneratingJob:
         assert counter[0] == 3
 
 
-@pytest.mark.skip # dependency injections are gone.
+@pytest.mark.skip  # dependency injections are gone.
 @pytest.mark.usefixtures("ppg1_compatibility_test")
 class TestDependencyInjectionJob:
     def test_basic(self, ppg1_compatibility_test):
         # TODO: there is a problem with this apporach. The AttributeLoadingJob
-        # references different objects, since it get's pickled alongside with the method,
-        # and depickled again, and then it's not the same object anymore,
+        # references different objects, since it get's pickled alongside with the
+        # method, and depickled again, and then it's not the same object anymore,
         # so the FileGeneratingJob and the AttributeLoadingJob in this test
         # reference different objects.
         # I'm not sure how to handle this right now though.
 
-        # I have an idea: Do JobGraphModifyingJobs in each worker, and send back just the
-        # dependency data (and new job name).
+        # I have an idea: Do JobGraphModifyingJobs in each worker, and send back just
+        # the dependency data (and new job name).
         # that way, we can still execute on any worker, and all the pointers should be
         # right.
         ppg1_compatibility_test.new_pipegraph()
@@ -558,7 +558,9 @@ class TestDependencyInjectionJob:
 
         assertRaises(TypeError, inner)
 
-    def test_injecting_into_data_loading_does_not_retrigger(self, ppg1_compatibility_test):
+    def test_injecting_into_data_loading_does_not_retrigger(
+        self, ppg1_compatibility_test
+    ):
         o = Dummy()
 
         def do_write():
@@ -618,7 +620,8 @@ class TestDependencyInjectionJob:
 
     def test_generated_job_depends_on_failing_job(self, ppg1_compatibility_test):
         # import logging
-        # ppg1_compatibility_test.new_pipegraph(log_file="debug.log", log_level=logging.DEBUG)
+        # ppg1_compatibility_test.new_pipegraph(log_file="debug.log",
+        # log_level=logging.DEBUG)
         def fn_a():
             raise ValueError()
 
@@ -637,9 +640,12 @@ class TestDependencyInjectionJob:
         assert b.error_reason == "no error"
         assert ppg.util.global_pipegraph.jobs["c"].error_reason == "Indirect"
 
-    def test_generated_job_depends_on_failing_job_inverse(self, ppg1_compatibility_test):
+    def test_generated_job_depends_on_failing_job_inverse(
+        self, ppg1_compatibility_test
+    ):
         # import logging
-        # ppg1_compatibility_test.new_pipegraph(log_file="debug.log", log_level=logging.DEBUG)
+        # ppg1_compatibility_test.new_pipegraph(log_file="debug.log",
+        # log_level=logging.DEBUG)
         def fn_a():
             raise ValueError()
 

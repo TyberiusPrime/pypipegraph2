@@ -104,7 +104,9 @@ class TestJobs:
             data.append("a")
 
         a = ppg.DataLoadingJob("A", load_a)
-        b = lambda: ppg.FileGeneratingJob("B", lambda of: of.write_text("b"))
+        b = lambda: ppg.FileGeneratingJob(  # noqa: E731
+            "B", lambda of: of.write_text("b")
+        )
         c = ppg.FileGeneratingJob(
             "C", lambda of: of.write_text(Path("B").read_text() + data[0])
         )
@@ -112,7 +114,7 @@ class TestJobs:
         ppg.run()
 
     def test_data_loading_MultiFile_dowstream(self, job_trace_log):
-        #todo :rename this test?
+        # todo :rename this test?
         def tf(ofs):
             counter("A")
             ofs[0].write_text("a1")
@@ -126,8 +128,8 @@ class TestJobs:
             ofs[1].write_text("c" + read("a1"))
 
         bc = ppg.MultiFileGeneratingJob(["b", "c"], write)
-        assert bc[0] == Path('b')
-        assert bc[1] == Path('c')
+        assert bc[0] == Path("b")
+        assert bc[1] == Path("c")
         bc.depends_on(a)
         bc()
         assert read("c") == "ca1"
@@ -145,7 +147,7 @@ class TestJobs:
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
         b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
-        c = ppg.DataLoadingJob("o", lambda: counter('c') and None)
+        c = ppg.DataLoadingJob("o", lambda: counter("c") and None)
         b.depends_on(a)
         a.depends_on_params("x")
         a.depends_on(c)
@@ -158,7 +160,8 @@ class TestJobs:
         ppg.run()
         assert read("a") == "2"
         assert read("c") == "2"
-        assert read("b") == "1" # ppg2_rust change
+        assert read("b") == "1"  # ppg2_rust change
+
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestJobs2:
@@ -246,9 +249,9 @@ class TestFileGeneratingJob:
 
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
-        print("this is it'", str(
-            ppg.global_pipegraph.last_run_result["out/0"].error
-        ),"'")
+        print(
+            "this is it'", str(ppg.global_pipegraph.last_run_result["out/0"].error), "'"
+        )
 
         assert "number is required, not PosixPath" in str(
             ppg.global_pipegraph.last_run_result["out/0"].error
@@ -343,7 +346,7 @@ class TestFileGeneratingJob:
             write(of, data_to_write)
             raise ValueError("shu")
 
-        job = ppg.FileGeneratingJob(of, do_write)
+        ppg.FileGeneratingJob(of, do_write)
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert Path(
@@ -379,7 +382,7 @@ class TestFileGeneratingJob:
         assert read("a") == "3"
         assert read("A") == "B"
 
-        job = ppg.FileGeneratingJob(of, func1)  # so we get the input we had previously!
+        ppg.FileGeneratingJob(of, func1)  # so we get the input we had previously!
         ppg.run()
         assert read("a") == "4"
         assert read("A") == "A"
@@ -453,16 +456,16 @@ class TestFileGeneratingJob:
 
         def do_write(of):
             write(of, "hello")
-            print("s" * (16 * 1024 ** 2))
-            sys.stderr.write("I" * (256 * 1024 ** 2))
+            print("s" * (16 * 1024**2))
+            sys.stderr.write("I" * (256 * 1024**2))
 
         job = ppg.FileGeneratingJob(of, do_write)
         with capsys.disabled():
             ppg.run()
         assert Path(of).exists()
         assert read(of) == "hello"
-        assert job.stdout == "s" * (16 * 1024 ** 2) + "\n"
-        assert job.stderr == "I" * (256 * 1024 ** 2)  # no \n here
+        assert job.stdout == "s" * (16 * 1024**2) + "\n"
+        assert job.stderr == "I" * (256 * 1024**2)  # no \n here
 
     def test_simple_filegeneration_captures_stdout_stderr_failure(self):
         of = "out/a"
@@ -564,7 +567,7 @@ class TestFileGeneratingJob:
         ppg.MultiFileGeneratingJob(
             ["out/D", "out/E"], lambda of: write("out/A", "world")
         )
-        with pytest.raises(ppg.JobOutputConflict) as excinfo:
+        with pytest.raises(ppg.JobOutputConflict):
             ppg.FileGeneratingJob("out/D", lambda of: write("out/C", "C"))
 
     def test_multi_file_with_exing_files_rerun_to_capture_hashes(self):
@@ -573,7 +576,7 @@ class TestFileGeneratingJob:
             for f in filenames:
                 f.write_text("hello")
 
-        a = ppg.MultiFileGeneratingJob(["a", "b"], callback)
+        ppg.MultiFileGeneratingJob(["a", "b"], callback)
         Path("a").write_text("shu")
         Path("b").write_text("shu")
         ppg.run()
@@ -1446,7 +1449,7 @@ class TestAttributeJob:
         o = Dummy()
         a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
         b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
-        c = ppg.AttributeLoadingJob("o", o, "o", lambda: counter('c') and None)
+        c = ppg.AttributeLoadingJob("o", o, "o", lambda: counter("c") and None)
         b.depends_on(a)
         a.depends_on_params("x")
         a.depends_on(c)
@@ -1459,7 +1462,7 @@ class TestAttributeJob:
         ppg.run()
         assert read("a") == "2"
         assert read("c") == "2"
-        assert read("b") == "1" # ppg2_rust
+        assert read("b") == "1"  # ppg2_rust
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1772,7 +1775,7 @@ class TestTempFileGeneratingJob:
         temp_job = ppg.TempFileGeneratingJob(
             temp_file, write_temp, depend_on_function=False
         )
-        jobA = ppg.FileGeneratingJob("A", write_a, depend_on_function=False)
+        ppg.FileGeneratingJob("A", write_a, depend_on_function=False)
         write_a("A")  # so the file is there!
         ppg.run()
         assert not (Path("out/temp").exists())
@@ -1780,9 +1783,7 @@ class TestTempFileGeneratingJob:
         write_temp(temp_file)
         assert Path("out/temp").exists()
         # this job never runs...
-        temp_job = ppg.TempFileGeneratingJob(
-            temp_file, write_temp, depend_on_function=False
-        )
+        ppg.TempFileGeneratingJob(temp_file, write_temp, depend_on_function=False)
         # temp_job.do_cleanup_if_was_never_run = True
         ppg.run()
         assert Path("out/temp").exists()  # no run, no cleanup
@@ -1847,8 +1848,9 @@ class TestTempFileGeneratingJob:
         assert Path("tf").read_text() == "1"  # same hash, file present
         assert Path("j2").read_text() == "2"
 
-    def test_adding_removing_outputs_does_not_trigger_downstreams_that_depend_on_the_unchanged_inputs(self):
-    
+    def test_adding_removing_outputs_does_not_trigger_downstreams_that_depend_on_the_unchanged_inputs(
+        self,
+    ):
         def do_a(ofs):
             counter("a")
             if isinstance(ofs, Path):
@@ -1857,7 +1859,9 @@ class TestTempFileGeneratingJob:
                 of.write_text(of.name)
 
         jobA = ppg.MultiFileGeneratingJob(["A", "B"], do_a)
-        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC = ppg.FileGeneratingJob(
+            "C", lambda of: counter("c") and of.write_text(of.name)
+        )
         jobC.depends_on("A")  # note how this depends on the file "A", not the job jobA.
         ppg.run()
         assert Path("C").read_text() == "C"
@@ -1865,7 +1869,9 @@ class TestTempFileGeneratingJob:
 
         ppg.new()
         jobA = ppg.MultiFileGeneratingJob(["A", "B", "D"], do_a)
-        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC = ppg.FileGeneratingJob(
+            "C", lambda of: counter("c") and of.write_text(of.name)
+        )
         jobC.depends_on("A")
         print("part2")
         ppg.run()
@@ -1874,12 +1880,13 @@ class TestTempFileGeneratingJob:
         assert Path("a").read_text() == "2"
         assert Path("c").read_text() == "1"
 
-
         # now let's take it out again.
         print("part3")
         ppg.new()
         jobA = ppg.MultiFileGeneratingJob(["A", "B"], do_a)
-        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC = ppg.FileGeneratingJob(
+            "C", lambda of: counter("c") and of.write_text(of.name)
+        )
         jobC.depends_on("A")
         ppg.run()
         assert Path("D").read_text() == "D"
@@ -1890,7 +1897,9 @@ class TestTempFileGeneratingJob:
         # take one out & put one in *at the same time*
         ppg.new()
         jobA = ppg.MultiFileGeneratingJob(["A", "B", "E"], do_a)
-        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC = ppg.FileGeneratingJob(
+            "C", lambda of: counter("c") and of.write_text(of.name)
+        )
         jobC.depends_on("A")
         ppg.run()
         assert Path("D").read_text() == "D"
@@ -1898,12 +1907,12 @@ class TestTempFileGeneratingJob:
         assert Path("a").read_text() == "4"
         assert Path("c").read_text() == "1"
 
-
-
         # now turn it into a FG
         ppg.new()
         jobA = ppg.FileGeneratingJob("A", do_a)
-        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        jobC = ppg.FileGeneratingJob(
+            "C", lambda of: counter("c") and of.write_text(of.name)
+        )
         jobC.depends_on("A")
         ppg.run()
         assert Path("D").read_text() == "D"
@@ -1911,17 +1920,19 @@ class TestTempFileGeneratingJob:
         assert Path("a").read_text() == "5"
         assert Path("c").read_text() == "1"
 
-
         # now turn it into back into a MFG
         ppg.new()
-        jobA = ppg.MultiFileGeneratingJob(["A", "B"], do_a)
-        jobC = ppg.FileGeneratingJob("C", lambda of: counter("c") and of.write_text(of.name))
+        ppg.MultiFileGeneratingJob(["A", "B"], do_a)
+        jobC = ppg.FileGeneratingJob(
+            "C", lambda of: counter("c") and of.write_text(of.name)
+        )
         jobC.depends_on("A")
         ppg.run()
         assert Path("D").read_text() == "D"
         assert Path("C").read_text() == "C"
         assert Path("a").read_text() == "6"
         assert Path("c").read_text() == "1"
+
 
 @pytest.mark.usefixtures("create_out_dir")
 @pytest.mark.usefixtures("ppg2_per_test")
@@ -1999,16 +2010,10 @@ class TestMultiTempFileGeneratingJob:
             ppg.MultiTempFileGeneratingJob(25, lambda of: write("out/A", param))
 
 
-
-
-
-
-
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestNoDotDotInJobIds:
     def test_no_dot_dot(self):
-        """ all ../ must be resolved before it becomes a job id"""
-        import unittest
+        """all ../ must be resolved before it becomes a job id"""
         from unittest.mock import patch
 
         collector = set()

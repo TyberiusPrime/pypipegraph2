@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 from .shared import counter, read
 import pypipegraph2 as ppg
 import pytest
@@ -33,6 +34,7 @@ def dummy_fg_raising(of):
 
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestsFromTheField:
+
     def test_issue_20210726a(self, job_trace_log):
         """This uncovered a depth first vs breadth first invalidation proagation bug.
         Created with Job_Status.dump_subgraph_for_debug and then heavily pruned
@@ -51,7 +53,9 @@ class TestsFromTheField:
 
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+                ppg.global_pipegraph.jobs[a].depends_on(
+                    ppg.global_pipegraph.jobs[b]
+                )
             else:
                 print("unused edge", a, b)
 
@@ -1399,7 +1403,9 @@ class TestsFromTheField:
         edges.append(("2", "109"))
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+                ppg.global_pipegraph.jobs[a].depends_on(
+                    ppg.global_pipegraph.jobs[b]
+                )
 
         ppg.run()
         ppg.run()
@@ -1461,7 +1467,9 @@ class TestsFromTheField:
         edges.append(("2", "109"))
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+                ppg.global_pipegraph.jobs[a].depends_on(
+                    ppg.global_pipegraph.jobs[b]
+                )
 
         ppg.run()
         ppg.run()
@@ -1476,13 +1484,19 @@ class TestsFromTheField:
             job_1 = ppg.DataLoadingJob("1", lambda: 55, depend_on_function=False)
             jobs_by_no["1"] = job_1
 
-            job_530 = ppg.DataLoadingJob("530", lambda: 55, depend_on_function=False)
+            job_530 = ppg.DataLoadingJob(
+                "530", lambda: 55, depend_on_function=False
+            )
             jobs_by_no["530"] = job_530
 
-            job_541 = ppg.DataLoadingJob("541", lambda: 55, depend_on_function=False)
+            job_541 = ppg.DataLoadingJob(
+                "541", lambda: 55, depend_on_function=False
+            )
             jobs_by_no["541"] = job_541
 
-            job_542 = ppg.FileGeneratingJob("542", dummy_fg, depend_on_function=False)
+            job_542 = ppg.FileGeneratingJob(
+                "542", dummy_fg, depend_on_function=False
+            )
             jobs_by_no["542"] = job_542
 
             edges = [
@@ -1579,7 +1593,9 @@ class TestsFromTheField:
 
         for (a, b) in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
-                ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
+                ppg.global_pipegraph.jobs[a].depends_on(
+                    ppg.global_pipegraph.jobs[b]
+                )
 
         ppg.run()
         ppg.run()
@@ -1663,7 +1679,7 @@ class TestsFromTheField:
         ppg.run()
 
         # now make it fail
-        ppg.new()  # log_level=6)
+        ppg.new() # log_level=6)
         # as above
         job_1 = ppg.FileGeneratingJob("1", dummy_fg, depend_on_function=False)
         job_2 = ppg.TempFileGeneratingJob("2", dummy_fg, depend_on_function=False)
@@ -1678,17 +1694,19 @@ class TestsFromTheField:
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert (
-            ppg.global_pipegraph.last_run_result["11"].outcome
-            == ppg.enums.JobOutcome.Failed
-        )
+                ppg.global_pipegraph.last_run_result["11"].outcome
+                == ppg.enums.JobOutcome.Failed
+            )
         assert (
-            ppg.global_pipegraph.last_run_result["2"].outcome
-            == ppg.enums.JobOutcome.Skipped
-        )
+                ppg.global_pipegraph.last_run_result["2"].outcome
+                == ppg.enums.JobOutcome.Skipped
+            )
         assert (
-            ppg.global_pipegraph.last_run_result["CleanUp:2"].outcome
-            == ppg.enums.JobOutcome.UpstreamFailed  # 11 fails, which fails 8, which fails this cleanup
-        )
+                ppg.global_pipegraph.last_run_result["CleanUp:2"].outcome
+                == ppg.enums.JobOutcome.UpstreamFailed # 11 fails, which fails 8, which fails this cleanup
+            )
+
+
 
         # and boom, job was marked done & skipped, but we now inform it it's upstream failed.
 

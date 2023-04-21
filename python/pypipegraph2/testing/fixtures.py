@@ -2,7 +2,6 @@ import sys
 import pytest
 import os
 import shutil
-from loguru import logger
 
 from pathlib import Path
 import pypipegraph2 as ppg2

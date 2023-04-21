@@ -221,7 +221,7 @@ class TestCachedAttributeJob:
 
         assertRaises(ppg.JobContractError, inner)
 
-    def test_cached_jobs_get_depencies_only_on_the_lazy_filegenerator_not_on_the_loading_job(
+    def test_cached_jobs_get_depencies_only_on_the_lazy_fg_not_on_the_loading_job(
         self,
     ):
         o = Dummy()
@@ -452,7 +452,7 @@ class TestCachedDataLoadingJob:
         ppg.run_pipegraph()
         assert read("out/A") == "55"
 
-    def test_cached_jobs_get_depencies_only_on_the_lazy_filegenerator_not_on_the_loading_job(
+    def test_cached_jobs_get_depencies_only_on_the_lazy_fg_not_on_the_loading_job(
         self,
     ):
         o = Dummy()
@@ -599,13 +599,13 @@ if (  # noqa: C901
             ppg1_compatibility_test.new_pipegraph()
             assertRaises(NotImplementedError, inner)
 
-
 else:
 
     @pytest.mark.skip  # No MemMappedDataLoadingJob in ppg2
     @pytest.mark.usefixtures("ppg1_compatibility_test")
     class TestMemMappedDataLoadingJob:
-        """Similar to a CachedDataLoadingJob, except that the data in question is a numpy
+        """Similar to a CachedDataLoadingJob, except
+        that the data in question is a numpy
         array that get's memmapped in later on"""
 
         def test_simple(self, ppg1_compatibility_test):

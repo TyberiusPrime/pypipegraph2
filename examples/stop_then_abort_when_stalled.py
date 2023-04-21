@@ -19,8 +19,8 @@ time_before_abort = 1
 timeout = 10
 jobcount = 5
 ppg.new(log_level=logging.INFO, cores=5)
-#tell the ppg to accept the SIGINT we're actually sending
-ppg.global_pipegraph._debug_allow_ctrl_c = 'stop&abort'
+# tell the ppg to accept the SIGINT we're actually sending
+ppg.global_pipegraph._debug_allow_ctrl_c = "stop&abort"
 
 
 def all_cores(ii):
@@ -28,7 +28,7 @@ def all_cores(ii):
         of.write_text(str(time.time()))
         proc = psutil.Process()
         parent = proc.parent()
-        if ii == 0: # only the first guy kills us
+        if ii == 0:  # only the first guy kills us
             time.sleep(time_before_abort)
             subprocess.check_call(["kill", "--signal", "SIGINT", str(parent.pid)])
             time.sleep(1)
@@ -52,5 +52,7 @@ try:
 except KeyboardInterrupt:
     print("Received expected Keyboard interrupt")
     stop = time.time()
-    print(f"stop took {stop-start-time_before_abort-1:.2f} seconds.\n We expected less than{timeout}.\n")
-
+    print(
+        f"stop took {stop-start-time_before_abort-1:.2f} seconds.\n "
+        "We expected less than{timeout}.\n"
+    )

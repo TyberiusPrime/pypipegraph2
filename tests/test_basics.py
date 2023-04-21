@@ -3,7 +3,7 @@ import time
 from loguru import logger
 import pytest
 import pypipegraph2 as ppg
-from pypipegraph2.runner import JobOutcome
+from pypipegraph2.enums import JobOutcome
 from .shared import counter, write, read
 
 
@@ -1201,7 +1201,7 @@ class TestPypipegraph2:
         assert Path("C").read_text() == "CB"
 
     def test_job_generating_generated_fails_rerun(self):
-        local_counter = [0]
+        # local_counter = [0]
 
         def inner():
             counter("a")
@@ -1944,7 +1944,6 @@ class TestPypipegraph2:
     def test_empty_depends_on_ok(self):
         a = ppg.FileGeneratingJob("shu", lambda of: of.write_text(of.name))
         a.depends_on()
-
 
     def test_job_name_must_not_contain_three_colons(self):
         with pytest.raises(ValueError):

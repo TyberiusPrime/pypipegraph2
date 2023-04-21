@@ -120,27 +120,29 @@ class Trace:
 
         self.stacks = stacks[::-1]
 
-
     def __str__(self):
         return self._format_rich_traceback_fallback(False)
 
-    def _format_rich_traceback_fallback(self, include_locals=False, include_formating=True):
+    def _format_rich_traceback_fallback(
+        self, include_locals=False, include_formating=True
+    ):
         """Pretty print a traceback.
 
         We don't use rich's own facility, since it is
         not time-bounded /  does not cut the output
         """
+
         def bold(x):
             if include_formating:
-                return f'[bold]{x}[/bold]'
-            else:
-                return x
-        def red(x):
-            if include_formating:
-                return f'[red]{x}[/red]'
+                return f"[bold]{x}[/bold]"
             else:
                 return x
 
+        def red(x):
+            if include_formating:
+                return f"[red]{x}[/red]"
+            else:
+                return x
 
         if include_locals:
 
@@ -216,5 +218,3 @@ class Trace:
                     f"{bold('Exception')} (repeated from above): {red(bold(stack.exc_type) + ' ' +  exc_value)}"
                 )
         return "\n".join(out)
-
-

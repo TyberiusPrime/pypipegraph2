@@ -1,6 +1,4 @@
-import pickle
 import shutil
-import json
 import pytest
 
 from pathlib import Path
@@ -10,6 +8,8 @@ from .shared import write, counter
 # fmt: off
 # has to be here for the indent to be the same...
 # since the test case also change python versions
+
+
 def _test_rewriting_history_do_a(ofs):
     counter('a')
     for of in ofs:

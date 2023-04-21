@@ -6,8 +6,8 @@ import signal
 from .util import (
     log_info,
     log_error,
-    log_warning,
-    log_debug,
+    # log_warning,
+    # log_debug,
     log_job_trace,
     shorten_job_id,
 )
@@ -17,7 +17,6 @@ import tty
 import threading
 from .util import console
 import rich.status
-from .parallel import async_raise
 from collections import namedtuple
 
 StatusReport = namedtuple(
@@ -68,7 +67,7 @@ class ConsoleInteractive:
         self.stopped = True
         if hasattr(self, "thread"):
             self.leave_thread = True
-            #async_raise(self.thread.ident, KeyboardInterrupt)
+            # async_raise(self.thread.ident, KeyboardInterrupt)
             os.write(self.breaker[1], b"x")
             self._end_terminal_raw()
             log_job_trace("Terminating interactive thread")
@@ -266,11 +265,12 @@ class ConsoleInteractive:
     def _cmd_debug(self, args):
         """Write the debug status from teh evaluator to debug.txt"""
         from pathlib import Path
-        import pypipegraph2
+
+        # import pypipegraph2
+
         # pypipegraph2.pypipegraph2.enable_logging()
-        filename = Path('debug.txt').absolute()
+        filename = Path("debug.txt").absolute()
         print(f"Writing to {filename}")
-        with open(filename,'w') as op:
+        with open(filename, "w") as op:
             op.write(self.runner.evaluator.debug())
         print(f"Debug information written to {filename}")
-

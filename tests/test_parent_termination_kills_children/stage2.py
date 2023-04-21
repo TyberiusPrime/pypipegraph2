@@ -32,7 +32,6 @@ def do_a(of):
 
 def kill_us():
     time.sleep(1)
-    import psutil
 
     p = psutil.Process(os.getpid())
     ppg.util.log_error(f"killing {os.getpid()}")

@@ -15,8 +15,8 @@ import os
 import pypipegraph2 as ppg2
 import pypipegraph2.testing.fixtures
 import sys
-import plotnine  # so it's available in the plot tests - saves about 10% of runtime
-from loguru import logger
+import plotnine  # noqa: F401 so it's available in the plot tests - saves about 10% of runtime
+from pypipegraph2.testing.fixtures import job_trace_log
 
 # support code to remove test created files
 # only if the test succeedd
@@ -87,9 +87,6 @@ def dir_per_test(request):
 def create_out_dir(request):
     Path("out").mkdir(exist_ok=True)
     yield
-
-
-from pypipegraph2.testing.fixtures import job_trace_log
 
 
 trace_log = job_trace_log

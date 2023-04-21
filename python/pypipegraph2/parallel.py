@@ -1,8 +1,7 @@
 """Parlallel computation / threading support helpers"""
 from threading import Lock, Condition
-from .util import log_info
 import ctypes
-from .util import log_info
+
 
 class _CoreLockContextManager:
     def __init__(self, core_lock, cores):
@@ -15,16 +14,16 @@ class _CoreLockContextManager:
     def __exit__(self, exc_type, exc_value, traceback):
         self.core_lock._release(self.cores)
 
-class FakeContextManager():
+
+class FakeContextManager:
     def __enter__(self):
         pass
 
     def __exit__(self, exc_type, exc_value, traceback):
         pass
-     
+
 
 class FakeLock:
-
     def __init__(self):
         self.cm = FakeContextManager()
 

@@ -1,7 +1,7 @@
 import sys
 import pytest
 import pypipegraph2 as ppg2
-from . import fixtures
+# from . import fixtures
 
 
 def run():

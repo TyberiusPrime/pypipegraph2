@@ -125,7 +125,6 @@ class TestCachedDataLoadingJob:
         def output(of):
             write(of, o.c)
 
-
         dl = ppg.DataLoadingJob("out/A", a)
         ca, cca = ppg.CachedDataLoadingJob("out/C", calc, load)
         fg = ppg.FileGeneratingJob("out/D", output)
@@ -264,7 +263,7 @@ class TestCachedAttributeJob:
         o = Dummy()
 
         def calc():
-            counter('1')
+            counter("1")
             return ", ".join(str(x) for x in range(0, 100))
 
         job, cache_job = ppg.CachedAttributeLoadingJob("mycalc", o, "a", calc)
@@ -276,12 +275,12 @@ class TestCachedAttributeJob:
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
-        assert read('1') == '1'
+        assert read("1") == "1"
 
         ppg.new()
 
         def calc2():
-            counter('2')
+            counter("2")
             return ", ".join(str(x) for x in range(0, 200))
 
         job, cache_job = ppg.CachedAttributeLoadingJob(
@@ -289,8 +288,10 @@ class TestCachedAttributeJob:
         )
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run()
-        assert read(of) == ", ".join(str(x) for x in range(0, 200)) # removing the dependency triggers
-        assert read('2') == '1'
+        assert read(of) == ", ".join(
+            str(x) for x in range(0, 200)
+        )  # removing the dependency triggers
+        assert read("2") == "1"
 
         ppg.new()
         job, cache_job = ppg.CachedAttributeLoadingJob("mycalc", o, "a", calc2)
@@ -299,14 +300,13 @@ class TestCachedAttributeJob:
         assert read(of) == ", ".join(
             str(x) for x in range(0, 200)
         )  # The new stuff - you either have an explicit ignore_code_changes in our codebase, or we enforce consistency between code and result
-        assert read('2') == '2' # rerun, we regained the func dependency
+        assert read("2") == "2"  # rerun, we regained the func dependency
 
         ppg.run()
         assert read(of) == ", ".join(
             str(x) for x in range(0, 200)
         )  # The new stuff - you either have an explicit ignore_code_changes in our codebase, or we enforce consistency between code and result
-        assert read('2') == '2' # no rerun
-
+        assert read("2") == "2"  # no rerun
 
     def test_throws_on_non_function_func(self):
         o = Dummy()

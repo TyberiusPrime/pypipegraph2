@@ -19,18 +19,23 @@ time_before_abort = 1
 timeout = 1
 jobcount = 5
 ppg.new(log_level=logging.INFO, cores=5)
-#tell the ppg to accept the SIGINT we're actually sending
-ppg.global_pipegraph._debug_allow_ctrl_c = 'stop'
+# tell the ppg to accept the SIGINT we're actually sending
+ppg.global_pipegraph._debug_allow_ctrl_c = "stop"
 
 
 def all_cores(ii):
     if ii == 3:
-        return ppg.MultiFileGeneratingJob(['A','B','C'], lambda ofs: [of.write_text(of.name) for of in ofs], resources=ppg.Resources.AllCores)
+        return ppg.MultiFileGeneratingJob(
+            ["A", "B", "C"],
+            lambda ofs: [of.write_text(of.name) for of in ofs],
+            resources=ppg.Resources.AllCores,
+        )
+
     def inner(of, ii=ii):
         of.write_text(str(time.time()))
         proc = psutil.Process()
         parent = proc.parent()
-        if ii == 0: # only the first guy kills us
+        if ii == 0:  # only the first guy kills us
             time.sleep(time_before_abort)
             subprocess.check_call(["kill", "--signal", "SIGINT", str(parent.pid)])
 
@@ -52,5 +57,7 @@ try:
 except KeyboardInterrupt:
     print("Received expected Keyboard interrupt")
     stop = time.time()
-    print(f"stop took {stop-start-time_before_abort:.2f} seconds.\n We expected {timeout}.\nNot multiples.")
-
+    print(
+        f"stop took {stop-start-time_before_abort:.2f} seconds.\n "
+        "We expected {timeout}.\nNot multiples."
+    )

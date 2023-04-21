@@ -67,13 +67,13 @@ class TestInvariant:
             counter("A")
             append(of, "shu" * self.sentinel_count())
 
-        job = ppg.FileGeneratingJob(of, do_write)
+        ppg.FileGeneratingJob(of, do_write)
         ppg.run()
 
         assert read(of) == "shu"
         assert read("A") == "1"
         ppg.new()
-        job = ppg.FileGeneratingJob(of, do_write)
+        ppg.FileGeneratingJob(of, do_write)
         ppg.run()
         assert read(of) == "shu"  # has not been run again, for no change
         assert read("A") == "1"
@@ -84,13 +84,13 @@ class TestInvariant:
             counter("A")
             append(of, "sha")
 
-        job = ppg.FileGeneratingJob(of, do_write2, depend_on_function=False)
+        ppg.FileGeneratingJob(of, do_write2, depend_on_function=False)
         ppg.run()
         assert read(of) == "sha"  # has been run again - number of invariants changed!
         assert read("A") == "2"
 
         ppg.new()
-        job = ppg.FileGeneratingJob(of, do_write2)
+        ppg.FileGeneratingJob(of, do_write2)
         ppg.run()
         assert read(of) == "sha"  # Readding the invariant does trigger again
         assert read("A") == "3"
@@ -411,9 +411,6 @@ class TestInvariant:
         # but within the pipegraph itself (e.g. when the user hit's CTRL-C
         # during history dumping
         # which we simulate here
-        import json
-        import traceback
-
         def w(of):
             write("out/A", "A")
             append("out/B", "B")
@@ -443,10 +440,9 @@ class TestInvariant:
             "out/A", w2, depend_on_function=False
         )  # and this job crashes
         fg.depends_on(func_dep)  # so a get's deleted, and rebuild
-        fg2 = ppg.FileGeneratingJob(
+        ppg.FileGeneratingJob(
             "out/C", lambda of: counter("out/c") and append(of, "C")
         )
-        ki_raised = False
         assert not hasattr(ppg.global_pipegraph, "last_run_result")
         ppg.global_pipegraph._test_failing_outside_of_job = True
         with pytest.raises(ppg.JobsFailed):
@@ -471,7 +467,7 @@ class TestInvariant:
             "out/A", w, depend_on_function=False
         )  # but this was not done the last time...
         fg.depends_on(func_dep)
-        fg2 = ppg.FileGeneratingJob(
+        ppg.FileGeneratingJob(
             "out/C", lambda of: counter("out/c") and append(of, "C")
         )
         ppg.run()
@@ -497,8 +493,6 @@ class TestInvariant:
         assert read("A") == "1"
 
     def test_input_output_dumping_dies_for_some_reason(self, ppg2_per_test, mocker):
-        import pickle
-
         ppg.global_pipegraph._test_failing_outside_of_job = True
         ppg.FileGeneratingJob("A", lambda of: counter("a") and write(of, "A"))
         ppg.FileGeneratingJob("B", lambda of: counter("b") and write(of, "B"))
@@ -1018,12 +1012,10 @@ class TestFunctionInvariant:
         )  # different dis, same source
 
     def test_source_file_mtime_change_without_hash_change(self):
-        import sys
-
         def inner():
             pass
 
-        python_version = tuple(sys.version_info)[:2]  # we only care about major.minor
+        # python_version = tuple(sys.version_info)[:2]  # we only care about major.minor
 
         a = ppg.FunctionInvariant("a", inner)
         calc = a.run(None, None)
@@ -1197,8 +1189,8 @@ class TestDependency:
 
     def test_job_iter(self):
         jobA = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))
-        l = list(iter(jobA))
-        assert l[0] is jobA
+        ll = list(iter(jobA))
+        assert ll[0] is jobA
 
     def test_depends_on_accepts_multiple_values(self):
         jobA = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", "A"))

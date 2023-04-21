@@ -10,7 +10,7 @@ class TestBootstrap:
 
     def test_smallest(self):
         assert not Path("A").exists()
-        job = ppg.FileGeneratingJob(
+        ppg.FileGeneratingJob(
             "A", lambda of: of.write_text("Done"), depend_on_function=False
         )
         ppg.run()
@@ -23,7 +23,7 @@ class TestBootstrap:
             counter("a")
             of.write_text("A")
 
-        job = ppg.FileGeneratingJob("A", func, depend_on_function=False)
+        ppg.FileGeneratingJob("A", func, depend_on_function=False)
         ppg.run()
         assert Path("A").read_text() == "A"
         assert read("a") == "1"
@@ -218,24 +218,26 @@ class TestBootstrap:
             lambda: counter("B") and out.append(out[0] + "b"),
             depend_on_function=False,
         )
-        c = ppg.FileGeneratingJob('c',
-                                  lambda of: counter('C') and of.write_text(out[1] + 'c'),
-                                  depend_on_function=False)
+        c = ppg.FileGeneratingJob(
+            "c",
+            lambda of: counter("C") and of.write_text(out[1] + "c"),
+            depend_on_function=False,
+        )
         c.depends_on(b)
         b.depends_on(a)
         ppg.run()
-        assert read('c') == 'abc'
-        assert read('A') == '1'
-        assert read('B') == '1'
-        assert read('C') == '1'
+        assert read("c") == "abc"
+        assert read("A") == "1"
+        assert read("B") == "1"
+        assert read("C") == "1"
         ppg.run()
-        assert read('c') == 'abc'
-        assert read('A') == '1'
-        assert read('B') == '1'
-        assert read('C') == '1'
-        Path('c').unlink()
+        assert read("c") == "abc"
+        assert read("A") == "1"
+        assert read("B") == "1"
+        assert read("C") == "1"
+        Path("c").unlink()
         ppg.run()
-        assert read('c') == 'abc'
-        assert read('A') == '2'
-        assert read('B') == '2'
-        assert read('C') == '2'
+        assert read("c") == "abc"
+        assert read("A") == "2"
+        assert read("B") == "2"
+        assert read("C") == "2"

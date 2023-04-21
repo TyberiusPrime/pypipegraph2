@@ -56,4 +56,6 @@ class TestSimple:
         ppg.FileGeneratingJob("A", lambda of: write(of, "A"))
         ppg.run()
         assert (Path("shu") / ppg.global_pipegraph.get_history_filename().name).exists()
-        assert not (Path(".ppg") / ppg.global_pipegraph.get_history_filename().name).exists()
+        assert not (
+            Path(".ppg") / ppg.global_pipegraph.get_history_filename().name
+        ).exists()
