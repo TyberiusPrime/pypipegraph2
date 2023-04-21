@@ -81,6 +81,7 @@
         '';
         requirements = ''
           pytest
+          pytest-cov
            pytest-mock
            loguru
            rich

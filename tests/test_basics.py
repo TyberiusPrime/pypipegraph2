@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 import time
 from loguru import logger
 import pytest
@@ -1707,7 +1708,8 @@ class TestPypipegraph2:
             / ppg.global_pipegraph.time_str
             / "0_exception.txt"
         ).read_text()
-        assert "# no source available" in e
+        if sys.version > (3,8):
+            assert "# no source available" in e
         assert "KeyError" in e
 
     def test_redefining_with_different_type(self):
