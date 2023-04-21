@@ -140,6 +140,7 @@
         };
         doCheck = false;
       };
+
     ppg1 = let
       p = pkgs.python39Packages;
     in
@@ -156,15 +157,35 @@
           sha256 = "sha256-x7UiibWXcCsLwJNKcYWMXHsqt3pCIbv5NoQdx6iD+2o=";
         };
       };
-    pyprctl = p:
+    dppd = let
+      p = pkgs.python39Packages;
+    in
       p.buildPythonPackage rec {
-        pname = "pyprctl";
-        version = "0.1.3";
+        pname = "dppd";
+        version = "0.23";
+        buildInputs = [mizani];
+        propagatedBuildInputs = [p.pandas p.wrapt p.natsort];
         src = p.fetchPypi {
           inherit pname version;
-          sha256 = "sha256-H7VNOrAw7ALkr8OPuWYtZjTBKDTpGueVneVqnAn2nCY=";
+          sha256 = "sha256-vze6u5gF50mvyro08BL4kFBQU83NB8ETmJF9DM9a2fM=";
         };
+        doCheck = false;
       };
+    dppd_plotnine = let
+      p = pkgs.python39Packages;
+    in
+      p.buildPythonPackage rec {
+        pname = "dppd_plotnine";
+        version = "0.2.5";
+        buildInputs = [plotnine];
+        propagatedBuildInputs = [p.pandas plotnine dppd];
+        src = p.fetchPypi {
+          inherit pname version;
+          sha256 = "sha256-agUD7FK4oFO5VbOQZh31nJ8lefJlzjmZ71u2/hL46lo=";
+        };
+        doCheck = false;
+      };
+
     mypython = pkgs.python39.withPackages (p: [
       #todo: figure out how to derive this from pyproject.toml
       p.pytest
@@ -178,7 +199,8 @@
       p.networkx
       p.cython
       p.setproctitle
-      (pyprctl p)
+      dppd
+      dppd_plotnine
       # for testing...
       ppg1
       plotnine
@@ -203,6 +225,7 @@
         mypython
         pkgs.maturin
         pkgs.py-spy
+        pkgs.file
       ];
     };
   };

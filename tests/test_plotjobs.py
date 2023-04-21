@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 import os
 from .shared import read, write, append
 import pickle
@@ -11,6 +12,7 @@ try:
     has_pyggplot = True
 except ImportError:
     has_pyggplot = False
+    raise ValueError()
     pass
 
 
@@ -116,14 +118,18 @@ if has_pyggplot:  # noqa C901
 
         def test_skip_caching(self):
             def calc():
-                if not os.path.exists("A"):
-                    raise ValueError()
+                write("B","B")
                 return pd.DataFrame(
                     {"X": list(range(0, 100)), "Y": list(range(50, 150))}
                 )
 
             def plot(df):
-                return dp(df).p9().add_point("X", "Y")
+                if not os.path.exists("A"):
+                    raise ValueError()
+                if not os.path.exists("B"):
+                    raise ValueError()
+
+                return dp(df).p9().add_point("X", "Y").pd
 
             def prep_job(output_filename):
                 write("A", "A")

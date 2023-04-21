@@ -2111,10 +2111,11 @@ def _save_plot(
     if (
         not hasattr(plot, "render")
         and not hasattr(plot, "save")
-        and not hasattr(plot, "save_fig")
+        and not hasattr(plot, "savefig")
     ):
         raise exceptions.JobContractError(
-            f"{output_filename}.plot_function did not return a plot object (needs to have as render/save/save_fig function)"
+            f"{output_filename}.plot_function did not return a plot object "
+            f"(needs to have as render/save/save_fig function). Was {type(plot)}"
         )
     if hasattr(plot, "pd"):  # dppd special..
         plot = plot.pd
