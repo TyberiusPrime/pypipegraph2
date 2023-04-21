@@ -1,4 +1,5 @@
 import shutil
+import sys
 import pytest
 
 from pathlib import Path
@@ -20,6 +21,9 @@ def _test_rewriting_history_do_a(ofs):
 @pytest.mark.usefixtures("ppg2_per_test")
 class TestRustConversion:
     def test_rewriting_history(self):
+        # not for python <  3.8
+        if sys.version_info < (3, 8):
+            return
         input = Path(__file__).parent / "old_history_for_conversion_test.gz"
         dir = ppg.global_pipegraph.get_history_filename().parent
         dir.mkdir(parents=True)
