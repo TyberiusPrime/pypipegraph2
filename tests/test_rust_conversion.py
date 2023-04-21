@@ -22,7 +22,7 @@ def _test_rewriting_history_do_a(ofs):
 class TestRustConversion:
     def test_rewriting_history(self):
         # not for python <  3.8
-        if sys.version_info < (3, 8):
+        if sys.version_info[:2] < (3, 8):
             return
         input = Path(__file__).parent / "old_history_for_conversion_test.gz"
         dir = ppg.global_pipegraph.get_history_filename().parent
