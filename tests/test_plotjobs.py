@@ -118,7 +118,7 @@ if has_pyggplot:  # noqa C901
 
         def test_skip_caching(self):
             def calc():
-                write("B","B")
+                write("B", "B")
                 return pd.DataFrame(
                     {"X": list(range(0, 100)), "Y": list(range(50, 150))}
                 )
@@ -480,8 +480,8 @@ if has_pyggplot:  # noqa C901
                 )
                 ax.grid()
                 return fig
+
             of = "out/test.png"
             p, c, t = ppg.PlotJob(of, calc, plot)
             ppg.run()
             assert Path(of).exists()
- 
