@@ -1,7 +1,7 @@
 # pypipegraph2
 
 
-Finegrained tracking of what goes into generated artifacts,
+Fine-grained tracking of what goes into generated artifacts,
 and when do we actually need to recalculate them.
 
 Also, trivial parallelization.
@@ -10,8 +10,11 @@ Also, trivial parallelization.
 ## Description
 
 There's a bunch of 'pipeline' packages out there.
-for scientific workflow managment.
+
+For scientific workflow managment.
+
 Often with a lot of 'magic'.
+
 SnakeMake is popular.
 
 Pypipegraph2 is a bit different.
@@ -32,16 +35,16 @@ your python functions (source and bytecode).
 
 When any of those change, or the number of inputs to a job changes,
 we recalculate it. Only if it's output changed, we recalculate the immediate downstreams.
-Do they return their old output (because your change was superficial)? Then we do not
+Do they return their old output (because your change was incosequential)? Then we do not
 recalculate their downstreams.
 
-That's the big thing with respect to pypipegraph. When the input changed back then,
+That's the big thing with respect to pypipegraph 1. When the input changed back then,
 everything downstream was recalculated. 
 
 You can use this in notebooks. You can use it in scripts. You can use it in
-complicated scientific pipelines. It scales easily to a few 100.000 jobsjj
+complicated scientific pipelines. It scales easily to a few 100.000 jobs.
 
-Here is the simples job:
+Here is the simplest example:
 
 ```python
 import pypipegraph2 as ppg2
@@ -66,7 +69,7 @@ def do_it(output_path):
 	output_path.write_text("Hello world, how are you today")
 ```
 
-If you delete the output file, if you say `job.depends_on(ppg.FunctionInvariant(my_other_function))`,
+If you delete the output file, if you introduce a dependency, say by `job.depends_on(ppg.FunctionInvariant(my_other_function))`,
 if you remove such a dependency, 'hello.txt' will be rebuild.
 
 
@@ -76,11 +79,12 @@ If jobs fail, those downstream of them / dependent on them will not be evalutate
 But everything outside of that part of the DAG will be.
 
 Jobs will run in parallel, using both multi-threading 
-(for jobs modifying the currently running program) and multi-process (for Filegenerating
+(for jobs modifying the currently running program) and multi-process (for FileGenerating
 jobs).
 
 Jobs like AttributeLoading, and TempFileGenerating have cleanups that run 
-when their immediate downstreams have been processed.
+when their immediate downstreams have been processed. The also only run when 
+they're required by a downstream, or when thier inputs have changed.
 
 FunctionInvariants are *smart*. They compare bytecode if you're using the same 
 python version, and fall back to source code if you have changed it.
@@ -103,6 +107,24 @@ python version, and fall back to source code if you have changed it.
 * `JobGeneratingjob(name, func)` - generate more jobs (after the upstreams have run!)
 * `PlotJob(output_path, calc_func, plot_func)` - generate some data, store it in a cache file, dump it a spreadsheet, generate a plot from the data, store it in output_path)
 	
+# Rust engine
+
+Starting with version 3.0.0, the actual engine is written in Rust.
+
+This is a complete rewrite of the inner workings. There were a small number of situations
+left where a graph would not evaluate, mostly involving failing jobs, and the python solution
+was very hard to follow - thanks to the 'run-on-demand' nature of temporary jobs.
+
+The new rust engine is based on the insight that while externally, we have a lot of job classes,
+for the evaluation only three kinds of jobs exists: Always, Output and Ephemeral.
+
+This allowed us a much more complete testing regime, the engine was tested to evaluate with all possible
+graphs (minus isomorphic equivalents) up to 7 nodes, and all possible graphs with 1..n failures
+up to 6 nodes (and some quarter of the possible 7 node graphs). This has increased my confidence
+into this implementation finally being correct.
+
+The drawback of course is that you need to install a binary wheel, or build with maturin.
+The nix-flake has a dev enviroment with everything setup.
 
 
 ## Note
