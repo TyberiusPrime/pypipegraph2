@@ -1,8 +1,7 @@
-name: CI
+name: release
 
 on:
-  push:
-  pull_request:
+  release:
 
 jobs:
   linux:
@@ -62,7 +61,6 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    # if: github.event_name == 'release' && github.event.action == 'published'
     needs: [ linux ]
     steps:
       - uses: actions/download-artifact@v3
