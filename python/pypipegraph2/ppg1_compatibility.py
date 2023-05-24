@@ -9,6 +9,7 @@ import pypipegraph.testing
 import pypipegraph.testing.fixtures
 import pypipegraph2 as ppg2
 import pypipegraph2.testing
+import pypipegraph2.testing.fixtures
 import wrapt
 import importlib
 from .util import (
