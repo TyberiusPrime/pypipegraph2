@@ -79,7 +79,7 @@ def watcher_unexpected_death_of_parent(_signum, _frame):
 
 
 def watcher_expected_death_of_parent(_signum, _frame):
-    log_error("Watcher discovered parent process ended regularly")
+    log_info("Watcher discovered parent process ended regularly")
     kill_process_group_but_ppg_runner()
     os._exit(0)
 
@@ -99,7 +99,10 @@ def spawn_watcher():
     if watcher_session_id is None:
         log_info("setting watcher sid")
         already_a_session = True
-        os.setsid()
+        try:
+            os.setsid()
+        except:
+            print("Could not start my own sid")
         watcher_session_id = os.getsid(0)
     recv, send = multiprocessing.Pipe()
     pid = os.fork()
