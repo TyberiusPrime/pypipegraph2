@@ -43,6 +43,7 @@ DependsOnInvariant = namedtuple("DependsOnInvariant", ["invariant", "self"])
 CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
 PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
 
+
 def _normalize_path(path):
     from . import global_pipegraph
 
@@ -2777,7 +2778,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         return self._map_filename(self._lookup[key])
 
 
-
 class NotebookInvariant(FileInvariant):
     """An invariant that checks only the code and markdown from a notebook (not the results)"""
 
@@ -2804,17 +2804,58 @@ class NotebookInvariant(FileInvariant):
                 runner._hash_file_cache[file] = h
                 return h
         else:
-            return hashers.hash_str(NotebookInvariant.extract_notebook_content(file))
-
+            stat = file.stat()
+            return {
+                "hash": hashers.hash_str(
+                    NotebookInvariant.extract_notebook_content(file)
+                ),
+                "mtime": int(stat.st_mtime),
+                "size": stat.st_size,
+            }
 
     @staticmethod
     def extract_notebook_content(file):
-        cells = json.loads(file.read_text())['cells']
+        cells = json.loads(file.read_text())["cells"]
         out = ""
         for cell in cells:
-            if cell['cell_type'] in ('markdown', 'code'):
-                out += '--\n' + cell['source'][0] + "\n\n"
+            if cell["cell_type"] in ("markdown", "code"):
+
+                out += "--\n" + "\n".join(cell["source"]) + "\n\n"
         return out
 
 
+def NotebookJob(notebook_file, input_files, output_files, html_output_folder):
+    """Run a jupyter notebook, tracking input and output files.
+    Then notebook is rendered into an html file in html_output_folder
 
+    Reruns whenever the *code* of the notebook changes,
+    not the output results.
+    """
+    notebook_file = Path(notebook_file)
+    html_output_folder = Path(html_output_folder)
+    html_filename = html_output_folder / notebook_file.with_suffix(".html").name
+    output_files = [Path(x) for x in output_files]
+    output_files.append(html_filename)
+
+    def run(output_files):
+        import subprocess
+        Path(html_filename.parent).mkdir(exist_ok=True, parents=True)
+        subprocess.check_call(
+            [
+                "jupyter",
+                "nbconvert",
+                "--execute",
+                "--to",
+                "html",
+                notebook_file,
+                "--output",
+                html_filename,
+            ]
+        )
+
+    job = MultiFileGeneratingJob(output_files, run)
+    job.depends_on(
+        NotebookInvariant(notebook_file)
+    )  # todo: replace with 'code in notebook'
+    job.depends_on(input_files)
+    return job
