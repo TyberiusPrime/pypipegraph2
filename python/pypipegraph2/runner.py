@@ -42,7 +42,7 @@ watcher_session_id = None
 
 def get_same_session_id_processes():
     for proc in psutil.process_iter():
-        proc_sid = os.getsid(proc.pid)
+        proc_sid = os.getpgid(proc.pid)
         if proc_sid == watcher_session_id:
             yield proc
 
@@ -51,6 +51,7 @@ def kill_process_group_but_ppg_runner():
     children_to_reap = []
     my_pid = os.getpid()
     for proc in get_same_session_id_processes():
+        print(proc, proc in watcher_ignored_processes)
         if not proc in watcher_ignored_processes:
             children_to_reap.append(proc)
     for p in children_to_reap:
@@ -99,19 +100,28 @@ def spawn_watcher():
     if watcher_session_id is None:
         log_info("setting watcher sid")
         already_a_session = True
+        my_pid = os.getpid()
+        my_pgid = os.getpgid(my_pid)
         try:
-            os.setsid()
-        except:
-            print("Could not start my own sid")
-        watcher_session_id = os.getsid(0)
+            if my_pid != my_pgid:
+                os.setpgid(my_pid, 0)
+                my_pgid = my_pid
+        except:  # noqa:E722
+            print("could not set process group leader")
+            print("pid before", os.getpid())
+            print("sid before ", os.getsid(os.getpid()))
+        watcher_session_id = my_pgid
+        log_info(f"Watcher_session_id {watcher_session_id}")
     recv, send = multiprocessing.Pipe()
+    log_info("collecting ignored processes")
+    log_info("%s" % (watcher_ignored_processes,))
     pid = os.fork()
     if pid == 0:
+        watcher_ignored_processes = list(get_same_session_id_processes())
         log_info(f"watcher_session_id {watcher_session_id}")
         watcher_parent_pid = os.getppid()
         parent_process = psutil.Process(watcher_parent_pid)
         # these guys were around before, so we don't kill tehm.
-        watcher_ignored_processes = list(get_same_session_id_processes())
 
         signal.signal(signal.SIGTERM, watcher_unexpected_death_of_parent)
         signal.signal(signal.SIGINT, watcher_expected_death_of_parent)
@@ -288,7 +298,9 @@ class Runner:
             log_job_trace(f"pruned {job_id}")
             try:
                 dag.remove_node(job_id)
-            except networkx.exception.NetworkXError:  # happens with cleanup nodes that we  omitted
+            except (
+                networkx.exception.NetworkXError
+            ):  # happens with cleanup nodes that we  omitted
                 pass
             # del self.jobs[job_id]
         return pruned
@@ -801,7 +813,9 @@ class Runner:
                                     outputs = None
                                     raise error
 
-                    except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
+                    except (
+                        SystemExit
+                    ) as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
                         log_trace(
                             "SystemExit in spawned process -> converting to hard exit"
                         )
@@ -809,7 +823,6 @@ class Runner:
                             os._exit(e.args[0])
                     except Exception as e:
                         if isinstance(e, KeyboardInterrupt):  # happens on abort
-
                             raise
                         elif isinstance(e, exceptions.JobError):
                             pass  # take it at face value
@@ -853,7 +866,6 @@ class Runner:
                                     outputs = None
 
                                 if outputs is not None:
-
                                     self.job_outcomes[job_id] = RecordedJobOutcome(
                                         job_id, JobOutcome.Success, outputs
                                     )

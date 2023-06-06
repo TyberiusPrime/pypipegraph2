@@ -583,7 +583,6 @@ class MultiFileGeneratingJob(Job):
         empty_ok=True,
         always_capture_output=True,
     ):
-
         self.generating_function = self._validate_func_argument(generating_function)
         self.depend_on_function = depend_on_function
         self.files, self._lookup = self._validate_files_argument(files)
@@ -842,7 +841,9 @@ class MultiFileGeneratingJob(Job):
                                 sleep_time = 1
                             time.sleep(sleep_time)
                             wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
-                    except KeyboardInterrupt:  # pragma: no cover  todo: interactive testing
+                    except (
+                        KeyboardInterrupt
+                    ):  # pragma: no cover  todo: interactive testing
                         log_trace(
                             f"Keyboard interrupt in {self.job_id} - sigbreak spawned process"
                         )
@@ -1140,7 +1141,6 @@ class _FileInvariantMixin:
     def calculate(
         self, file, stat, runner=None
     ):  # so that FileInvariant and FunctionInvariant can reuse it
-
         # ppg1 had the option of using an external .md5sum file for the hash
         # provided the filetime was exactly the same as the files'
         # it would accept it instead of calculating it's own.
@@ -2228,7 +2228,6 @@ def PlotJob(  # noqa:C901
             plot_job, cache_job.load
         )  # necessary because the ppg1 compatibility layer messes with this
     else:
-
         cache_job = None
         if str(cache_filename) in global_pipegraph.jobs:
             raise ValueError(
@@ -2500,7 +2499,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
                     / self.output_dir.relative_to(self.output_dir_prefix)
                     / output_key,
                 )
-            except FileExistsError as e:  # existed, or race condition... symlink.exist()   is lying.
+            except (
+                FileExistsError
+            ) as e:  # existed, or race condition... symlink.exist()   is lying.
                 if not symlink.is_symlink():  # pragma: no cover
                     # can only happen in race condition, other wise captured in output_needed
                     # we really expect this to be a symlink to be a symlink,k?
@@ -2704,7 +2705,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         and for that we need to lookup the actual jobs.
         """
         hasher = hashlib.sha512()
-        for (key, value) in sorted(hashes.items()):
+        for key, value in sorted(hashes.items()):
             job_id = runner.job_graph.outputs_to_job_ids[key]
             job = runner.jobs[job_id]
             if isinstance(job, SharedMultiFileGeneratingJob) and key == str(
@@ -2782,7 +2783,6 @@ class NotebookInvariant(FileInvariant):
     def calculate(
         self, file, stat, runner=None
     ):  # so that FileInvariant and FunctionInvariant can reuse it
-
         # ppg1 had the option of using an external .md5sum file for the hash
         # provided the filetime was exactly the same as the files'
         # it would accept it instead of calculating it's own.
@@ -2810,15 +2810,17 @@ class NotebookInvariant(FileInvariant):
                 "mtime": int(stat.st_mtime),
                 "size": stat.st_size,
             }
+
     @staticmethod
     def extract_notebook_content(file):
         cells = json.loads(file.read_text())["cells"]
         out = ""
         for cell in cells:
             if cell["cell_type"] in ("markdown", "code"):
-
                 out += "--\n" + "\n".join(cell["source"]) + "\n\n"
         return out
+
+
 def NotebookJob(notebook_file, input_files, output_files, html_output_folder):
     """Run a jupyter notebook, tracking input and output files.
     Then notebook is rendered into an html file in html_output_folder
@@ -2833,6 +2835,7 @@ def NotebookJob(notebook_file, input_files, output_files, html_output_folder):
 
     def run(output_files):
         import subprocess
+
         Path(html_filename.parent).mkdir(exist_ok=True, parents=True)
         subprocess.check_call(
             [

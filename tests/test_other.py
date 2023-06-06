@@ -667,7 +667,7 @@ def test_spawned_processes_get_killed_on_catastrophic_process_failure(
                 "ppid",
                 proc.ppid(),
             )
-        if "sleep" in proc.info["cmdline"] and '5.51234' in proc.info["cmdline"]:
+        if "sleep" in proc.info["cmdline"] and "5.51234" in proc.info["cmdline"]:
             raise ValueError(
                 "children not killed, found a sleep",
                 "pid",
