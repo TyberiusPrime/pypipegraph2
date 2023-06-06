@@ -34,7 +34,7 @@ def kill_us():
     time.sleep(1)
 
     p = psutil.Process(os.getpid())
-    ppg.util.log_error(f"killing {os.getpid()}")
+    ppg.util.log_error(f"now killing this jobs process. {os.getpid()}")
     p.kill()
 
 
