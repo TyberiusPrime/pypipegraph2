@@ -104,7 +104,10 @@ def spawn_watcher():
         my_pgid = os.getpgid(my_pid)
         try:
             if my_pid != my_pgid:
+                # we ignore sigttou, so we can keep the terminal
+                signal.signal(signal.SIGTTOU, signal.SIG_IGN)
                 os.setpgid(my_pid, 0)
+                os.tcsetpgrp(0, my_pid) # we keep the terminal
                 my_pgid = my_pid
         except:  # noqa:E722
             print("could not set process group leader")

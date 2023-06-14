@@ -1,3 +1,4 @@
+import sys
 import subprocess
 import sys
 import os
@@ -9,7 +10,7 @@ import setproctitle
 setproctitle.setproctitle("stage1")
 
 
-p = subprocess.Popen(["python", Path(__file__).parent / "stage2.py"])
+p = subprocess.Popen(["python", Path(__file__).parent / "stage2.py"], env=os.environ)
 p.communicate()
 print("stage 2 ended, ", os.getpid())
 subprocess.check_call(["ps", "--forest", "-o", "%p %r %c"])
