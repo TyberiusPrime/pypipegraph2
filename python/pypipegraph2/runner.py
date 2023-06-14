@@ -131,6 +131,7 @@ def spawn_watcher():
         log_info("entering watcher loop")
         send.send_bytes(b"go")
         send.close()
+        sys.stdin.close()
         while True:
             time.sleep(100)
         log_info("watcher done")
