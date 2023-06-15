@@ -48,10 +48,11 @@ def get_same_session_id_processes():
 
 
 def kill_process_group_but_ppg_runner():
+    log_info("kill_process_group_but_ppg_runner")
     children_to_reap = []
     my_pid = os.getpid()
     for proc in get_same_session_id_processes():
-        print(proc, proc in watcher_ignored_processes)
+        log_info(f"{proc} ignored: {proc in watcher_ignored_processes}")
         if not proc in watcher_ignored_processes:
             children_to_reap.append(proc)
     for p in children_to_reap:
@@ -98,36 +99,28 @@ def spawn_watcher():
     """
     global watcher_parent_pid, watcher_ignored_processes, watcher_session_id
     if watcher_session_id is None:
-        log_info("setting watcher sid")
-        already_a_session = True
+        log_info("Capturing watcher process group id")
         my_pid = os.getpid()
         my_pgid = os.getpgid(my_pid)
-        try:
-            if my_pid != my_pgid:
-                # we ignore sigttou, so we can keep the terminal
-                signal.signal(signal.SIGTTOU, signal.SIG_IGN)
-                os.setpgid(my_pid, 0)
-                os.tcsetpgrp(0, my_pid) # we keep the terminal
-                my_pgid = my_pid
-        except:  # noqa:E722
-            print("could not set process group leader")
-            print("pid before", os.getpid())
-            print("sid before ", os.getsid(os.getpid()))
+        # ok, the shell gives us a group id, right?
+        # we do not mess with that, or the session id, we are not a shell,
+        # and we don't fork for the top level managment process.
+        # (messing with setgrp and so on has only lead to pain...)
         watcher_session_id = my_pgid
-        log_info(f"Watcher_session_id {watcher_session_id}")
+        log_info(f"Watcher identifies process by process group id {watcher_session_id}")
     recv, send = multiprocessing.Pipe()
-    log_info("collecting ignored processes")
+    log_info("Collecting already running process that will be ignored by teh watcher")
     log_info("%s" % (watcher_ignored_processes,))
     pid = os.fork()
     if pid == 0:
         watcher_ignored_processes = list(get_same_session_id_processes())
-        log_info(f"watcher_session_id {watcher_session_id}")
         watcher_parent_pid = os.getppid()
         parent_process = psutil.Process(watcher_parent_pid)
         # these guys were around before, so we don't kill tehm.
 
         signal.signal(signal.SIGTERM, watcher_unexpected_death_of_parent)
         signal.signal(signal.SIGINT, watcher_expected_death_of_parent)
+        # get watcher to detect parent's death
         prtcl = ctypes.CDLL("libc.so.6")["prctl"]
         PR_SET_PDEATHSIG = 1
         prtcl(PR_SET_PDEATHSIG, signal.SIGTERM)  # 1 =
@@ -136,8 +129,8 @@ def spawn_watcher():
         send.close()
         sys.stdin.close()
         while True:
-            time.sleep(100)
-        log_info("watcher done")
+            time.sleep(100)  # we Live by signal from here on
+        log_info("watcher loop exit - should be unreachable?")
         os._exit(0)
     else:
         recv.recv_bytes()

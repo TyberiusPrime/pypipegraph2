@@ -644,6 +644,7 @@ def test_spawned_processes_get_killed_on_abort(ppg2_per_test, job_trace_log):
     except psutil.NoSuchProcess:
         ok = True
     if not ok:
+        # subprocess.check_call(["ps", "xf", "-o", "pid,ppid,pgid,cmd"])
         raise ValueError("Process was neither zombie (since parent is dead), nor gone.")
 
     p.communicate()
