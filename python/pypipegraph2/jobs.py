@@ -2613,7 +2613,10 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             else:
                 keys = {}
             keys[str(self.output_dir_prefix)] = key
-            fn.write_text(json.dumps(keys))
+            # safe write to temp, rename temp
+            tf = fn.with_suffix(".temp")
+            tf.write_text(json.dumps(keys))
+            os.rename(tf, fn)
 
     def _raise_partial_result_exception(self):
         raise exceptions.JobContractError(
