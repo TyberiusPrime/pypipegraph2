@@ -467,6 +467,8 @@ class Runner:
                 (self.job_outcomes, self.evaluator.new_history())
             )  # self.job_states)
         log_trace("Left runner.run()")
+        if self.aborted:
+            self.evaluator.event_abort()
 
         return self.job_outcomes, self.evaluator.new_history()
 

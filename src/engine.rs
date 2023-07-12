@@ -49,6 +49,7 @@ pub enum JobStateAlways {
     FinishedSuccess,
     FinishedFailure,
     FinishedUpstreamFailure,
+    FinishedAborted,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -60,6 +61,7 @@ pub enum JobStateOutput {
     FinishedFailure,
     FinishedUpstreamFailure,
     FinishedSkipped,
+    FinishedAborted,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -75,6 +77,7 @@ pub enum JobStateEphemeral {
     FinishedFailure,
     FinishedUpstreamFailure,
     FinishedSkipped,
+    FinishedAborted,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -119,13 +122,14 @@ impl JobQueries for JobStateAlways {
             JobStateAlways::FinishedSuccess => true,
             JobStateAlways::FinishedFailure => true,
             JobStateAlways::FinishedUpstreamFailure => true,
+            JobStateAlways::FinishedAborted => true,
         }
     }
 
     fn is_failed(&self) -> bool {
         matches!(
             self,
-            JobStateAlways::FinishedFailure | JobStateAlways::FinishedUpstreamFailure
+            JobStateAlways::FinishedFailure | JobStateAlways::FinishedUpstreamFailure | JobStateAlways::FinishedAborted
         )
     }
 
@@ -143,13 +147,14 @@ impl JobQueries for JobStateOutput {
             JobStateOutput::FinishedFailure => true,
             JobStateOutput::FinishedUpstreamFailure => true,
             JobStateOutput::FinishedSkipped => true,
+            JobStateOutput::FinishedAborted => true,
         }
     }
 
     fn is_failed(&self) -> bool {
         matches!(
             self,
-            JobStateOutput::FinishedFailure | JobStateOutput::FinishedUpstreamFailure
+            JobStateOutput::FinishedFailure | JobStateOutput::FinishedUpstreamFailure | JobStateOutput::FinishedAborted
         )
     }
 
@@ -172,13 +177,14 @@ impl JobQueries for JobStateEphemeral {
             JobStateEphemeral::FinishedFailure => true,
             JobStateEphemeral::FinishedUpstreamFailure => true,
             JobStateEphemeral::FinishedSkipped => true,
+            JobStateEphemeral::FinishedAborted => true,
         }
     }
 
     fn is_failed(&self) -> bool {
         matches!(
             self,
-            JobStateEphemeral::FinishedFailure | JobStateEphemeral::FinishedUpstreamFailure
+            JobStateEphemeral::FinishedFailure | JobStateEphemeral::FinishedUpstreamFailure | JobStateEphemeral::FinishedAborted
         )
     }
 
@@ -254,6 +260,7 @@ enum SignalKind {
     JobUpstreamFailure,
     ConsiderJob,
     JobCleanedUp,
+    JobAborted,
 }
 
 impl Signal {
@@ -425,6 +432,27 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 invalidated: Required::Unknown,
             },
         );
+    }
+
+    pub fn abort_remaining(&mut self) -> Result<(), PPGEvaluatorError> {
+        let mut signal_failure = Vec::new();
+
+        let mut new_signals: Vec<Signal> = Vec::new();
+
+        for (job_idx, job) in self.jobs.iter_mut().enumerate() {
+            if !job.state.is_finished() {
+                dbg!("Declaring upstream failure", job);
+                signal_failure.push(job_idx);
+            }
+        }
+
+        for job_idx in signal_failure {
+            new_signals.push(NewSignal!(SignalKind::JobAborted, job_idx, self.jobs));
+        }
+        self.signals.extend(new_signals);
+        self.process_signals(0)?;
+        self.is_finished();
+        Ok(())
     }
 
     pub fn is_finished(&mut self) -> bool {
@@ -621,10 +649,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         true
     }
     pub fn new_history(&self) -> Result<HashMap<String, String>, PPGEvaluatorError> {
-        /* if !self.is_finished() {
-            debug!("{}", Self::debug(&self.dag, &self.jobs));
-            panic!("Graph wasn't finished, not handing out history..."); // todo: actually, why not, we could save history occasionally?
-        } */
+        match self.already_started {
+            StartStatus::Finished => {}
+            _ => {
+                debug!("{}", Self::debug(&self.dag, &self.jobs));
+                panic!("Graph wasn't finished, not handing out history..."); // todo: actually, why not, we could save history occasionally?
+            }
+        }
         //our history 'keys'
         //(we can't do tuple indices because of json dumping)
         //no !!! -> job output.
@@ -696,6 +727,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
             //step 2: record the actual output of this job
             // (are we using this anywhere?)
+            // We're not for checking-the-ephemeral-invariant-upholding,
+            // for that we use the ones stored on the downstream jobs.
 
             let key = job.job_id.to_string();
             let job_was_success = job.history_output.is_some();
@@ -739,8 +772,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 //
                 // but if it failed because of upstream failure,
                 // we need to *keep* the history.
+                //
+                //
+                // is this not a problem on abort?
+                // no abort fails the currently running jobs (external, python does that)
 
                 // paranoia...
+                dbg!(&job);
                 assert!(
                     job.state.is_failed()
                         || Self::_job_and_downstreams_are_ephemeral(&self.dag, &self.jobs, idx)
@@ -1366,7 +1404,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                         node_idx,
                         &mut new_signals,
                         &mut self.gen,
-                        &mut ignore_consider_signals
+                        &mut ignore_consider_signals,
                     )?;
                 }
                 SignalKind::JobCleanedUp => {
@@ -1385,6 +1423,34 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 "unexpected was 8 {:?}",
                                 j
                             )))
+                        }
+                    }
+                }
+                SignalKind::JobAborted => {
+                    let j = &mut self.jobs[node_idx as usize];
+                    if !j.state.is_finished() {
+                        match j.state {
+                            JobState::Ephemeral(_) => {
+                                set_node_state!(
+                                    j,
+                                    JobState::Ephemeral(JobStateEphemeral::FinishedAborted),
+                                    self.gen
+                                );
+                            }
+                            JobState::Output(_) => {
+                                set_node_state!(
+                                    j,
+                                    JobState::Output(JobStateOutput::FinishedAborted),
+                                    self.gen
+                                );
+                            }
+                            JobState::Always(_) => {
+                                set_node_state!(
+                                    j,
+                                    JobState::Always(JobStateAlways::FinishedAborted),
+                                    self.gen
+                                );
+                            }
                         }
                     }
                 }

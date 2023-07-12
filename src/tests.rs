@@ -449,6 +449,8 @@ pub fn disjoint_and_twice() {
         g.event_job_finished_success("C", "histC".to_string())
             .unwrap();
         already_done.borrow_mut().insert("C".to_string());
+        start_logging();
+        g.abort_remaining().unwrap();
         g.new_history().unwrap()
     };
     error!("part 2");
@@ -2293,6 +2295,158 @@ fn test_fuzz_11() {
 
     ro.setup_graph = Box::new(create_graph2);
     let g = ro.run(&["N0"]).unwrap();
+}
+#[test]
+fn test_aborting_inbetween_jobs(){
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N1", JobKind::Output);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Output);
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N2");
+    }
+    let mut g = PPGEvaluator::new(StrategyForTesting::new());
+    create_graph(&mut g);
+    g.event_startup().unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N1"]);
+    g.event_now_running("N1").unwrap();
+    assert!(g.query_ready_to_run().is_empty());
+    g.event_job_finished_success("N1", "out1output".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N2"]);
+    assert!(!g.is_finished());
+    g.event_now_running("N2").unwrap();
+    assert!(!g.is_finished());
+    g.event_job_finished_success("N2", "out2output".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N3"]);
+    g.event_now_running("N3").unwrap();
+    assert!(!g.is_finished());
+    g.event_job_finished_success("N3", "out3output".to_string())
+        .unwrap();
+    assert!(g.is_finished());
+    let history = g.new_history().unwrap();
+    dbg!(&history);
+    assert!(history.get(&("N1!!!N2".to_string())).unwrap() == "out1output");
+    assert!(history.get(&("N2!!!N3".to_string())).unwrap() == "out2output");
+    dbg!(&history);
+    assert!(history.len() == 2 + 3 + 3);
+
+    let mut g = PPGEvaluator::new_with_history(history.clone(), StrategyForTesting::new());
+    create_graph(&mut g);
+    g.add_node("A", JobKind::Always);
+    g.add_node("B", JobKind::Output);
+    g.depends_on("N1", "A");
+    g.event_startup().unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["A", "B"]);
+    g.event_now_running("A").unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["B"]);
+    g.event_job_finished_success("A", "outA".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N1", "B"]);
+    g.event_now_running("N1").unwrap();
+    g.event_job_finished_success("N1", "out1output_changed".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N2", "B"]);
+    g.event_now_running("N2").unwrap();
+    g.event_job_finished_failure("N2",).unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["B"]);
+    start_logging();
+    g.abort_remaining().unwrap();
+
+    let history2 = g.new_history().unwrap();
+
+}
+#[test]
+fn test_aborting_while_ephemeral_is_running() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N1", JobKind::Output);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Output);
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N2");
+    }
+    let mut g = PPGEvaluator::new(StrategyForTesting::new());
+    create_graph(&mut g);
+    g.event_startup().unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N1"]);
+    g.event_now_running("N1").unwrap();
+    assert!(g.query_ready_to_run().is_empty());
+    g.event_job_finished_success("N1", "out1output".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N2"]);
+    assert!(!g.is_finished());
+    g.event_now_running("N2").unwrap();
+    assert!(!g.is_finished());
+    g.event_job_finished_success("N2", "out2output".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N3"]);
+    g.event_now_running("N3").unwrap();
+    assert!(!g.is_finished());
+    g.event_job_finished_success("N3", "out3output".to_string())
+        .unwrap();
+    assert!(g.is_finished());
+    let history = g.new_history().unwrap();
+    dbg!(&history);
+    assert!(history.get(&("N1!!!N2".to_string())).unwrap() == "out1output");
+    assert!(history.get(&("N2!!!N3".to_string())).unwrap() == "out2output");
+    dbg!(&history);
+    assert!(history.len() == 2 + 3 + 3);
+
+    let mut g = PPGEvaluator::new_with_history(history.clone(), StrategyForTesting::new());
+    create_graph(&mut g);
+    g.add_node("A", JobKind::Always);
+    g.add_node("B", JobKind::Output);
+    g.depends_on("N1", "A");
+    g.event_startup().unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["A", "B"]);
+    g.event_now_running("A").unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["B"]);
+    g.event_job_finished_success("A", "outA".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N1", "B"]);
+    g.event_now_running("N1").unwrap();
+    g.event_job_finished_success("N1", "out1output_changed".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N2", "B"]);
+    g.event_now_running("N2").unwrap();
+    g.event_job_finished_failure("N2",).unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["B"]);
+
+    g.abort_remaining().unwrap();
+
+    let history2 = g.new_history().unwrap();
+    dbg!(&history2);
+
+    assert!(history2.get(&("N1".to_string())).unwrap() == "out1output_changed");
+    assert!(history2.get(&("N1!!!".to_string())).unwrap() == "A");
+    assert!(history2.get(&("N1!!!N2".to_string())).unwrap() == "out1output"); //we did not filter
+                                                                              //this.
+    assert!(history2.get(&("N2!!!".to_string())).is_none());
+    assert!(history2.get(&("N2".to_string())).is_none());
+
+    let strat = StrategyForTesting::new();
+    strat.already_done.borrow_mut().insert("N1".to_string());
+    strat.already_done.borrow_mut().insert("N3".to_string());
+    let mut g = PPGEvaluator::new_with_history(history2.clone(), strat);
+    create_graph(&mut g);
+    g.add_node("A", JobKind::Always);
+    g.add_node("B", JobKind::Output);
+    g.depends_on("N1", "A");
+    g.depends_on("B", "N2");
+    start_logging();
+    g.event_startup().unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["A"]);
+    g.event_now_running("A").unwrap();
+    assert!(g.query_ready_to_run().is_empty());
+    g.event_job_finished_success("A", "outA".to_string())
+        .unwrap();
+
+    assert_eq!(g.query_ready_to_run(), set!["N2"]);
+    g.event_now_running("N2").unwrap();
+    g.event_job_finished_success("N2", "out2output_changed".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N3","B"]);
 }
 /*
 #[test]

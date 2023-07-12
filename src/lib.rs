@@ -586,6 +586,11 @@ impl PyPPG2Evaluator {
         self.evaluator.reconsider_all_jobs()?;
         Ok(())
     }
+
+    pub fn event_abort(&mut self) -> Result<(), PyErr> {
+        self.evaluator.abort_remaining()?;
+        Ok(())
+    }
 }
 
 /// Formats the sum of two numbers as string.
