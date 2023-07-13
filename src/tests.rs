@@ -25,7 +25,6 @@ fn test_one_output() {
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&Vec::new()).unwrap();
     let new_history = g.new_history().unwrap();
-    dbg!(&new_history);
     assert!(new_history.contains_key("A"));
     assert!(ro.run_counters.get("A") == Some(&1));
     error!("Run again");
@@ -449,7 +448,6 @@ pub fn disjoint_and_twice() {
         g.event_job_finished_success("C", "histC".to_string())
             .unwrap();
         already_done.borrow_mut().insert("C".to_string());
-        start_logging();
         g.abort_remaining().unwrap();
         g.new_history().unwrap()
     };
@@ -1513,9 +1511,11 @@ fn test_ephemeral_retriggered_changing_output() {
     ro.outputs.insert("TA".to_string(), "changed".to_string());
 
     error!("part2");
+    start_logging();
     let g = ro.run(&Vec::new()).unwrap();
     assert!(ro.run_counters.get("TA") == Some(&2));
     let failed = g.query_failed();
+    dbg!(&failed);
     assert!(failed.contains("TA"));
     assert!(failed.len() == 1);
     let upstream_failed = g.query_upstream_failed();
@@ -1787,7 +1787,6 @@ fn test_upstream_failure_but_history_still_captured() {
     assert!(history.contains_key("C"));
     assert!(history.contains_key("D:E:F"));
 
-    //start_logging_to_file("shu.txt");
     ro.already_done.remove("A");
     let g = ro.run(&["A"]).unwrap();
     assert!(g.query_failed().len() == 1);
@@ -1925,7 +1924,6 @@ fn test_fuzz_3() {
     }
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&[]).unwrap();
-    start_logging_to_file("debug.log");
     let g = ro.run(&[]).unwrap();
 }
 
@@ -1991,7 +1989,6 @@ fn test_fuzz_5() {
     ro.setup_graph = Box::new(create_graph2);
 
     let fails = ["N0"];
-    start_logging();
     let g = ro
         .run(&fails)
         .map_err(|x| {
@@ -2070,7 +2067,6 @@ fn test_fuzz_7() {
 
     let mut ro = TestGraphRunner::new(Box::new(create_graph));
     let g = ro.run(&[]).unwrap();
-    start_logging();
     let g = ro.run(&[]).unwrap();
 }
 
@@ -2235,7 +2231,6 @@ fn test_fuzz_10() {
             }
         }
     }
-    start_logging();
 
     ro.setup_graph = Box::new(create_graph2);
     let g = ro.run(&["N1"]).unwrap();
@@ -2297,7 +2292,7 @@ fn test_fuzz_11() {
     let g = ro.run(&["N0"]).unwrap();
 }
 #[test]
-fn test_aborting_inbetween_jobs(){
+fn test_aborting_inbetween_jobs() {
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("N1", JobKind::Output);
         g.add_node("N2", JobKind::Ephemeral);
@@ -2305,7 +2300,9 @@ fn test_aborting_inbetween_jobs(){
         g.depends_on("N2", "N1");
         g.depends_on("N3", "N2");
     }
-    let mut g = PPGEvaluator::new(StrategyForTesting::new());
+    let strat = StrategyForTesting::new();
+    let mut g = PPGEvaluator::new(strat);
+    let strat = StrategyForTesting::new();
     create_graph(&mut g);
     g.event_startup().unwrap();
     assert_eq!(g.query_ready_to_run(), set!["N1"]);
@@ -2313,26 +2310,27 @@ fn test_aborting_inbetween_jobs(){
     assert!(g.query_ready_to_run().is_empty());
     g.event_job_finished_success("N1", "out1output".to_string())
         .unwrap();
+    strat.already_done.borrow_mut().insert("N1".to_string());
     assert_eq!(g.query_ready_to_run(), set!["N2"]);
     assert!(!g.is_finished());
     g.event_now_running("N2").unwrap();
     assert!(!g.is_finished());
     g.event_job_finished_success("N2", "out2output".to_string())
         .unwrap();
+    strat.already_done.borrow_mut().insert("N2".to_string());
     assert_eq!(g.query_ready_to_run(), set!["N3"]);
     g.event_now_running("N3").unwrap();
     assert!(!g.is_finished());
     g.event_job_finished_success("N3", "out3output".to_string())
         .unwrap();
     assert!(g.is_finished());
+    strat.already_done.borrow_mut().insert("N3".to_string());
     let history = g.new_history().unwrap();
-    dbg!(&history);
     assert!(history.get(&("N1!!!N2".to_string())).unwrap() == "out1output");
     assert!(history.get(&("N2!!!N3".to_string())).unwrap() == "out2output");
-    dbg!(&history);
     assert!(history.len() == 2 + 3 + 3);
 
-    let mut g = PPGEvaluator::new_with_history(history.clone(), StrategyForTesting::new());
+    let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
     create_graph(&mut g);
     g.add_node("A", JobKind::Always);
     g.add_node("B", JobKind::Output);
@@ -2349,13 +2347,11 @@ fn test_aborting_inbetween_jobs(){
         .unwrap();
     assert_eq!(g.query_ready_to_run(), set!["N2", "B"]);
     g.event_now_running("N2").unwrap();
-    g.event_job_finished_failure("N2",).unwrap();
+    g.event_job_finished_failure("N2").unwrap();
     assert_eq!(g.query_ready_to_run(), set!["B"]);
-    start_logging();
     g.abort_remaining().unwrap();
 
     let history2 = g.new_history().unwrap();
-
 }
 #[test]
 fn test_aborting_while_ephemeral_is_running() {
@@ -2366,7 +2362,8 @@ fn test_aborting_while_ephemeral_is_running() {
         g.depends_on("N2", "N1");
         g.depends_on("N3", "N2");
     }
-    let mut g = PPGEvaluator::new(StrategyForTesting::new());
+    let strat = StrategyForTesting::new();
+    let mut g = PPGEvaluator::new(strat.clone());
     create_graph(&mut g);
     g.event_startup().unwrap();
     assert_eq!(g.query_ready_to_run(), set!["N1"]);
@@ -2374,26 +2371,28 @@ fn test_aborting_while_ephemeral_is_running() {
     assert!(g.query_ready_to_run().is_empty());
     g.event_job_finished_success("N1", "out1output".to_string())
         .unwrap();
+    strat.already_done.borrow_mut().insert("N1".to_string());
     assert_eq!(g.query_ready_to_run(), set!["N2"]);
     assert!(!g.is_finished());
     g.event_now_running("N2").unwrap();
     assert!(!g.is_finished());
     g.event_job_finished_success("N2", "out2output".to_string())
         .unwrap();
+    strat.already_done.borrow_mut().insert("N2".to_string());
     assert_eq!(g.query_ready_to_run(), set!["N3"]);
     g.event_now_running("N3").unwrap();
     assert!(!g.is_finished());
     g.event_job_finished_success("N3", "out3output".to_string())
         .unwrap();
+    strat.already_done.borrow_mut().insert("N3".to_string());
     assert!(g.is_finished());
     let history = g.new_history().unwrap();
-    dbg!(&history);
     assert!(history.get(&("N1!!!N2".to_string())).unwrap() == "out1output");
     assert!(history.get(&("N2!!!N3".to_string())).unwrap() == "out2output");
-    dbg!(&history);
     assert!(history.len() == 2 + 3 + 3);
+    assert!(strat.already_done.borrow_mut().contains("N1"));
 
-    let mut g = PPGEvaluator::new_with_history(history.clone(), StrategyForTesting::new());
+    let mut g = PPGEvaluator::new_with_history(history.clone(), strat.clone());
     create_graph(&mut g);
     g.add_node("A", JobKind::Always);
     g.add_node("B", JobKind::Output);
@@ -2410,13 +2409,12 @@ fn test_aborting_while_ephemeral_is_running() {
         .unwrap();
     assert_eq!(g.query_ready_to_run(), set!["N2", "B"]);
     g.event_now_running("N2").unwrap();
-    g.event_job_finished_failure("N2",).unwrap();
+    g.event_job_finished_failure("N2").unwrap();
     assert_eq!(g.query_ready_to_run(), set!["B"]);
 
     g.abort_remaining().unwrap();
 
     let history2 = g.new_history().unwrap();
-    dbg!(&history2);
 
     assert!(history2.get(&("N1".to_string())).unwrap() == "out1output_changed");
     assert!(history2.get(&("N1!!!".to_string())).unwrap() == "A");
@@ -2434,7 +2432,6 @@ fn test_aborting_while_ephemeral_is_running() {
     g.add_node("B", JobKind::Output);
     g.depends_on("N1", "A");
     g.depends_on("B", "N2");
-    start_logging();
     g.event_startup().unwrap();
     assert_eq!(g.query_ready_to_run(), set!["A"]);
     g.event_now_running("A").unwrap();
@@ -2446,8 +2443,123 @@ fn test_aborting_while_ephemeral_is_running() {
     g.event_now_running("N2").unwrap();
     g.event_job_finished_success("N2", "out2output_changed".to_string())
         .unwrap();
-    assert_eq!(g.query_ready_to_run(), set!["N3","B"]);
+    assert_eq!(g.query_ready_to_run(), set!["N3", "B"]);
 }
+
+#[test]
+fn test_aborting_between_ephemerals_1() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2a", JobKind::Ephemeral);
+        g.add_node("N2b", JobKind::Ephemeral);
+        g.add_node("N2c", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Output);
+        g.depends_on("N2a", "N1");
+        g.depends_on("N2b", "N1");
+        g.depends_on("N2c", "N1");
+        g.depends_on("N3", "N2a");
+        g.depends_on("N3", "N2b");
+        g.depends_on("N3", "N2c");
+    }
+    //so the idea is that everything had run. Then it was rerun, and N1 was rebuild
+    // (because it was missing, or perhaps because it was invalidated),
+    // and then N2a was run, but before N2b could be run (and update it's inputs), the abort
+    // happend
+    // so we have diverging history.
+    // and we need a third job go the ephemeral to rebuild.
+    // but we should not need a third job, the fact taht N2b is invalidated by the (stored) N1 
+    // output should already retrigger N1.
+    // So We might Have Two Bugs: Not triggering N1 thouh N2b is invalidated
+    // and then 'comparing with stored on "N1!!N2b" instead of "N2b"
+    let strat = StrategyForTesting::new();
+    strat.already_done.borrow_mut().insert("N1".to_string());
+    strat.already_done.borrow_mut().insert("N3".to_string());
+    let mut history = HashMap::new();
+    history.insert("N1".to_string(), "1_changed".to_string());
+    history.insert("N1!!!".to_string(), "".to_string());
+
+    history.insert("N2a".to_string(), "2a".to_string());
+    history.insert("N2a!!!".to_string(), "N1".to_string());
+    history.insert("N1!!!N2a".to_string(), "1_changed".to_string());
+
+    history.insert("N2b".to_string(), "2b".to_string());
+    history.insert("N2b!!!".to_string(), "N1".to_string());
+    history.insert("N1!!!N2b".to_string(), "1".to_string()); // that's the one that did not update.
+
+    history.insert("N3".to_string(), "3".to_string());
+    history.insert("N3!!!".to_string(), "N2a\nN2b".to_string());
+    history.insert("N2a!!!N3".to_string(), "2a".to_string()); // that's the one that did not update.
+    history.insert("N2b!!!N3".to_string(), "2b".to_string()); // that's the one that did not update.
+
+    let mut g = PPGEvaluator::new_with_history(history, strat);
+    start_logging();
+    create_graph(&mut g);
+    g.event_startup().unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N1"]);
+    g.event_now_running("N1").unwrap();
+    g.event_job_finished_success("N1", "1_changed".to_string()) .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N2a", "N2b", "N2c"]); // N3 needs all three.
+    g.event_now_running("N2a").unwrap();
+    g.event_now_running("N2b").unwrap();
+    g.event_now_running("N2c").unwrap();
+    g.event_job_finished_success("N2a", "2a".to_string()) .unwrap();
+    g.event_job_finished_success("N2b", "2b".to_string()) .unwrap();
+    g.event_job_finished_success("N2c", "2c".to_string()) .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N3"]);
+    g.event_now_running("N3").unwrap();
+    g.event_job_finished_success("N3", "3".to_string()) .unwrap();
+                                                                   //
+    assert!(g.query_ready_to_run().is_empty());
+    assert!(g.is_finished());
+}
+
+#[test]
+fn test_aborting_between_ephemerals_invalidation_triggers() {
+    //same as above, but forcing us to actually have the N2b invalidation because N1 changed.
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2a", JobKind::Ephemeral);
+        g.add_node("N2b", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Output);
+        g.depends_on("N2a", "N1");
+        g.depends_on("N2b", "N1");
+        g.depends_on("N3", "N2a");
+        g.depends_on("N3", "N2b");
+    }
+    let strat = StrategyForTesting::new();
+    strat.already_done.borrow_mut().insert("N1".to_string());
+    strat.already_done.borrow_mut().insert("N3".to_string());
+    let mut history = HashMap::new();
+    history.insert("N1".to_string(), "1_changed".to_string());
+    history.insert("N1!!!".to_string(), "".to_string());
+
+    history.insert("N2a".to_string(), "2a".to_string());
+    history.insert("N2a!!!".to_string(), "N1".to_string());
+    history.insert("N1!!!N2a".to_string(), "1_changed".to_string());
+
+    history.insert("N2b".to_string(), "2b".to_string());
+    history.insert("N2b!!!".to_string(), "N1".to_string());
+    history.insert("N1!!!N2b".to_string(), "1".to_string()); // that's the one that did not update.
+
+    history.insert("N3".to_string(), "3".to_string());
+    history.insert("N3!!!".to_string(), "N2a\nN2b".to_string());
+    history.insert("N2a!!!N3".to_string(), "2a".to_string()); // that's the one that did not update.
+    history.insert("N2b!!!N3".to_string(), "2b".to_string()); // that's the one that did not update.
+
+    let mut g = PPGEvaluator::new_with_history(history, strat);
+    create_graph(&mut g);
+    g.event_startup().unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N1"]);
+    g.event_now_running("N1").unwrap();
+    g.event_job_finished_success("N1", "1_changed".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["N2b"]);
+    g.event_now_running("N2b").unwrap();
+    g.event_job_finished_success("N2b", "2b".to_string()).unwrap();
+
+    assert!(g.is_finished());
+}
+
 /*
 #[test]
 fn test_multi_file_job_gaining_output() {

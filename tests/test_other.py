@@ -676,3 +676,26 @@ def test_spawned_processes_get_killed_on_catastrophic_process_failure(
                 "ppid",
                 proc.ppid(),
             )
+
+
+def test_tempmultifilegen_changing_output_but_had_been_validated(ppg2_per_test):
+    import random
+
+    def bad(files):
+        files[0].write_text("hello")
+        files[1].write_text("world" + str(random.random()))
+
+    tmfg = ppg.MultiTempFileGeneratingJob(["a", "b"], bad)
+    c = ppg.FileGeneratingJob("c", lambda of: of.write_text(Path("a").read_text()))
+    c.depends_on("a")
+    ppg.run()
+    ppg.new()
+    tmfg = ppg.MultiTempFileGeneratingJob(["a", "b"], bad)
+    c = ppg.FileGeneratingJob("c", lambda of: of.write_text(Path("a").read_text()))
+    c.depends_on("a")
+    d = ppg.FileGeneratingJob("d", lambda of: of.write_text(Path("a").read_text()))
+    d.depends_on("a")
+    with pytest.raises(ppg.JobsFailed):
+        ppg.run()
+    error = ppg.global_pipegraph.last_run_result[tmfg.job_id].error
+    assert "changed output" in error and "ephemeral" in error.lower()

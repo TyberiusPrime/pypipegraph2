@@ -129,7 +129,9 @@ impl JobQueries for JobStateAlways {
     fn is_failed(&self) -> bool {
         matches!(
             self,
-            JobStateAlways::FinishedFailure | JobStateAlways::FinishedUpstreamFailure | JobStateAlways::FinishedAborted
+            JobStateAlways::FinishedFailure
+                | JobStateAlways::FinishedUpstreamFailure
+                | JobStateAlways::FinishedAborted
         )
     }
 
@@ -154,7 +156,9 @@ impl JobQueries for JobStateOutput {
     fn is_failed(&self) -> bool {
         matches!(
             self,
-            JobStateOutput::FinishedFailure | JobStateOutput::FinishedUpstreamFailure | JobStateOutput::FinishedAborted
+            JobStateOutput::FinishedFailure
+                | JobStateOutput::FinishedUpstreamFailure
+                | JobStateOutput::FinishedAborted
         )
     }
 
@@ -184,7 +188,9 @@ impl JobQueries for JobStateEphemeral {
     fn is_failed(&self) -> bool {
         matches!(
             self,
-            JobStateEphemeral::FinishedFailure | JobStateEphemeral::FinishedUpstreamFailure | JobStateEphemeral::FinishedAborted
+            JobStateEphemeral::FinishedFailure
+                | JobStateEphemeral::FinishedUpstreamFailure
+                | JobStateEphemeral::FinishedAborted
         )
     }
 
@@ -986,8 +992,82 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             }
         }
         if j.state == JobState::Ephemeral(JobStateEphemeral::Running(ValidationStatus::Validated)) {
+            // changing your output when you were Validated is not allowed.
+            // We the the job-output history, not the one on the downstreams
+            // because those might be actually different, if the upstream epehemeral had run
+            // and we had aborted/failed the downstreams in a previous run,
+            // and this turn it's then obvs validated, but the downstreams do no longer match.
+            //
+            // We have to query the  downstream jobs though if it is really different
+            // for history_is_different on the python side only considers those outputs
+            // that are then again inputs for the downstream jobs.
+            // (side-effect: if it changes in an output that's not used by any downstream,
+            // this would not trigger.
+            // It's an unlikely problem, and I currently don't see how to work around it.
+            // witohut turning the downstream_job_id into a magic value that means 'check all the
+            // outputs (we need the upstream job to know what comparison to use)
+            //
+            let hist_key = &j.job_id;
+            if let Some(job_history) = self.history.get(hist_key) {
+                // we have to check for actually altered history.
+                // the timestamp may change, but the hash not...
+                // any would do
+                if self
+                    .strategy
+                    .is_history_altered(job_id, "!!!", job_history, &history_to_store)
+                {
+                    self.signals.push_back(NewSignal!(
+                        SignalKind::JobFinishedFailure,
+                        node_idx,
+                        self.jobs
+                    ));
+                    let my_err = PPGEvaluatorError::EphemeralChangedOutput {
+                        job_id: j.job_id.clone(),
+                        last_history: job_history.to_string(),
+                        new_history: history_to_store,
+                    };
+                    self.process_signals(0)?;
+                    return Err(my_err);
+                }
+            }
+
+            /*
             let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
             for downstream_idx in downstreams {
+                debug!(
+                    "Ephemeral {} finished, downstream {} is now ready to run. Downstream state was {:?}",
+                    job_id, self.jobs[downstream_idx as usize].job_id
+                    , self.jobs[downstream_idx as usize].state
+                );
+                match self.jobs[downstream_idx].state {
+                    JobState::Always(_) => {}
+                    JobState::Output(jo) => match jo {
+                        JobStateOutput::NotReady(v) => match v {
+                            ValidationStatus::Unknown => {}, //
+                            ValidationStatus::Validated => {} // to the chekc.
+                            ValidationStatus::Invalidated => continue,
+                        },
+                        JobStateOutput::FinishedSkipped => continue,
+                        JobStateOutput::FinishedUpstreamFailure => continue,
+                        x => panic!("Should not happen: {:?}", x),
+                    },
+                    JobState::Ephemeral(je) => match je {
+                        JobStateEphemeral::NotReady(v) => match v {
+                            ValidationStatus::Unknown => {},
+                            ValidationStatus::Validated => {}
+                            ValidationStatus::Invalidated => continue,
+                        },
+                        JobStateEphemeral::ReadyButDelayed => continue,
+                        JobStateEphemeral::ReadyToRun(v) => match v {
+                            ValidationStatus::Unknown => panic!("Should not happen"),
+                            ValidationStatus::Validated => {}
+                            ValidationStatus::Invalidated => continue,
+                        },
+                        JobStateEphemeral::FinishedSkipped => continue,
+                        JobStateEphemeral::FinishedUpstreamFailure => continue,
+                        _ => panic!("Should not happen"),
+                    },
+                }
                 let hist_key = format!(
                     "{}!!!{}",
                     j.job_id, &self.jobs[downstream_idx as usize].job_id
@@ -1016,6 +1096,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     }
                 }
             }
+            */
         }
 
         let j = &mut self.jobs[node_idx as usize];
@@ -1749,6 +1830,45 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 // not invalidate a downstream.
                 // If it produces a changed output,
                 // that's a job contract failure.
+                //
+                // But! If it ran previously, produced a different output,
+                // and we did not run the downstream job to completion (abort, possibly failure?)
+                // Then it can invalidate the downstream job!
+                //
+                //TODO
+                let upstream_historical_output =
+                    history.get(&jobs[upstream_idx].job_id).ok_or_else(|| {
+                        PPGEvaluatorError::InternalError(
+                            "Should have had history for it, if it was validated?!".to_string(),
+                        )
+                    })?;
+                let my_historical_input = history.get(&format!(
+                    "{}!!!{}",
+                    &jobs[upstream_idx].job_id, &jobs[node_idx].job_id
+                ));
+                match my_historical_input {
+                    None => {
+                        //no history, so certainly invalidated
+                        debug!(
+                            "edge invalidated: No history for {}->{}",
+                            &jobs[upstream_idx].job_id, &jobs[node_idx].job_id
+                        );
+                        invalidated = true;
+                    }
+                    Some(my_historical_input) => {
+                        if upstream_historical_output != my_historical_input {
+                            debug!("edge invalidated by epheremeral changed in prev run: History for {}->{} changed",
+                                   &jobs[upstream_idx].job_id,
+                                   &jobs[node_idx].job_id);
+                            invalidated = true;
+                            dag.edge_weight_mut(upstream_idx, node_idx)
+                                .unwrap()
+                                .required = Required::Yes;
+                        } else {
+                            continue;
+                        }
+                    }
+                }
             } else if jobs[upstream_idx as usize].state
                 == JobState::Output(JobStateOutput::NotReady(ValidationStatus::Validated))
             {
@@ -2014,6 +2134,20 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             // not the most elegant control flow, but ok.
                             //
                             reconsider_job!(jobs, node_idx, new_signals, gen.get());
+                            if let ValidationStatus::Invalidated = solid_vs {
+                                //this happens when we did not run the ephemeral last time
+                                //(aborted),
+                                //but would have had to run it due to invalidation.
+                                //and now it's invalidated again, but we have to tell the upstream
+                                //ephemerals
+                                Self::reconsider_ephemeral_upstreams(
+                                    dag,
+                                    jobs,
+                                    node_idx,
+                                    new_signals,
+                                    gen,
+                                );
+                            }
                         }
                     }
                 }
