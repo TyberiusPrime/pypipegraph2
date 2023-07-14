@@ -784,7 +784,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 // no abort fails the currently running jobs (external, python does that)
 
                 // paranoia...
-                dbg!(&job);
+                //dbg!(&job);
                 assert!(
                     job.state.is_failed()
                         || Self::_job_and_downstreams_are_ephemeral(&self.dag, &self.jobs, idx)
