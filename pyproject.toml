@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pypipegraph2"
-version = "3.0.3"
+version = "3.0.4"
 description = "Advanced python 'what changed and what do we need to do' tracking"
 long-description = "README.md"
 authors = [
