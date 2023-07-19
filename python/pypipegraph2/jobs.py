@@ -22,6 +22,8 @@ from .enums import Resources
 from .util import escape_logging
 import hashlib
 import shutil
+import random
+import filelock
 from .util import (
     log_info,
     log_error,
@@ -2597,7 +2599,22 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         # or if we had no history
         if did_build or not self.job_id in runner.history:
             self._cleanup(runner)
-        self._log_local_usage(by_input_key)
+        lock_file = (
+            global_pipegraph.history_dir / SharedMultiFileGeneratingJob.log_filename
+        ).with_suffix(".lock")
+        lock = filelock.FileLock(lock_file, timeout=random.randint(8, 20))
+        try:
+            with lock:
+                self._log_local_usage(by_input_key)
+        except filelock.Timeout:
+            # guess we have as stale lock. This really shouldn't take this much time.
+            try:
+                lock_file.unlink()
+            except:  # noqa: E722
+                pass
+            with lock:
+                self._log_local_usage(by_input_key)
+
         return res
 
     def _log_local_usage(self, key):

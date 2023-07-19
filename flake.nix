@@ -91,7 +91,7 @@
            psutil
            networkx
            cython
-
+           filelock
         '';
         format = "pyproject";
       };
@@ -205,6 +205,7 @@
       # for testing...
       ppg1
       plotnine
+      p.filelock
     ]);
   in {
     # pass in nixpkgs, mach-nix and what you want it to report back as a version
