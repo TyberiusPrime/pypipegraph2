@@ -447,7 +447,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
         for (job_idx, job) in self.jobs.iter_mut().enumerate() {
             if !job.state.is_finished() {
-                dbg!("Declaring upstream failure", job);
+                //dbg!("Declaring upstream failure", job);
                 signal_failure.push(job_idx);
             }
         }
@@ -784,7 +784,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 // no abort fails the currently running jobs (external, python does that)
 
                 // paranoia...
-                dbg!(&job);
+                //dbg!(&job);
                 assert!(
                     job.state.is_failed()
                         || Self::_job_and_downstreams_are_ephemeral(&self.dag, &self.jobs, idx)
