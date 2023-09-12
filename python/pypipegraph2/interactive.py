@@ -111,7 +111,7 @@ class ConsoleInteractive:
                             self.cmd = ""
                         elif value == "\x1a":  # ctrl-z
                             os.kill(os.getpid(), signal.SIGTSTP)
-                        elif ord("0") <= ord(value) <= ord("z") or value == " ":
+                        elif value and (ord("0") <= ord(value) <= ord("z") or value == " "):
                             self.cmd += value
                         elif value == "\x7f":  # backspace
                             self.cmd = self.cmd[:-1]
