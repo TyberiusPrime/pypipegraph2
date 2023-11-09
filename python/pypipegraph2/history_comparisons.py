@@ -35,7 +35,9 @@ def history_is_different(runner, job_upstream_id, job_downstream_id, str_last, s
                     altered = not job_upstream.compare_hashes(obj_last[ip], obj_now[ip])
                     if altered:
                         log_error(
-                                f"history is actually different for job-pair {job_upstream_id}->{job_downstream_id}: {obj_last[ip]} {obj_now[ip]}"
+                            "history is actually different for job-pair "
+                            + f"{job_upstream_id}->{job_downstream_id}: "
+                            + f"{obj_last[ip]} {obj_now[ip]}"
                         )
                         return True
         except:  # noqa: E722 yes we really want to capture and reraise *everything*
