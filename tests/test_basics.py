@@ -846,7 +846,7 @@ class TestPypipegraph2:
                 pickle.dump("153", op)
             # now this does not get rewritten
             # because of the BadFileGeneratingJob
-            assert type(cache_job) == BadFileGeneratingJob
+            assert type(cache_job) is BadFileGeneratingJob
             # with the new execution engine (JobOutcome based)
             # this is no longer an issue
             # at worst, you'll get a pickle failed error if the job dies

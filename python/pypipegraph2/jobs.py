@@ -80,7 +80,7 @@ def _dedup_job(cls, job_id):
         raise TypeError(f".. in job id not allowed. Was {job_id}")
     if global_pipegraph.run_mode.is_strict() and job_id in global_pipegraph.jobs:
         j = global_pipegraph.jobs[job_id]
-        if type(j) != cls:  # noqa: E721
+        if type(j) is not cls:
             if (
                 str(cls) == "<class 'pypipegraph2.ppg1_compatibility.FileInvariant'>"
             ) and (str(type(j)) == "<class 'pypipegraph2.jobs.FileInvariant'>"):
