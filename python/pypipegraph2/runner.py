@@ -696,16 +696,22 @@ class Runner:
                                         log_error(
                                             "Evaluator is not finished, reports no jobs ready to run, but no jobs currently running -> a bug in the state machine. No way forward, aborting graph executing (cleanly). Graph written to debug.txt "
                                         )
-                                        self.evaluator.debug_is_finished()  # if this helps' we're looking at a propagation failure. Somewhere.
+
+                                        #from .pypipegraph2 import enable_logging_to_file
+                                        #enable_logging_to_file("rust_debug.log")
+
+                                        self.evaluator.debug_is_finished()  
                                         Path("debug.txt").write_text(
                                             self.evaluator.debug()
-                                        )  # if this helps' we're looking at a propagation failure. Somewhere.
-                                        # self.evaluator.reconsider_all_jobs() # if this helps' we're looking at a propagation failure. Somewhere.
-                                        # if not self.evaluator.is_finished() and not self.evaluator.jobs_ready_to_run():
-                                        #     #print("goin gdown hard")
-                                        #     #self.interactive._cmd_die(False)
-                                        # else:
-                                        #     log_error("Could recover by doing reconsider_all")
+                                        )  
+                                        #self.evaluator.reconsider_all_jobs() # if this helps' we're looking at a propagation failure. Somewhere.
+                                        if not self.evaluator.is_finished() and not self.evaluator.jobs_ready_to_run():
+                                            print("reconsidering all jobs did not lead to recovery, going down hard")
+                                            self.interactive._cmd_die(False)
+                                        else:
+                                            log_error("Could recover by doing reconsider_all!")
+                                            self.interactive._cmd_die(False)
+
 
                             else:
                                 ljt(f"to run {rr}")
@@ -872,6 +878,7 @@ class Runner:
                                         outputs, sort_keys=True, indent=1
                                     )
                                     ljt(f"success {job_id} str_history {str_history}")
+                                    self.jobs_done += 1
                                     try:
                                         self.evaluator.event_job_success(
                                             job_id, str_history
@@ -886,6 +893,7 @@ class Runner:
                                         )
 
                                 else:
+                                    self.fail_counter += 1
                                     ljt(f"failure {job_id} - {error}")
                                     self.job_outcomes[job_id] = RecordedJobOutcome(
                                         job_id, JobOutcome.Failed, error

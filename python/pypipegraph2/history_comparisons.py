@@ -2,7 +2,8 @@ import json
 from .util import (
     # log_info,
     log_error,
-    # log_warning, log_debug, log_trace,
+    log_warning, 
+    #log_debug, log_trace,
     # log_job_trace
 )
 import sys
@@ -23,7 +24,7 @@ def history_is_different(runner, job_upstream_id, job_downstream_id, str_last, s
         for ip in outputs:
             altered = not job_upstream.compare_hashes(obj_last[ip], obj_now[ip])
             if altered:
-                log_error(f"history is actually different {obj_last[ip]} {obj_now[ip]}")
+                log_warning(f"history is actually different for {job_upstream_id}-> !!! {obj_last[ip]} {obj_now[ip]}")
                 return True
 
     else:
@@ -34,7 +35,7 @@ def history_is_different(runner, job_upstream_id, job_downstream_id, str_last, s
                 if ip in outputs:
                     altered = not job_upstream.compare_hashes(obj_last[ip], obj_now[ip])
                     if altered:
-                        log_error(
+                        log_warning(
                             "history is actually different for job-pair "
                             + f"{job_upstream_id}->{job_downstream_id}: "
                             + f"{obj_last[ip]} {obj_now[ip]}"
