@@ -1510,8 +1510,8 @@ fn test_ephemeral_retriggered_changing_output() {
     ro.setup_graph = Box::new(create_graph2);
     ro.outputs.insert("TA".to_string(), "changed".to_string());
 
-    error!("part2");
     start_logging();
+    error!("part2");
     let g = ro.run(&Vec::new()).unwrap();
     assert!(ro.run_counters.get("TA") == Some(&2));
     let failed = g.query_failed();
@@ -2558,6 +2558,57 @@ fn test_aborting_between_ephemerals_invalidation_triggers() {
     g.event_job_finished_success("N2b", "2b".to_string()).unwrap();
 
     assert!(g.is_finished());
+}
+
+
+#[test]
+fn test_invalidation_case_20231120() {
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("A", JobKind::Output);
+        g.add_node("B", JobKind::Ephemeral);
+        g.add_node("C1", JobKind::Ephemeral);
+        g.add_node("C2", JobKind::Always);
+        g.depends_on("A", "B");
+        g.depends_on("B", "C1");
+        g.depends_on("B", "C2");
+    }
+    let strat = StrategyForTesting::new();
+    strat.already_done.borrow_mut().insert("A".to_string());
+
+    let mut history = HashMap::new();
+    history.insert("C1".to_string(), "C1".to_string());
+    history.insert("C2".to_string(), "C2".to_string());
+    history.insert("B".to_string(), "B".to_string());
+    history.insert("A".to_string(), "A".to_string());
+    history.insert("C1!!!".to_string(), "".to_string());
+    history.insert("C2!!!".to_string(), "".to_string());
+    history.insert("B!!!".to_string(), "C1\nC2".to_string());
+    history.insert("A!!!".to_string(), "B".to_string());
+    history.insert("B!!!A".to_string(), "B".to_string());
+    history.insert("C1!!!B".to_string(), "C1".to_string());
+    history.insert("C2!!!B".to_string(), "C2".to_string());
+
+    //start_logging();
+    let mut g = PPGEvaluator::new_with_history(history, strat);
+    create_graph(&mut g);
+    g.event_startup().unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["C2"]);
+    g.event_now_running("C2").unwrap();
+    g.event_job_finished_success("C2", "C2_changed".to_string())
+        .unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["C1"]);
+    error!("start reading here");
+    warn!("start reading here");
+    g.event_now_running("C1").unwrap();
+    assert!(!g.is_finished());
+    g.event_job_finished_success("C1", "C1".to_string()).unwrap();
+
+    assert_eq!(g.query_ready_to_run(), set!["B"]);
+    g.event_now_running("B").unwrap();
+    g.event_job_finished_success("B", "B".to_string()).unwrap();
+
+    assert!(g.is_finished());
+
 }
 
 /*

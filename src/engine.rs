@@ -37,6 +37,7 @@ pub enum Required {
     Yes,
     No,
 }
+#[derive(Debug)]
 pub struct EdgeInfo {
     required: Required,
     invalidated: Required,
@@ -1438,6 +1439,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 self.gen
                             );
                         }
+                        JobState::Output(JobStateOutput::FinishedSkipped) => {
+                            set_node_state!(
+                                j,
+                                JobState::Output(JobStateOutput::FinishedUpstreamFailure),
+                                self.gen
+                            );
+                        }
                         _ => {
                             return Err(PPGEvaluatorError::InternalError(format!(
                                 "unexpected was 7 {:?}",
@@ -1551,20 +1559,43 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         Ok(())
     }
 
-    fn any_downstream_required(dag: &GraphType, jobs: &[NodeInfo], node_idx: NodeIndex) -> bool {
+    fn any_downstream_required(dag: &GraphType, jobs: &[NodeInfo], node_idx: NodeIndex) -> Result<bool, PPGEvaluatorError> {
+        let res = match Self::downstream_requirement_status(dag, jobs, node_idx)? {
+            Required::Unknown => false,
+            Required::Yes => true,
+            Required::No => false,
+        };
+        info!("any_downstream_required {}: -> {res}", jobs[node_idx].job_id);
+        Ok(res)
+        /*
+
         for (_upstream_idx, downstream_idx, weight) in
             dag.edges_directed(node_idx, Direction::Outgoing)
         {
+            info!("Looking at edge {}->{}, {weight:?}",
+
+                  jobs[_upstream_idx].job_id,
+                  jobs[downstream_idx].job_id,
+                  );
+            //checking the edge only checks wether this node_idx invalidated one of the
+            //downstreams...
             match weight.required {
-                Required::Unknown => {}
                 Required::Yes => {
                     debug!("downstream required {}", jobs[downstream_idx].job_id);
                     return true;
                 }
+                Required::Unknown => {}
                 Required::No => {}
             }
+            // but the downstream might have been invalidated by another upstream.
         }
+        info!("leaving any_downstream_required {} with false", jobs[node_idx].job_id);
+        //why is the edge C1->B not being examined!?!?!
+        dbg!(dag);
+        dbg!(jobs);
+        dbg!(node_idx);
         false
+        */
     }
 
     fn all_downstreams_validated_or_upstream_failed(
@@ -1667,7 +1698,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         best
     }
 
-    fn edge_invalidated(
+    fn edge_invalidated( // that's a question
         dag: &mut GraphType,
         strategy: &dyn PPGEvaluatorStrategy,
         jobs: &[NodeInfo],
@@ -2096,7 +2127,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 }
                 JobStateEphemeral::ReadyButDelayed => {
                     {
-                        if Self::any_downstream_required(dag, jobs, node_idx) {
+                        if Self::any_downstream_required(dag, jobs, node_idx)? {
                             debug!("\tA downstream was required");
                             Self::remove_consider_signals(new_signals, node_idx);
                             ignore_consider_signals.insert(node_idx);
@@ -2166,7 +2197,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
     fn downstream_requirement_status(
         dag: &GraphType,
-        jobs: &mut [NodeInfo],
+        jobs: &[NodeInfo],
 
         node_idx: NodeIndex,
     ) -> Result<Required, PPGEvaluatorError> {
