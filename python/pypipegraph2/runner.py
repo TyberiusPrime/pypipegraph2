@@ -173,6 +173,7 @@ class Runner:
             self.next_job_number = self.job_graph.next_job_number
             self.core_lock = CoreLock(job_graph.cores)
             self.fail_counter = 0
+            self.jobs_done = 0
             self.run_id = (
                 run_id  # to allow jobgenerating jobs to run just once per graph.run()
             )
@@ -394,7 +395,6 @@ class Runner:
         self.watcher_pid = spawn_watcher()
         self._start_job_executing_threads()
 
-        self.jobs_done = 0
         try:
             self._interactive_start()
             while True:
@@ -697,21 +697,27 @@ class Runner:
                                             "Evaluator is not finished, reports no jobs ready to run, but no jobs currently running -> a bug in the state machine. No way forward, aborting graph executing (cleanly). Graph written to debug.txt "
                                         )
 
-                                        #from .pypipegraph2 import enable_logging_to_file
-                                        #enable_logging_to_file("rust_debug.log")
+                                        # from .pypipegraph2 import enable_logging_to_file
+                                        # enable_logging_to_file("rust_debug.log")
 
-                                        self.evaluator.debug_is_finished()  
+                                        self.evaluator.debug_is_finished()
                                         Path("debug.txt").write_text(
                                             self.evaluator.debug()
-                                        )  
-                                        #self.evaluator.reconsider_all_jobs() # if this helps' we're looking at a propagation failure. Somewhere.
-                                        if not self.evaluator.is_finished() and not self.evaluator.jobs_ready_to_run():
-                                            print("reconsidering all jobs did not lead to recovery, going down hard")
+                                        )
+                                        # self.evaluator.reconsider_all_jobs() # if this helps' we're looking at a propagation failure. Somewhere.
+                                        if (
+                                            not self.evaluator.is_finished()
+                                            and not self.evaluator.jobs_ready_to_run()
+                                        ):
+                                            print(
+                                                "reconsidering all jobs did not lead to recovery, going down hard (=die)"
+                                            )
                                             self.interactive._cmd_die(False)
                                         else:
-                                            log_error("Could recover by doing reconsider_all!")
+                                            log_error(
+                                                "Could recover by doing reconsider_all. Still going down hard (=die), this needs debugging!"
+                                            )
                                             self.interactive._cmd_die(False)
-
 
                             else:
                                 ljt(f"to run {rr}")
@@ -909,7 +915,7 @@ class Runner:
                                 if c > 1:
                                     self.jobs_all_cores_in_flight -= 1
 
-                            self.job_outcomes[job_id].run_time = job.run_time
+                                self.job_outcomes[job_id].run_time = job.run_time
                             self.check_for_new_jobs.set()
                         elif error:
                             print(error)
