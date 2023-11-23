@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "pypipegraph2"
 version = "3.0.5"
 description = "Advanced python 'what changed and what do we need to do' tracking"
-long-description = "README.md"
+# long-description = "README.md"
 authors = [
  {"name" = "Florian Finkernagel", "email" = "finkernagel@imt.uni-marburg.de"}
 ]
@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 
-[project.opetional-dependencies]
+[project.optional-dependencies]
 dev = [
 	"flake8",
 	"pytest",
