@@ -219,7 +219,6 @@ fn main() {
     println!("problem size: {}", problem_size);
     println!("skipping {}", skip);
 
-
     //let problem_size = 6;
 
     //
@@ -285,6 +284,8 @@ fn main() {
                         let part1_ok = Arc::new(Mutex::new(false));
                         let part1_ok_outer = part1_ok.clone();
                         let res = std::panic::catch_unwind(|| {
+
+                            //part1 is where the failing nodes are not in the graph?
                             let n2b = all_nodes.clone();
                             let m2b = all_edges.clone();
                             let f2b = all_fails.clone();
@@ -314,6 +315,7 @@ fn main() {
                                 }
                             }
                             *part1_ok.lock().unwrap() = true;
+                            //part2: now all nodes are in the graph
                             let n2b = all_nodes.clone();
                             let m2b = all_edges.clone();
                             t.setup_graph = Box::new(move |g| {
@@ -356,6 +358,7 @@ fn main() {
                                 let n2 = all_nodes.clone();
                                 let m2 = all_edges.clone();
                                 let f2 = all_fails.clone();
+                                //se we can print them.
                                 let t1 = TestGraphRunner::new(Box::new(move |g| {
                                 n2.apply(g, &f2);
                                 m2.apply(g, &f2);

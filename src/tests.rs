@@ -2467,7 +2467,7 @@ fn test_aborting_between_ephemerals_1() {
     // happend
     // so we have diverging history.
     // and we need a third job go the ephemeral to rebuild.
-    // but we should not need a third job, the fact taht N2b is invalidated by the (stored) N1 
+    // but we should not need a third job, the fact taht N2b is invalidated by the (stored) N1
     // output should already retrigger N1.
     // So We might Have Two Bugs: Not triggering N1 thouh N2b is invalidated
     // and then 'comparing with stored on "N1!!N2b" instead of "N2b"
@@ -2497,18 +2497,22 @@ fn test_aborting_between_ephemerals_1() {
     g.event_startup().unwrap();
     assert_eq!(g.query_ready_to_run(), set!["N1"]);
     g.event_now_running("N1").unwrap();
-    g.event_job_finished_success("N1", "1_changed".to_string()) .unwrap();
+    g.event_job_finished_success("N1", "1_changed".to_string())
+        .unwrap();
     assert_eq!(g.query_ready_to_run(), set!["N2a", "N2b", "N2c"]); // N3 needs all three.
     g.event_now_running("N2a").unwrap();
     g.event_now_running("N2b").unwrap();
     g.event_now_running("N2c").unwrap();
-    g.event_job_finished_success("N2a", "2a".to_string()) .unwrap();
-    g.event_job_finished_success("N2b", "2b".to_string()) .unwrap();
-    g.event_job_finished_success("N2c", "2c".to_string()) .unwrap();
+    g.event_job_finished_success("N2a", "2a".to_string())
+        .unwrap();
+    g.event_job_finished_success("N2b", "2b".to_string())
+        .unwrap();
+    g.event_job_finished_success("N2c", "2c".to_string())
+        .unwrap();
     assert_eq!(g.query_ready_to_run(), set!["N3"]);
     g.event_now_running("N3").unwrap();
-    g.event_job_finished_success("N3", "3".to_string()) .unwrap();
-                                                                   //
+    g.event_job_finished_success("N3", "3".to_string()).unwrap();
+    //
     assert!(g.query_ready_to_run().is_empty());
     assert!(g.is_finished());
 }
@@ -2555,11 +2559,11 @@ fn test_aborting_between_ephemerals_invalidation_triggers() {
         .unwrap();
     assert_eq!(g.query_ready_to_run(), set!["N2b"]);
     g.event_now_running("N2b").unwrap();
-    g.event_job_finished_success("N2b", "2b".to_string()).unwrap();
+    g.event_job_finished_success("N2b", "2b".to_string())
+        .unwrap();
 
     assert!(g.is_finished());
 }
-
 
 #[test]
 fn test_invalidation_case_20231120() {
@@ -2601,16 +2605,60 @@ fn test_invalidation_case_20231120() {
     warn!("start reading here");
     g.event_now_running("C1").unwrap();
     assert!(!g.is_finished());
-    g.event_job_finished_success("C1", "C1".to_string()).unwrap();
+    g.event_job_finished_success("C1", "C1".to_string())
+        .unwrap();
 
     assert_eq!(g.query_ready_to_run(), set!["B"]);
     g.event_now_running("B").unwrap();
     g.event_job_finished_success("B", "B".to_string()).unwrap();
 
     assert!(g.is_finished());
-
 }
 
+#[test]
+fn test_fail_panic_after_20231120_fix() {
+    //turned out to be downstream_requirement_status returning 'unknown' too eagerly.
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Always);
+        g.add_node("N3", JobKind::Output);
+
+        let edges = vec![("N1", "N0"), ("N2", "N0"), ("N3", "N1"), ("N3", "N2")];
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(a, b);
+            }
+        }
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    start_logging();
+    let g = ro.run(&[]).unwrap();
+}
+
+#[test]
+fn test_fail_panic_after_20231120_fix2() { //and another one.
+    //bet it's another early return in downstream_requirement_status.
+    //and indeed it was.
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Always);
+        g.add_node("N3", JobKind::Output);
+
+        let edges = vec![("N1", "N0"), ("N2", "N0"), ("N3", "N0"), ("N3", "N2")];
+        for (a, b) in edges {
+            if g.contains_node(a) && g.contains_node(b) {
+                g.depends_on(a, b);
+            }
+        }
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    let g = ro.run(&[]).unwrap();
+    start_logging();
+    let g = ro.run(&[]).unwrap();
+}
 /*
 #[test]
 fn test_multi_file_job_gaining_output() {

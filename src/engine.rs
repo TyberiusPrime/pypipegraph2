@@ -1559,13 +1559,20 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         Ok(())
     }
 
-    fn any_downstream_required(dag: &GraphType, jobs: &[NodeInfo], node_idx: NodeIndex) -> Result<bool, PPGEvaluatorError> {
+    fn any_downstream_required(
+        dag: &GraphType,
+        jobs: &[NodeInfo],
+        node_idx: NodeIndex,
+    ) -> Result<bool, PPGEvaluatorError> {
         let res = match Self::downstream_requirement_status(dag, jobs, node_idx)? {
             Required::Unknown => false,
             Required::Yes => true,
             Required::No => false,
         };
-        info!("any_downstream_required {}: -> {res}", jobs[node_idx].job_id);
+        info!(
+            "any_downstream_required {}: -> {res}",
+            jobs[node_idx].job_id
+        );
         Ok(res)
         /*
 
@@ -1698,7 +1705,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         best
     }
 
-    fn edge_invalidated( // that's a question
+    fn edge_invalidated(
+        // that's a question
         dag: &mut GraphType,
         strategy: &dyn PPGEvaluatorStrategy,
         jobs: &[NodeInfo],
@@ -2202,6 +2210,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         node_idx: NodeIndex,
     ) -> Result<Required, PPGEvaluatorError> {
         let downstreams = dag.neighbors_directed(node_idx, Direction::Outgoing);
+        let mut had_unknown = false;
         for downstream_idx in downstreams {
             error!(
                 "downstream_requirement_status {}->{}: {:?} {:?}",
@@ -2232,7 +2241,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
                     JobState::Output(JobStateOutput::NotReady(ValidationStatus::Unknown)) => {
                         error!("\tRequired::Unknown");
-                        return Ok(Required::Unknown);
+                        had_unknown = true;
+                        //return Ok(Required::Unknown);
                     }
                     JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) => {}
                     JobState::Output(JobStateOutput::FinishedSkipped)
@@ -2243,7 +2253,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     }
                     JobState::Ephemeral(JobStateEphemeral::NotReady(ValidationStatus::Unknown)) => {
                         error!("\tRequired::Unknown");
-                        return Ok(Required::Unknown);
+                        //return Ok(Required::Unknown);
+                        had_unknown = true;
                     }
                     _ => {
                         return Err(PPGEvaluatorError::InternalError(format!(
@@ -2254,7 +2265,11 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 },
             }
         }
-        Ok(Required::No)
+        if had_unknown {
+            Ok(Required::Unknown)
+        } else {
+            Ok(Required::No)
+        }
     }
 
     fn consider_downstreams(
