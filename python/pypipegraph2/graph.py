@@ -76,7 +76,6 @@ class PyPipeGraph:
         prevent_absolute_paths=True,
         report_done_filter=1,
     ):
-
         if cores is ALL_CORES:
             self.cores = CPUs()
         else:
@@ -124,6 +123,8 @@ class PyPipeGraph:
         self.func_cache = {}
         self.dir_absolute = Path(".").absolute()
         self._jobs_do_dump_subgraph_debug = False
+        self._jobs_to_prune_unrelated = False
+        self._jobs_to_prune_but = False
 
     def run(
         self,
@@ -216,6 +217,12 @@ class PyPipeGraph:
         self.run_dir.mkdir(exist_ok=True, parents=True)
         self.do_raise = []
         self._restart_afterwards = False
+
+        # we want logs, so we do tihs 'late'.
+        if self._jobs_to_prune_unrelated:
+            self._prune_unrelated()
+        if self._jobs_to_prune_but:
+            self._prune_but()
         ok = False
 
         try:
@@ -515,7 +522,6 @@ class PyPipeGraph:
     @staticmethod
     def _load_old_history(path):
         with gzip.GzipFile(Path(path)) as of:
-
             old = {}
             try:
                 while True:
@@ -720,3 +726,41 @@ class PyPipeGraph:
         # j1 = self.jobs[jall[0]]
         # j1.dump_subgraph_for_debug(jall)
         self._jobs_do_dump_subgraph_debug = jall
+
+    def prune_all_unrelated_to(self, job_ids):
+        """Remove all jobs that are not related to the given jobs.
+        This takes effect *after* the cleanup jobs
+        and so on have been assembled (ie. when run is called)
+
+        """
+        self._jobs_to_prune_unrelated = job_ids
+
+    def _prune_unrelated(self):
+        keep = []
+        # graph_undirected = self.job_dag.to_undirected()
+        # for job_id in self._jobs_to_prune_unrelated:
+        #     keep.extend(networkx.node_connected_component(graph_undirected, job_id))
+        for job_id in self._jobs_to_prune_unrelated:
+            keep.extend(networkx.ancestors(self.job_dag, job_id))
+            keep.extend(networkx.descendants(self.job_dag, job_id))
+
+        keep = set(keep)
+        log_info(f"keeping {len(keep)} jobs")
+        for k in keep:
+            log_info(f"keeping {k}")
+        if len(keep) == len(self.jobs):
+            log_warning("pruning all unrelated jobs, but *everything's connected*")
+        to_remove = set(self.jobs.keys()) - keep
+        for k in to_remove:
+            log_info(f"pruning unrelated job {k}")
+            self.jobs[k].prune()
+
+    def prune_all_but(self, job_ids):
+        self._jobs_to_prune_but = job_ids
+
+    def _prune_but(self):
+        """prune after _resolve_dependency_callback"""
+        keep = set(self._jobs_to_prune_but)
+        for j in self.jobs:
+            if not j in keep:
+                self.jobs[j].prune()

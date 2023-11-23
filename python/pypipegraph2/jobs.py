@@ -566,7 +566,7 @@ def dummy_fg(of):
             lines += edges
             lines += ["", "ppg.run()", "ppg.run"]
 
-            op.write("\n".join(["        "] + (ll for ll in lines)))
+            op.write("\n".join(["        "] + [ll for ll in lines]))
 
 
 class MultiFileGeneratingJob(Job):
