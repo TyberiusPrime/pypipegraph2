@@ -159,6 +159,8 @@ def shorten_job_id(job_id):
 def pretty_log_errors(func):
     """capture exceptions (on a function outside of ppg)
     and format it with our fancy local logging exception logger
+
+    This is a decorator!
     """
 
     def inner(*args, **kwargs):
