@@ -573,8 +573,8 @@ class MultiFileGeneratingJob(Job):
     eval_job_kind = "Output"
 
     def __new__(cls, files, *args, **kwargs):
-        files = cls._validate_files_argument(files)[0]
-        return Job.__new__(cls, [str(x) for x in files])
+        valid_files = cls._validate_files_argument(files)[0]
+        return Job.__new__(cls, [str(x) for x in valid_files])
 
     def __init__(
         self,
