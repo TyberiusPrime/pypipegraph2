@@ -90,7 +90,7 @@ def _dedup_job(cls, job_id):
                 pass  #
             else:
                 raise exceptions.JobRedefinitionError(
-                    f"Redefining job {job_id} with different type - prohibited by RunMode. Was {type(j)}, wants to be {cls}"
+                    f"Redefining job {job_id} with different type - prohibited by RunMode. Was {type(j)}, wants to be {cls}. If the job ids make no sense, check for symlinks"
                 )
         return global_pipegraph.jobs[job_id]
     else:
