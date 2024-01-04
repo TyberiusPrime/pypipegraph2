@@ -169,7 +169,7 @@ def pretty_log_errors(func):
 
     def inner(*args, **kwargs):
         try:
-            func(*args, **kwargs)
+            return func(*args, **kwargs)
         except Exception as e:
             exception_type, exception_value, tb = sys.exc_info()
             captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
