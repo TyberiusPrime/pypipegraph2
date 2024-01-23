@@ -668,7 +668,7 @@ class Runner:
 
                             for cleanup_job_id in cleanups:
                                 try:
-                                    log_error(f"Cleanup for {cleanup_job_id}")
+                                    log_info(f"Cleanup for {cleanup_job_id}")
                                     self.jobs[cleanup_job_id].cleanup()
                                 except Exception as e:
                                     log_error(f"Cleanup had an exception {repr(e)}")
