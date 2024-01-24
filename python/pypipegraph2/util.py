@@ -177,3 +177,19 @@ def pretty_log_errors(func):
             raise
 
     return inner
+
+
+def wrap_for_function_invariant(function, *args, **kwargs):
+    """When you need to pass a function + parameters which ends up in a FunctionInvariant.
+    Think lambda: some_func(filename).
+
+    This marks it so that the FunctionInvariant tracks 'somefunc',
+    not the lambda."""
+    from .jobs import _mark_function_wrapped
+
+    def wrapper(function=function, args=args, kwargs=kwargs):
+        return function(*args, **kwargs)
+
+    _mark_function_wrapped(wrapper, function, "wrap_for_function_invariant")
+
+    return wrapper

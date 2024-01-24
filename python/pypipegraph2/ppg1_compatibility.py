@@ -243,7 +243,7 @@ class Job:
 
 
 job = Job()
-job.function_to_str = ppg2.FunctionInvariant.function_to_str
+job.function_to_str = ppg2._FunctionInvariant.function_to_str
 
 
 class FakeRC:
@@ -389,7 +389,7 @@ class FileInvariant(PPG1AdaptorBase, ppg2.FileInvariant):
     pass
 
 
-class FunctionInvariant(PPG1AdaptorBase, ppg2.FunctionInvariant):
+class FunctionInvariant(PPG1AdaptorBase, ppg2._FunctionInvariant):
     pass
 
 

@@ -124,3 +124,37 @@ class TestUtils:
         assert ppg.inside_ppg()
         ppg.global_pipegraph = None
         assert not ppg.inside_ppg()
+
+    def test_wrap_for_function_invariant(self):
+        from pathlib import Path
+
+        ppg.new()
+
+        def inner(x):
+            return 5 + x
+
+        func = ppg.util.wrap_for_function_invariant(inner, 1)
+        j1 = ppg.FunctionInvariant("A", func)
+        j2 = ppg.FileGeneratingJob(
+            "BB", lambda of, func=func: of.write_text(str(func()))
+        )
+        j2.depends_on(j1)
+        ppg.run()
+
+        assert Path("BB").read_text() == "6"
+
+        def inner(x):
+            return 6 + x
+
+        ppg.new(log_level=6)
+        func1 = func
+        func = ppg.util.wrap_for_function_invariant(inner, 1)
+        assert func1 is not func
+        assert func1.wrapped_function != func.wrapped_function
+        j1 = ppg.FunctionInvariant("A", func)
+        j2 = ppg.FileGeneratingJob(
+            "BB", lambda of, func=func: of.write_text(str(func()))
+        )
+        j2.depends_on(j1)
+        ppg.run()
+        assert Path("BB").read_text() == "7"

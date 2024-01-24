@@ -263,7 +263,7 @@ class ConsoleInteractive:
         job.kill_if_running()
 
     def _cmd_debug(self, args):
-        """Write the debug status from teh evaluator to debug.txt"""
+        """Write the debug status from the evaluator to debug.txt"""
         from pathlib import Path
 
         # import pypipegraph2

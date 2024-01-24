@@ -1450,10 +1450,10 @@ class TestPypipegraph2:
         f2 = a.depends_on_func("inner", inner)
         f3 = a.depends_on_func(inner)
         f4 = a.depends_on_func(open)  # built in
-        assert isinstance(f1.invariant, ppg.FunctionInvariant)
-        assert isinstance(f2.invariant, ppg.FunctionInvariant)
-        assert isinstance(f3.invariant, ppg.FunctionInvariant)
-        assert isinstance(f4.invariant, ppg.FunctionInvariant)
+        assert isinstance(f1.invariant, ppg._FunctionInvariant)
+        assert isinstance(f2.invariant, ppg._FunctionInvariant)
+        assert isinstance(f3.invariant, ppg._FunctionInvariant)
+        assert isinstance(f4.invariant, ppg._FunctionInvariant)
         assert f1.self is a
         assert f2.self is a
         assert f3.self is a

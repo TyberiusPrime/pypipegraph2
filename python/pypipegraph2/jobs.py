@@ -344,7 +344,7 @@ class Job:
         if isinstance(function, str):
             function, name = name, function
         if not name:
-            name = FunctionInvariant.func_to_name(function)
+            name = _FunctionInvariant.func_to_name(function)
 
         upstream = FunctionInvariant(function, self.job_id + "_" + name)
         self.depends_on(upstream)
@@ -1165,17 +1165,17 @@ class _FileInvariantMixin:
             return hashers.hash_file(file)
 
 
-class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
+class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     def __new__(cls, function, name=None):
         name, function = cls._parse_args(function, name)
         return super().__new__(cls, [name])
 
     @classmethod
     def _parse_args(cls, function, name):
+        # duplicated from FunctionInvariant for the compatibility layer
         if isinstance(function, (str, Path)):
             name, function = function, name
-
-        name = "FI" + (str(name) if name else FunctionInvariant.func_to_name(function))
+        name = "FI" + (str(name) if name else _FunctionInvariant.func_to_name(function))
         return name, function
 
     def __init__(
@@ -1621,8 +1621,11 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
     def verify_arguments(self, job_id, function):
         if not callable(function) and function is not None:
-            raise TypeError("%s function was not a callable (or None)" % job_id)
-        if hasattr(self, "function") and not FunctionInvariant.functions_equal(
+            raise TypeError(
+                "%s function was not a callable (or None), function: %s"
+                % (job_id, repr(function))
+            )
+        if hasattr(self, "function") and not _FunctionInvariant.functions_equal(
             function, self.function
         ):
             from . import global_pipegraph
@@ -1632,9 +1635,9 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                     "FunctionInvariant %s created twice with different functions: \n%s\n%s\n%s"
                     % (
                         job_id,
-                        FunctionInvariant.function_to_str(function),
-                        FunctionInvariant.function_to_str(self.function),
-                        FunctionInvariant.debug_function_differences(
+                        _FunctionInvariant.function_to_str(function),
+                        _FunctionInvariant.function_to_str(self.function),
+                        _FunctionInvariant.debug_function_differences(
                             self.function, function
                         ),
                     )
@@ -1683,6 +1686,29 @@ class FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                 self.job_id,
                 id(self),
             )
+
+
+def FunctionInvariant(function, name=None):
+    if isinstance(function, (str, Path)):
+        name, function = function, name
+    if hasattr(function, "wrapped_function"):
+        f1 = _FunctionInvariant(function, name)
+        f2 = _FunctionInvariant(function.wrapped_function, name + "_inner")
+        return [f1, f2]
+    else:
+        return _FunctionInvariant(function, name)
+
+
+FunctionInvariant.compare_hashes = _FunctionInvariant.compare_hashes
+FunctionInvariant.debug_function_differences = (
+    _FunctionInvariant.debug_function_differences
+)
+FunctionInvariant.functions_equal = _FunctionInvariant.functions_equal
+FunctionInvariant.function_to_str = _FunctionInvariant.function_to_str
+FunctionInvariant.get_cython_filename_and_line_no = (
+    _FunctionInvariant.get_cython_filename_and_line_no
+)
+FunctionInvariant.get_cython_source = _FunctionInvariant.get_cython_source
 
 
 class FileInvariant(_InvariantMixin, Job, _FileInvariantMixin):
