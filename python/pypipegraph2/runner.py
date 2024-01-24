@@ -181,7 +181,9 @@ class Runner:
                 self.job_graph.job_dag
             ):  # pragma: no cover - defensive
                 error_fn = self.job_graph.log_dir / "debug_edges_with_cycles.txt"
-                networkx.write_edgelist(self.job_graph.job_dag, error_fn)
+                networkx.write_edgelist(
+                    self.job_graph.job_dag, error_fn, delimiter="\t"
+                )
                 cycles = list(networkx.simple_cycles(self.job_graph.job_dag))
                 raise exceptions.NotADag(
                     f"Not a directed *acyclic* graph. See {error_fn}. Cycles between {cycles}"
@@ -225,7 +227,7 @@ class Runner:
                 self.dag
             ):  # pragma: no cover - defensive
                 error_fn = self.job_graph.log_dir / "debug_edges_with_cycles.txt"
-                networkx.write_edgelist(self.dag, error_fn)
+                networkx.write_edgelist(self.dag, error_fn, delimiter="\t")
                 cycles = list(networkx.simple_cycles(self.dag))
                 raise exceptions.NotADag(
                     f"Not a directed *acyclic* graph after modification. See {error_fn}. Cycles between {cycles}"
