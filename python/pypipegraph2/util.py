@@ -46,7 +46,11 @@ def job_or_filename(job_or_filename, invariant_class=None):
     """Take a filename, or a job. Return Path(filename), dependency-for-that-file
     ie. either the job, or a invariant_class (default: FileInvariant)"""
     from .jobs import Job, FileInvariant
+    from . import global_pipegraph
     from pathlib import Path
+
+    if global_pipegraph is None:
+        return Path(job_or_filename), []
 
     if invariant_class is None:  # pragma: no cover
         invariant_class = FileInvariant
