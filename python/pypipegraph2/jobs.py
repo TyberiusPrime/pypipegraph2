@@ -1980,6 +1980,7 @@ class AttributeLoadingJob(
         self.object = object
         self.attribute_name = attribute_name
         self.callback = data_function
+        self.do_cleanup = True
         super().__init__([job_id], resources=resources)
 
     def cleanup(self):
