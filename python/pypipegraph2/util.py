@@ -47,6 +47,10 @@ def job_or_filename(job_or_filename, invariant_class=None):
     ie. either the job, or a invariant_class (default: FileInvariant)"""
     from .jobs import Job, FileInvariant
     from pathlib import Path
+    from . import global_pipegraph
+
+    if global_pipegraph is None:
+        return Path(job_or_filename), []
 
     if invariant_class is None:  # pragma: no cover
         invariant_class = FileInvariant
@@ -55,8 +59,13 @@ def job_or_filename(job_or_filename, invariant_class=None):
         filename = job_or_filename.files[0]
         deps = [job_or_filename]
     elif job_or_filename is not None:
-        filename = Path(job_or_filename)
-        deps = [invariant_class(filename)]
+        try:
+           global_pipegraph.find_job_from_file(str(job_or_filename))
+           deps = [str(job_or_filename)]
+           filename = job_or_filename
+        except KeyError:
+            filename = Path(job_or_filename)
+            deps = [invariant_class(filename)]
     else:
         filename = None
         deps = []
