@@ -297,7 +297,7 @@ def test_job_or_filename(ppg2_per_test):
 
     b2, dep_b2 = ppg.util.job_or_filename("out/B")
     assert b2 == ("out/B")
-    assert dep_b2 == ["out/B"] # still not a job, but it's findable downstream
+    assert dep_b2 == ["out/B"]  # still not a job, but it's findable downstream
 
 
 @pytest.mark.xfail()  # todo

@@ -48,10 +48,6 @@ def job_or_filename(job_or_filename, invariant_class=None):
     from .jobs import Job, FileInvariant
     from . import global_pipegraph
     from pathlib import Path
-    from . import global_pipegraph
-
-    if global_pipegraph is None:
-        return Path(job_or_filename), []
 
     if global_pipegraph is None:
         return Path(job_or_filename), []
@@ -64,9 +60,9 @@ def job_or_filename(job_or_filename, invariant_class=None):
         deps = [job_or_filename]
     elif job_or_filename is not None:
         try:
-           global_pipegraph.find_job_from_file(str(job_or_filename))
-           deps = [str(job_or_filename)]
-           filename = job_or_filename
+            global_pipegraph.find_job_from_file(str(job_or_filename))
+            deps = [str(job_or_filename)]
+            filename = job_or_filename
         except KeyError:
             filename = Path(job_or_filename)
             deps = [invariant_class(filename)]
