@@ -266,8 +266,14 @@ class Job:
 
         You may pass in one ore more Jobs, a list of such,
         ore a callable that will return such. The callable will
-        be called when the ppg is run the first time
-        (todo: when is the later useful)
+        be called when the ppg is run the first time.
+        (This is usefull if you need to finalize e.g. a tree structure
+         and design the actual dependencies on that tree structure).
+
+        This method will also take a filename, in which case we'll look
+        up the job producing the filename.
+        Bonus: Dependency is the nonly on the contens of that file,
+        not on all files of the (MultiFileGenerating) Job.
         """
 
         from . import global_pipegraph
