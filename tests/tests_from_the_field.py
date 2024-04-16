@@ -49,7 +49,7 @@ class TestsFromTheField:
         edges.append(("J2", "J76"))
         edges.append(("J76", "J3"))
 
-        for (a, b) in edges:
+        for a, b in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
                 ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
             else:
@@ -1397,7 +1397,7 @@ class TestsFromTheField:
         edges.append(("76", "107"))
         edges.append(("76", "108"))
         edges.append(("2", "109"))
-        for (a, b) in edges:
+        for a, b in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
                 ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
 
@@ -1459,7 +1459,7 @@ class TestsFromTheField:
         edges.append(("76", "107"))
         edges.append(("76", "108"))
         edges.append(("2", "109"))
-        for (a, b) in edges:
+        for a, b in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
                 ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
 
@@ -1495,7 +1495,7 @@ class TestsFromTheField:
             ]
 
             ok_edges = []
-            for (a, b) in edges:
+            for a, b in edges:
                 if a in jobs_by_no and b in jobs_by_no:
                     jobs_by_no[a].depends_on(jobs_by_no[b])
                     ok_edges.append((a, b))
@@ -1577,7 +1577,7 @@ class TestsFromTheField:
         edges.append(("67", "48"))
         edges.append(("61", "3"))
 
-        for (a, b) in edges:
+        for a, b in edges:
             if a in ppg.global_pipegraph.jobs and b in ppg.global_pipegraph.jobs:
                 ppg.global_pipegraph.jobs[a].depends_on(ppg.global_pipegraph.jobs[b])
 
@@ -1655,7 +1655,7 @@ class TestsFromTheField:
         ea(("1", "2"))
         ea(("8", "11"))
         ea(("8", "2"))
-        for (a, b) in edges:
+        for a, b in edges:
             if a in cjobs_by_no and b in cjobs_by_no:
                 cjobs_by_no[a].depends_on(cjobs_by_no[b])
                 # print(f"ea(('{a}', '{b}'))")
@@ -1671,7 +1671,7 @@ class TestsFromTheField:
 
         # make this one fail.
         job_11 = ppg.FileGeneratingJob("11", dummy_fg_raising, depend_on_function=True)
-        for (a, b) in edges:
+        for a, b in edges:
             if a in cjobs_by_no and b in cjobs_by_no:
                 cjobs_by_no[a].depends_on(cjobs_by_no[b])
 
@@ -1692,9 +1692,26 @@ class TestsFromTheField:
 
         # and boom, job was marked done & skipped, but we now inform it it's upstream failed.
 
+    def test_depends_on_mfg_by_str_job_id_does_not_work(self):
+        """Verify that you can't depend_on(job_id) off a multi file generating job,
+        but you can depend on the individual files.
+
+        """
+        a = ppg.FileGeneratingJob("a", lambda of: of.write_text("a"))
+
+        def do_b(ofs):
+            for fn in ofs:
+                fn.write_text(fn.name)
+
+        b = ppg.MultiFileGeneratingJob(["b", "c"], do_b)
+        # aassert ppg.global_pipegraph.find_job_from_file(b.job_id) is b
+        with pytest.raises(KeyError):
+            a.depends_on(b.job_id)
+        assert ppg.global_pipegraph.find_job_from_file("b") is b
+        assert ppg.global_pipegraph.find_job_from_file("c") is b
+
 
 def gen_20211221(func):
-
     global do_fail
 
     def dummy_fg_fail(of):
@@ -1726,7 +1743,7 @@ def gen_20211221(func):
     ea(("1096", "650"))
     ea(("1096", "661"))
     ea(("650", "651"))
-    for (a, b) in edges:
+    for a, b in edges:
         if a in cjobs_by_no and b in cjobs_by_no:
             cjobs_by_no[a].depends_on(cjobs_by_no[b])
             # print(f"ea(('{a}', '{b}'))")
