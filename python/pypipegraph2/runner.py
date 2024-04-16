@@ -327,7 +327,9 @@ class Runner:
                 dag.nodes[node]["shape"] = self.jobs[node].__class__.__name__
             networkx.readwrite.graphml.write_graphml(
                 dag,
-                self.job_graph.log_dir / "graph_pre_mod.graphml",
+                self.job_graph.log_file.with_name(
+                    self.job_graph.log_file.stem + "pre_prune.graphml"
+                ),
                 named_key_ids=True,
             )
 
