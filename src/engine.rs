@@ -655,6 +655,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
         true
     }
+    ///
+    /// Retrieve the 'new history' after a ppg run
     pub fn new_history(&self) -> Result<HashMap<String, String>, PPGEvaluatorError> {
         match self.already_started {
             StartStatus::Finished => {}
@@ -664,10 +666,11 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             }
         }
         //our history 'keys'
-        //(we can't do tuple indices because of json dumping)
+        //(we can't do tuple indices because of json history-save-format.)
         //no !!! -> job output.
         //ends with !!! -> the list of named inputs
         //x!!!y -> input x for job y.
+        
         //todo: consider splitting into multiple functions?
         let mut multi_output_job_filtered_outputs = HashSet::new();
         for j in self.jobs.iter() {
@@ -734,6 +737,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
             //step 2: record the actual output of this job
             // (are we using this anywhere?)
+            // (todo: I think there's a potential to reuse it for ephemeral jobs that are needed
+            // again, because their downstream failed)
             // We're not for checking-the-ephemeral-invariant-upholding,
             // for that we use the ones stored on the downstream jobs.
 
