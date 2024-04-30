@@ -1710,8 +1710,6 @@ class TestsFromTheField:
         assert ppg.global_pipegraph.find_job_from_file("b") is b
         assert ppg.global_pipegraph.find_job_from_file("c") is b
 
-    
-
 
 def gen_20211221(func):
     global do_fail

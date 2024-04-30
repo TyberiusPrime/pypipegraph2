@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "pypipegraph2"
-version = "3.0.6"
+version = "3.0.7"
 dependencies = [
  "backtrace",
  "colored",
