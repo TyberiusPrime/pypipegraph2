@@ -337,3 +337,80 @@ class TestJobGeneratingJob:
     #     c = ppg.JobGeneratingJob('c', jj('c'))
     #     d = ppg.JobGeneratingJob('d', jj('d'))
     #     ppg.run()
+
+    def test_job_gen_leading_to_missing_history(self):
+        """test_job_gen_leading_to_missing_history
+
+        A case where our previous 'trash history when MFG is renamed'
+        functionality lead to throwing away of history.
+        """
+
+        # I think I need a job that's new, so the MFG get's pulled back in
+        # and I need a job that's was already done in the first round and is pruned
+        # so that the 2nd's history is first removed by the 'rename paranoia code'
+        # and then not restored, because it did not run.
+        # also a regular mFG should trigger in.
+
+        def do_a(ofs, prefix=None):
+            for of in ofs:
+                of.write_text("a")
+
+        def do_f(of):
+            of.write_text("f")
+
+        a = ppg.MultiFileGeneratingJob(["a", "a1"], do_a)
+        b = ppg.FileGeneratingJob("b", do_f)
+        b.depends_on(a)
+
+        def gen():
+            c = ppg.FileGeneratingJob("c", lambda of: of.write_text("c"))
+            c.depends_on(a)  # pull it back in.
+
+        ppg.JobGeneratingJob("gen", gen)
+
+        ppg.run()
+
+        history = ppg.global_pipegraph._load_history()
+        import pprint
+
+        pprint.pprint(sorted(history.keys()))
+        key_of_interest = a.job_id + "!!!" + "b"  # that's the one that goes missing
+        assert key_of_interest in history
+        key_of_interest = a.job_id + "!!!" + "c"
+        assert key_of_interest in history
+
+    def test_job_gen_leading_to_missing_history_part2(self):
+        """test_job_gen_leading_to_missing_history_part2(
+
+        A case where our previous 'trash history when MFG is renamed'
+        functionality lead to throwing away of history.
+
+        This does the same, but verifies we keep the history when the gen job is not using the MFG
+        """
+
+        # similar
+
+        def do_a(ofs, prefix=None):
+            for of in ofs:
+                of.write_text("a")
+
+        def do_f(of):
+            of.write_text("f")
+
+        a = ppg.MultiFileGeneratingJob(["a", "a1"], do_a)
+        b = ppg.FileGeneratingJob("b", do_f)
+        b.depends_on(a)
+
+        def gen():
+            c = ppg.FileGeneratingJob("c", lambda of: of.write_text("c"))
+
+        ppg.JobGeneratingJob("gen", gen)
+
+        ppg.run()
+
+        history = ppg.global_pipegraph._load_history()
+        import pprint
+
+        pprint.pprint(sorted(history.keys()))
+        key_of_interest = a.job_id + "!!!" + "b"  # that's the one that goes missing
+        assert key_of_interest in history

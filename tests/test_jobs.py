@@ -1891,7 +1891,7 @@ class TestTempFileGeneratingJob:
         ppg.run()
         assert Path("D").read_text() == "D"
         assert Path("C").read_text() == "C"
-        assert Path("a").read_text() == "3"
+        assert Path("a").read_text() == "2"
         assert Path("c").read_text() == "1"
 
         # take one out & put one in *at the same time*
@@ -1904,7 +1904,7 @@ class TestTempFileGeneratingJob:
         ppg.run()
         assert Path("D").read_text() == "D"
         assert Path("C").read_text() == "C"
-        assert Path("a").read_text() == "4"
+        assert Path("a").read_text() == "3"
         assert Path("c").read_text() == "1"
 
         # now turn it into a FG
@@ -1917,7 +1917,7 @@ class TestTempFileGeneratingJob:
         ppg.run()
         assert Path("D").read_text() == "D"
         assert Path("C").read_text() == "C"
-        assert Path("a").read_text() == "5"
+        assert Path("a").read_text() == "4"
         assert Path("c").read_text() == "1"
 
         # now turn it into back into a MFG
@@ -1930,7 +1930,7 @@ class TestTempFileGeneratingJob:
         ppg.run()
         assert Path("D").read_text() == "D"
         assert Path("C").read_text() == "C"
-        assert Path("a").read_text() == "6"
+        assert Path("a").read_text() == "4"
         assert Path("c").read_text() == "1"
 
 

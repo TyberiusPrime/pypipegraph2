@@ -670,18 +670,34 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         //no !!! -> job output.
         //ends with !!! -> the list of named inputs
         //x!!!y -> input x for job y.
-        
+
         //todo: consider splitting into multiple functions?
-        let mut multi_output_job_filtered_outputs = HashSet::new();
+
+        // when a multi-file-generating-job get's renamed, we need to remove the old history.
+        // but only then.
+        let mut multi_parts_to_jobs = HashMap::new();
         for j in self.jobs.iter() {
             if j.job_id.contains(":::") {
-                for output_name in j.job_id.split(":::") {
-                    multi_output_job_filtered_outputs.insert(output_name.to_string());
+                for part in j.job_id.split(":::") {
+                    multi_parts_to_jobs.insert(part, j.job_id.clone());
                 }
+            } else {
+                multi_parts_to_jobs.insert(&j.job_id, j.job_id.clone());
             }
         }
-        // let failed: HashSet<String> = self.query_failed();
-        // dbg!(&failed);
+
+        let filter_if_renamed = |job_id: &str| -> bool {
+            if job_id.contains(":::") {
+                let last_time = multi_parts_to_jobs.get(job_id);
+                match last_time {
+                    Some(last_time) => last_time == job_id,
+                    None => true, //not present.
+                }
+            } else {
+                return true;
+            }
+        };
+
         let mut out = self.history.clone();
         let mut out: HashMap<_, _> = out
             .drain()
@@ -696,38 +712,20 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 self.dag.edge_weight(*node_idx_a, *node_idx_b).is_some()
                             }
                             _ => {
-                                for output_name in job_id_a.split(":::") {
-                                    if multi_output_job_filtered_outputs.contains(output_name) {
-                                        return false;
-                                    }
-                                }
-
-                                true
+                                //if it's from a multi-output job that was producing different
+                                //stuff before,
+                                filter_if_renamed(job_id_a)
                             }
                         }
                     } else {
                         // a node uplink entry.
-                        for output_name in job_id_a.split(":::") {
-                            if multi_output_job_filtered_outputs.contains(output_name) {
-                                return false;
-                            }
-                        }
-
-                        true
+                        filter_if_renamed(job_id_a)
                     }
                 } else {
                     // when MultiFileGeneratingJobs
                     // get renamed, we need to make sure we don't keep
                     // old history around
-                    for output_name in k.split(":::") {
-                        if multi_output_job_filtered_outputs.contains(output_name) {
-                            return false;
-                        }
-                    }
-                    /* if failed.contains(k) { that's  being taken care of down in the next loop.
-                        return false;
-                    }; */
-                    true // a node entry
+                    filter_if_renamed(k)
                 }
             })
             .collect();
