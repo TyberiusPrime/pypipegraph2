@@ -130,3 +130,8 @@ Open stuff
 
 
    - stop when having jobGeneratingJobs not working
+
+
+- recheck everything above
+   - sort interactive jobs by 'status' (running, waiting)
+   - much better default log output... tell me what jobs spawned & finished
