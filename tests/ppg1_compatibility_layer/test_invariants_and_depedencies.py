@@ -47,7 +47,7 @@ class Undepickable(object):
 
 
 @pytest.mark.usefixtures("ppg1_compatibility_test")
-class TestInvariant:
+class TestInvariantPPG1:
     def sentinel_count(self):
         sentinel = "out/sentinel"
         try:

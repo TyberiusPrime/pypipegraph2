@@ -54,6 +54,53 @@ class ALL_CORES:
     pass
 
 
+class DirConfig:
+    def __init__(
+        self,
+        root: Union[Path, str] = ".ppg",
+        log_dir: Union[Path, str, None, bool] = False,
+        error_dir: Union[Path, str, None, bool] = False,
+        history_dir: Union[Path, str, None, bool] = False,
+        run_dir: Union[
+            Path, str, None, bool
+        ] = False,  # used by FileGeneratingJobs to e.g. recorde stdout
+        cache_dir="cache",
+    ):
+        self.root = Path(root)
+        if log_dir is False:
+            self.log_dir = self.root / "logs"
+        else:
+            self.log_dir = Path(log_dir) if log_dir is not None else None
+        if error_dir is False:
+            self.error_dir = self.root / "errors"
+        else:
+            self.error_dir = Path(error_dir) if error_dir is not None else None
+        if history_dir is False:
+            self.history_dir = self.root / "history"
+        else:
+            self.history_dir = Path(history_dir)
+        if run_dir is False:
+            self.run_dir = self.root / "run"
+        else:
+            self.run_dir = Path(run_dir)
+        if cache_dir is False:
+            self.cache_dir = self.root / "cache"
+        else:
+            self.cache_dir = Path(cache_dir) if cache_dir is not None else None
+
+    def mkdirs(self):
+        for dir in (
+            self.root,
+            self.log_dir,
+            self.error_dir,
+            self.history_dir,
+            self.run_dir,
+            self.cache_dir,
+        ):
+            if dir is not None:
+                dir.mkdir(exist_ok=True, parents=True)
+
+
 class PyPipeGraph:
     history_dir: Optional[Path]
     log_dir: Optional[Path]
@@ -63,11 +110,7 @@ class PyPipeGraph:
     def __init__(
         self,
         cores: Union[int, ALL_CORES],
-        log_dir: Optional[Path],
-        error_dir: Optional[Path],
-        history_dir: Path,
-        run_dir: Path,
-        cache_dir: Path,
+        dir_config: Optional[Union[DirConfig, str, Path]],
         log_level: int,
         run_mode: RunMode,
         paths: Optional[Dict[str, Union[Path, str]]] = None,
@@ -79,17 +122,15 @@ class PyPipeGraph:
         if cores is ALL_CORES:
             self.cores = CPUs()
         else:
+            if isinstance(cores, (DirConfig, str, Path)):  # pragma: no cover
+                raise ValueError(
+                    "You tried to pass dir_config by positin, but the first argument is cores"
+                )
             self.cores = int(cores)
-        if log_dir:
-            self.log_dir = Path(log_dir)
-        else:
-            self.log_dir = None
-        if error_dir:
-            self.error_dir = error_dir
-        else:
-            self.error_dir = None
-        self.history_dir = Path(history_dir)
-        self.run_dir = Path(run_dir)
+        if isinstance(dir_config, (str, Path)):
+            dir_config = DirConfig(dir_config)
+        self.dir_config = dir_config
+
         self.log_level = log_level
         self.log_retention = log_retention
         # self.paths = {k: Path(v) for (k, v) in paths} if paths else {}
@@ -107,12 +148,7 @@ class PyPipeGraph:
         self.run_id = 0
         self._test_failing_outside_of_job = False
         self.allow_short_filenames = allow_short_filenames
-        if cache_dir:
-            self.cache_dir = Path(cache_dir)
-            self.cache_dir.mkdir(exist_ok=True, parents=True)
-        else:
-            self.cache_dir = None
-        self.cache_folder = self.cache_dir  # todo: change all occurances?
+        self.dir_config.mkdirs()
         self.running = False
         self.prevent_absolute_paths = prevent_absolute_paths
         self._debug_allow_ctrl_c = False  # see examples/abort_when_stalled.py
@@ -170,16 +206,17 @@ class PyPipeGraph:
         start_time = time.time()
         self._resolve_dependency_callbacks()
         self.running = True  # must happen after dependency callbacks
-        if self.error_dir:
+        if self.dir_config.error_dir:
             self._cleanup_errors()
-            (self.error_dir / self.time_str).mkdir(exist_ok=True, parents=True)
+            (self.dir_config.error_dir / self.time_str).mkdir(
+                exist_ok=True, parents=True
+            )
             self._link_errors()
         log_id = None
-        if self.log_dir:
+        if self.dir_config.log_dir:
             self._cleanup_logs()
-            self.log_dir.mkdir(exist_ok=True, parents=True)
             fn = Path(sys.argv[0]).name
-            self.log_file = self.log_dir / f"{fn}-{self.time_str}.log"
+            self.log_file = self.dir_config.log_dir / f"{fn}-{self.time_str}.log"
             logger.remove()  # no default logging
             logger.add(
                 open(self.log_file, "w"), level=min(self.log_level, logging.DEBUG)
@@ -189,7 +226,10 @@ class PyPipeGraph:
                     RichHandler(
                         markup=False,
                         console=Console(
-                            file=open(self.log_dir / f"{fn}-{self.time_str}.log", "w"),
+                            file=open(
+                                self.dir_config.log_dir / f"{fn}-{self.time_str}.log",
+                                "w",
+                            ),
                             width=120,  #
                         ),
                     ),
@@ -213,8 +253,6 @@ class PyPipeGraph:
             log_info(
                 f"Run is go {threading.get_ident()} pid: {os.getpid()}, run_id {self.run_id}, log_level = {self.log_level}"
             )
-        self.history_dir.mkdir(exist_ok=True, parents=True)
-        self.run_dir.mkdir(exist_ok=True, parents=True)
         self.do_raise = []
         self._restart_afterwards = False
 
@@ -342,11 +380,13 @@ class PyPipeGraph:
 
     def _cleanup_logs(self):
         """Clean up old logs and drop a 'latest' symlink"""
-        if not self.log_dir or self.log_retention is None:  # pragma: no cover
+        if (
+            not self.dir_config.log_dir or self.log_retention is None
+        ):  # pragma: no cover
             return
         fn = Path(sys.argv[0]).name
         pattern = f"{fn}-*.log"
-        files = sorted(self.log_dir.glob(pattern))
+        files = sorted(self.dir_config.log_dir.glob(pattern))
         if len(files) > self.log_retention:
             remove = files[: -self.log_retention]
             for f in remove:
@@ -368,16 +408,18 @@ class PyPipeGraph:
 
     def _link_logs(self):
         fn = Path(sys.argv[0]).name
-        self._link_latest(self.log_dir, f"{fn}-*.log", "latest", False)
+        self._link_latest(self.dir_config.log_dir, f"{fn}-*.log", "latest", False)
 
     def _cleanup_errors(self):
         """Cleanup old errors and drop a 'latest' symlink"""
-        if not self.error_dir or self.log_retention is None:  # pragma: no cover
+        if (
+            not self.dir_config.error_dir or self.log_retention is None
+        ):  # pragma: no cover
             return
         err_dirs = sorted(
             [
                 x
-                for x in (self.error_dir / self.time_str).parent.glob("*")
+                for x in (self.dir_config.error_dir / self.time_str).parent.glob("*")
                 if x.is_dir() and not x.is_symlink()
             ]
         )
@@ -387,12 +429,12 @@ class PyPipeGraph:
                 shutil.rmtree(f)
 
     def _link_errors(self):
-        self._link_latest(self.error_dir, "*", "latest", True)
+        self._link_latest(self.dir_config.error_dir, "*", "latest", True)
 
     def _log_runtimes(self, job_results, run_start_time):
         """Log the runtimes to a file (ever growing. But only runtimes over a threshold)"""
-        if self.log_dir:
-            rt_file = self.log_dir / "runtimes.tsv"
+        if self.dir_config.log_dir:
+            rt_file = self.dir_config.log_dir / "runtimes.tsv"
             lines = []
             if not rt_file.exists():
                 lines.append("jobid\trun_start_time\truntime_s")
@@ -410,7 +452,7 @@ class PyPipeGraph:
         # we by default share the history file
         # if it's the same history dir, it's the same project
         # and you'd retrigger the calculations too often otherwise
-        return self.history_dir / "ppg_history.2.gz"  # don't end on .py
+        return self.dir_config.history_dir / "ppg_history.2.gz"  # don't end on .py
 
     def _load_history(self):
         log_trace("_load_history")
@@ -452,7 +494,7 @@ class PyPipeGraph:
         """Convert pre-rust history,
         by assuming that it's the same graph, and you changed *nothing* else in the upgrade
         """
-        old_filename = self.history_dir / "ppg_history.gz"
+        old_filename = self.dir_config.history_dir / "ppg_history.gz"
         new_filename = self.get_history_filename()
         if not old_filename.exists():
             return
@@ -461,10 +503,10 @@ class PyPipeGraph:
             sys.stderr.write("Could not convert history.\n")
             sys.stderr.write(f"Reason: {reason}.\n\n")
             sys.stderr.write(
-                f"Safe choice: Remove {self.history_dir}, rebuild everything\n"
+                f"Safe choice: Remove {self.dir_config.history_dir}, rebuild everything\n"
             )
             sys.stderr.write(
-                f"Unsafe choice: Remove {self.history_dir}/ppg_history.gz, keeping ppg_history.2.gz.\n"
+                f"Unsafe choice: Remove {self.dir_config.history_dir}/ppg_history.gz, keeping ppg_history.2.gz.\n"
             )
             sys.stderr.write(
                 "The old history had no knowledge of the set of inputs of a job\n"

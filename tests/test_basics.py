@@ -1354,7 +1354,7 @@ class TestPypipegraph2:
         assert not Path("C").exists()
 
     def test_no_log_dir(self):
-        ppg.new(log_dir=None)
+        ppg.new(dir_config=ppg.DirConfig(".ppg", log_dir=None))
         c = ppg.FileGeneratingJob("C", lambda of: write(of, "C"))
         ppg.run()
         assert read("C") == "C"
@@ -1498,7 +1498,7 @@ class TestPypipegraph2:
             d["shu"]
 
     def test_no_error_dir(self):
-        ppg.new(error_dir=None)
+        ppg.new(dir_config=ppg.DirConfig(error_dir=None))
         try:
             ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
 
@@ -1509,10 +1509,10 @@ class TestPypipegraph2:
             with pytest.raises(ppg.JobsFailed):
                 ppg.run()
         finally:
-            del ppg._last_new_arguments["error_dir"]  # reset to default
+            del ppg._last_new_arguments["dir_config"]  # reset to default
 
     def test_no_logs(self):
-        ppg.new(log_dir=None)
+        ppg.new(dir_config=ppg.DirConfig(log_dir=None))
         try:
             ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
 
@@ -1523,7 +1523,30 @@ class TestPypipegraph2:
             with pytest.raises(ppg.JobsFailed):
                 ppg.run()
         finally:
-            del ppg._last_new_arguments["log_dir"]  # reset to default
+            del ppg._last_new_arguments["dir_config"]  # reset to default
+
+    def test_dir_config(self):
+        import shutil
+
+        try:
+            shutil.rmtree(Path(".ppg/history"))  # from the default created ppg
+            ppg.new(dir_config=ppg.DirConfig(".ppg2"))
+            ppg.run()
+            assert not Path(".ppg/history").exists()
+            assert Path(".ppg2/history").exists()
+            ppg.new(dir_config="ppg3")
+            ppg.run()
+            assert Path("ppg3/history").exists()
+        finally:
+            del ppg._last_new_arguments["dir_config"]  # reset to default
+
+    def test_cache_dir(self):
+        ppg.new(dir_config=ppg.DirConfig(cache_dir="shu"))
+        assert Path("shu").exists()
+        ppg.new(dir_config=ppg.DirConfig(cache_dir=None))
+        a = ppg.FileGeneratingJob("a", lambda of: of.write_text("A"))
+        ppg.run()
+        assert Path("a").read_text() == "A"
 
     def test_log_retention(self):
         old_timeformat = ppg.graph.time_format
@@ -1533,29 +1556,29 @@ class TestPypipegraph2:
             )
             ppg.new(log_retention=1)  # so keep 2
             ppg.FileGeneratingJob("A", lambda of: of.write_text("A"))
-            assert len(list(ppg.global_pipegraph.log_dir.glob("*.log"))) == 0
+            assert len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*.log"))) == 0
             ppg.run()
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*")))
+                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*")))
                 == 1 + 1 + 1  # for latest
             )  # runtimes
             ppg.run()
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*")))
+                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*")))
                 == 2 + 1 + 1  # for latest
             )  # runtimes
             ppg.new(log_retention=2)
             ppg.run()
-            prior = list(ppg.global_pipegraph.log_dir.glob("*"))
+            prior = list(ppg.global_pipegraph.dir_config.log_dir.glob("*"))
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*")))
+                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*")))
                 == 3 + 1 + 1  # for latest
             )  # runtimes
             # no new.. still new log file please
             ppg.run()
-            after = list(ppg.global_pipegraph.log_dir.glob("*"))
+            after = list(ppg.global_pipegraph.dir_config.log_dir.glob("*"))
             assert (
-                len(list(ppg.global_pipegraph.log_dir.glob("*")))
+                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*")))
                 == 3 + 1 + 1  # for latest
             )  # runtimes
             assert set([x.name for x in prior]) != set([x.name for x in after])
@@ -1577,7 +1600,7 @@ class TestPypipegraph2:
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
         e = (
-            ppg.global_pipegraph.error_dir
+            ppg.global_pipegraph.dir_config.error_dir
             / ppg.global_pipegraph.time_str
             / "0_exception.txt"
         ).read_text()
@@ -1704,7 +1727,7 @@ class TestPypipegraph2:
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
         e = (
-            ppg.global_pipegraph.error_dir
+            ppg.global_pipegraph.dir_config.error_dir
             / ppg.global_pipegraph.time_str
             / "0_exception.txt"
         ).read_text()

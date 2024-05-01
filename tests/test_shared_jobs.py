@@ -230,7 +230,7 @@ class TestSharedJob:
         h1 = ppg.global_pipegraph.get_history_filename()
         assert read("doit") == "1"
 
-        ppg.new(history_dir=".my_history")
+        ppg.new(dir_config=ppg.DirConfig(history_dir=".my_history"))
         job = ppg.SharedMultiFileGeneratingJob(
             "out", ["a", "b"], doit, depend_on_function=False, remove_unused=False
         )
@@ -248,7 +248,7 @@ class TestSharedJob:
             read("A") == "2"
         )  # changing the history dir obviously triggers a rerun to capture hashes.
 
-        ppg.new(history_dir=".my_history2")
+        ppg.new(dir_config=ppg.DirConfig(history_dir=".my_history2"))
         job = ppg.SharedMultiFileGeneratingJob(
             "out", ["a", "b"], doit, depend_on_function=False, remove_unused=False
         )
@@ -280,7 +280,7 @@ class TestSharedJob:
         assert read("A") == "3"
 
         logger.info("final")
-        ppg.new(history_dir=".my_history2")
+        ppg.new(dir_config=ppg.DirConfig(history_dir=".my_history2"))
         job = ppg.SharedMultiFileGeneratingJob(
             "out", ["a", "b"], doit, depend_on_function=False, remove_unused=False
         )
@@ -389,7 +389,7 @@ class TestSharedJob:
         # assert read(job.find_file("file_a")) == "file_a"
         assert read("doit") == "1"
 
-        ppg.new(history_dir=".my_history")
+        ppg.new(dir_config=ppg.DirConfig(history_dir=".my_history"))
         job = ppg.SharedMultiFileGeneratingJob("out", {"b": "file_a"}, doit)
         ppg.run()
         assert read(job.find_file("b")) == "file_a"
@@ -406,7 +406,7 @@ class TestSharedJob:
         assert read(res["b"]) == "file_a"
 
     def test_shared_job_with_changing_inputs(self):
-        ppg.new(history_dir="history_one")
+        ppg.new(dir_config=ppg.DirConfig(history_dir="history_one"))
         out = ["a"]
 
         def doit(output_files, prefix, out=out):
@@ -428,7 +428,7 @@ class TestSharedJob:
         known = get_known(job)
         assert len(known) == 1
 
-        ppg.new(history_dir="my_history")
+        ppg.new(dir_config=ppg.DirConfig(history_dir="my_history"))
         job = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit, remove_unused=False)
         job.depends_on_params("sha")
         job()
@@ -442,7 +442,7 @@ class TestSharedJob:
         # and we get no new output dir
         # and we finally trigger the last case in .output_needed
 
-        ppg.new(history_dir="history_one")
+        ppg.new(dir_config=ppg.DirConfig(history_dir="history_one"))
         job = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit, remove_unused=False)
         job.depends_on_params("sha")
         job()
@@ -485,7 +485,7 @@ class TestSharedJob:
         assert len(ol) == 1
         symlink.append(ol[0])
         os.unlink(sl[0])
-        ppg.new(history_dir="history_two")
+        ppg.new(dir_config=ppg.DirConfig(history_dir="history_two"))
         job = ppg.SharedMultiFileGeneratingJob("out", ["a"], doit, remove_unused=False)
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
@@ -508,7 +508,7 @@ class TestSharedJob:
         assert "some result files" in str(job.exception)
 
         # second path to that exception
-        ppg.new(history_dir="history2")
+        ppg.new(dir_config=ppg.DirConfig(history_dir="history2"))
         job = ppg.SharedMultiFileGeneratingJob("out", ["a", "b"], doit)
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
@@ -618,7 +618,7 @@ class TestSharedJob:
     def test_local_log_usage(self):
         def load():
             fn = (
-                ppg.global_pipegraph.history_dir
+                ppg.global_pipegraph.dir_config.history_dir
                 / ppg.SharedMultiFileGeneratingJob.log_filename
             )
             return json.loads(fn.read_text())

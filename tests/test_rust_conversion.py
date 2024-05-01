@@ -26,7 +26,7 @@ class TestRustConversion:
             return
         input = Path(__file__).parent / "old_history_for_conversion_test.gz"
         dir = ppg.global_pipegraph.get_history_filename().parent
-        dir.mkdir(parents=True)
+        # dir.mkdir(parents=True)
         old_history_file = dir / "ppg_history.gz"
         shutil.copy(input, old_history_file)
 

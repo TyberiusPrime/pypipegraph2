@@ -750,17 +750,17 @@ class MultiFileGeneratingJob(Job):
             # and we can't use tempfiles.
             # they would get closed by other forked jobs running in parallel
             stdout = open(
-                runner.job_graph.run_dir
+                runner.job_graph.dir_config.run_dir
                 / f"{runner.start_time:.2f}_{self.job_number}.stdout",
                 "w+",
             )
             stderr = open(
-                runner.job_graph.run_dir
+                runner.job_graph.dir_config.run_dir
                 / f"{runner.start_time:.2f}_{self.job_number}.stderr",
                 "w+",
             )
             exception_out = open(
-                runner.job_graph.run_dir / f"{self.job_number}.exception", "w+b"
+                runner.job_graph.dir_config.run_dir / f"{self.job_number}.exception", "w+b"
             )  # note the binary!
 
             def aborted(sig, stack):
@@ -2633,7 +2633,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         if did_build or not self.job_id in runner.history:
             self._cleanup(runner)
         lock_file = (
-            global_pipegraph.history_dir / SharedMultiFileGeneratingJob.log_filename
+            global_pipegraph.dir_config.history_dir / SharedMultiFileGeneratingJob.log_filename
         ).with_suffix(".lock")
         lock = filelock.FileLock(lock_file, timeout=random.randint(8, 20))
         try:
@@ -2656,7 +2656,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         and find the files"""
         from . import global_pipegraph
 
-        fn = global_pipegraph.history_dir / SharedMultiFileGeneratingJob.log_filename
+        fn = global_pipegraph.dir_config.history_dir / SharedMultiFileGeneratingJob.log_filename
         with _SharedMultiFileGeneratingJob_log_local_lock:
             if fn.exists():
                 keys = json.loads(fn.read_text())

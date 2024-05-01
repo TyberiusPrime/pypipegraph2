@@ -544,7 +544,7 @@ class TestInvariant:
         write("out/b", "a")
         import pickle
 
-        Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True)
+        Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True, exist_ok=True)
         with gzip.GzipFile(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             op.write(b"This breaks")

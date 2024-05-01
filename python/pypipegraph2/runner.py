@@ -181,7 +181,7 @@ class Runner:
             if not networkx.algorithms.is_directed_acyclic_graph(
                 self.job_graph.job_dag
             ):  # pragma: no cover - defensive
-                error_fn = self.job_graph.log_dir / "debug_edges_with_cycles.txt"
+                error_fn = self.job_graph.dir_config.log_dir / "debug_edges_with_cycles.txt"
                 networkx.write_edgelist(
                     self.job_graph.job_dag, error_fn, delimiter="\t"
                 )
@@ -227,7 +227,7 @@ class Runner:
             if not networkx.algorithms.is_directed_acyclic_graph(
                 self.dag
             ):  # pragma: no cover - defensive
-                error_fn = self.job_graph.log_dir / "debug_edges_with_cycles.txt"
+                error_fn = self.job_graph.dir_config.log_dir / "debug_edges_with_cycles.txt"
                 networkx.write_edgelist(self.dag, error_fn, delimiter="\t")
                 cycles = list(networkx.simple_cycles(self.dag))
                 raise exceptions.NotADag(
@@ -582,9 +582,9 @@ class Runner:
                             "JobCanceled outside of stopped/aborted state?!"
                         )
                 # log error to file. Todo: move to job_state
-                if self.job_graph.error_dir is not None:
+                if self.job_graph.dir_config.error_dir is not None:
                     error_file = (
-                        self.job_graph.error_dir
+                        self.job_graph.dir_config.error_dir
                         / self.job_graph.time_str
                         / (str(job.job_number) + "_exception.txt")
                     )
@@ -605,7 +605,7 @@ class Runner:
                     log(error)
                     log("no stack available")
 
-                if self.job_graph.error_dir is not None:
+                if self.job_graph.dir_config.error_dir is not None:
                     with open(error_file, "w") as ef:
                         ef.write(f"JobId: {job_id}\n")
                         ef.write(f"Class: {job.__class__.__name__}\n")

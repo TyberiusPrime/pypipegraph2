@@ -52,7 +52,7 @@ class TestSimple:
         assert read("A") == "A"
 
     def test_non_default_status_filename(self):
-        ppg.new(history_dir="shu")
+        ppg.new(dir_config=ppg.DirConfig(history_dir="shu"))
         ppg.FileGeneratingJob("A", lambda of: write(of, "A"))
         ppg.run()
         assert (Path("shu") / ppg.global_pipegraph.get_history_filename().name).exists()

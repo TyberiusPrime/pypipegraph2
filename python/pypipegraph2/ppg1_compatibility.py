@@ -230,7 +230,6 @@ else:
 
 
 class Graph:
-
     invariant_status_filename_default = invariant_status_filename_default
 
 
@@ -272,20 +271,19 @@ def new_pipegraph(
     else:
         run_mode = ppg2.RunMode.NONINTERACTIVE
     kwargs = {}
+    dir_config_args = {}
     if invariant_status_filename:
         invariant_status_filename = Path(invariant_status_filename)
-        kwargs["log_dir"] = invariant_status_filename / "logs"
-        kwargs["error_dir"] = invariant_status_filename / "errors"
-        kwargs["history_dir"] = invariant_status_filename / "history"
-        kwargs["run_dir"] = invariant_status_filename / "run"
+        dir_config_args = {"root": invariant_status_filename}
+    dir_config_args["cache_dir"] = Path(cache_folder)
     kwargs["allow_short_filenames"] = False  # as was the default for ppg1
     kwargs["prevent_absolute_paths"] = False  # as was the default for ppg1
 
     res = ppg2.new(
         cores=cores,
+        dir_config=ppg2.DirConfig(**dir_config_args),
         run_mode=run_mode,
         log_level=log_level,
-        cache_dir=Path(cache_folder),
         **kwargs,
     )
     _add_graph_comp(res)
@@ -293,7 +291,7 @@ def new_pipegraph(
 
 
 def _add_graph_comp(graph):
-    graph.cache_folder = graph.cache_dir  # ppg1 compatibility
+    graph.cache_folder = graph.dir_config.cache_dir  # ppg1 compatibility
     graph.rc = FakeRC()
     util.global_pipegraph = graph
 

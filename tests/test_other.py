@@ -362,15 +362,6 @@ def test_capturing_locals_when_they_have_throwing_str(ppg2_per_test):
     assert "trace check" in str(j.stack_trace)  # we captured teh relevant line
 
 
-def test_cache_dir(ppg2_per_test):
-    ppg.new(cache_dir="shu")
-    assert Path("shu").exists()
-    ppg.new(cache_dir=None)
-    a = ppg.FileGeneratingJob("a", lambda of: of.write_text("A"))
-    ppg.run()
-    assert Path("a").read_text() == "A"
-
-
 class TestCleanup:
     def test_error_cleanup(self, ppg2_per_test):
         import pypipegraph2 as ppg2
@@ -386,23 +377,23 @@ class TestCleanup:
         lc = []
         with pytest.raises(ppg.JobsFailed):
             ppg.run(print_failures=False)
-        ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
-        lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
+        ec.append(len(list(ppg.global_pipegraph.dir_config.error_dir.glob("*"))))
+        lc.append(len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*.log"))))
         with pytest.raises(ppg.JobsFailed):
             ppg.run(print_failures=False)
-        ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
-        lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
+        ec.append(len(list(ppg.global_pipegraph.dir_config.error_dir.glob("*"))))
+        lc.append(len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*.log"))))
         with pytest.raises(ppg.JobsFailed):
             ppg.run(print_failures=False)
         # we keep  log_retention old ones + the current one
-        ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
-        lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
+        ec.append(len(list(ppg.global_pipegraph.dir_config.error_dir.glob("*"))))
+        lc.append(len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*.log"))))
 
         with pytest.raises(ppg.JobsFailed):
             ppg.run(print_failures=False)
         assert ppg.global_pipegraph.log_file.exists()
-        ec.append(len(list(ppg.global_pipegraph.error_dir.glob("*"))))
-        lc.append(len(list(ppg.global_pipegraph.log_dir.glob("*.log"))))
+        ec.append(len(list(ppg.global_pipegraph.dir_config.error_dir.glob("*"))))
+        lc.append(len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*.log"))))
         assert ec == [
             1 + 1,
             2 + 1,

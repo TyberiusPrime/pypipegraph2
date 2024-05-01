@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 
 def read(filename):
@@ -11,7 +12,7 @@ def read(filename):
 
 def write(filename, string):
     """open file for writing, dump string, close file"""
-    op = open(filename, "w")
+    op = open(Path(filename).absolute(), "w")
     op.write(string)
     op.close()
 

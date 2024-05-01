@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 __version__ = "3.0.7"
 
-from pathlib import Path
 import logging
 import contextlib
-from .graph import PyPipeGraph, ALL_CORES
+from .graph import PyPipeGraph, ALL_CORES, DirConfig
 from .jobs import (
     FileGeneratingJob,
     MultiFileGeneratingJob,
@@ -25,7 +24,7 @@ from .jobs import (
     JobList,
     SharedMultiFileGeneratingJob,
     NotebookInvariant,
-    NotebookJob
+    NotebookJob,
 )
 from .exceptions import (
     PPGException,
@@ -68,10 +67,7 @@ def _last_or_default(name, value, default_value):
 def new(
     cores=reuse_last_or_default,
     run_mode=reuse_last_or_default,
-    log_dir=reuse_last_or_default,
-    error_dir=reuse_last_or_default,
-    history_dir=reuse_last_or_default,
-    run_dir=reuse_last_or_default,
+    dir_config=reuse_last_or_default,
     log_level=reuse_last_or_default,
     allow_short_filenames=reuse_last_or_default,
     log_retention=reuse_last_or_default,
@@ -96,15 +92,11 @@ def new(
         name: _last_or_default(name, locs[name], default_arg)
         for name, default_arg in [
             ("cores", ALL_CORES),
-            ("log_dir", Path(".ppg/logs")),
-            ("error_dir", Path(".ppg/errors")),
-            ("history_dir", Path(".ppg/history")),
-            ("run_dir", Path(".ppg/run")),
+            ("dir_config", DirConfig(".ppg")),
             ("log_level", logging.DEBUG),  # that's the one for the log file
             ("allow_short_filenames", False),
             ("run_mode", RunMode.CONSOLE),
             ("log_retention", 3),
-            ("cache_dir", Path("cache")),
             ("prevent_absolute_paths", True),
             ("report_done_filter", 1),
         ]
