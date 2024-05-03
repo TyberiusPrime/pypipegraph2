@@ -76,4 +76,5 @@ docs/_build/
 /.ppg/
 examples/simplest/
 tests/run
+tests/**/run
 *shu*

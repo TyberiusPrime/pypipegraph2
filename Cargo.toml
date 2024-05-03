@@ -9,7 +9,7 @@ name = "pypipegraph2"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "ppg2_profileing"
+name = "ppg2_profiling"
 path = "src/main.rs"
 
 [[bin]]

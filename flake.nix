@@ -96,7 +96,7 @@
         format = "pyproject";
       };
     palettable = let
-      p = pkgs.python39Packages;
+      p = pkgs.python311Packages;
     in
       p.buildPythonPackage rec {
         pname = "palettable";
@@ -110,7 +110,7 @@
       };
 
     mizani = let
-      p = pkgs.python39Packages;
+      p = pkgs.python311Packages;
     in
       p.buildPythonPackage rec {
         pname = "mizani";
@@ -128,7 +128,7 @@
         doCheck = false;
       };
     plotnine = let
-      p = pkgs.python39Packages;
+      p = pkgs.python311Packages;
     in
       p.buildPythonPackage rec {
         pname = "plotnine";
@@ -143,7 +143,7 @@
       };
 
     ppg1 = let
-      p = pkgs.python39Packages;
+      p = pkgs.python311Packages;
     in
       p.buildPythonPackage rec {
         pname = "pypipegraph";
@@ -159,7 +159,7 @@
         };
       };
     dppd = let
-      p = pkgs.python39Packages;
+      p = pkgs.python311Packages;
     in
       p.buildPythonPackage rec {
         pname = "dppd";
@@ -173,7 +173,7 @@
         doCheck = false;
       };
     dppd_plotnine = let
-      p = pkgs.python39Packages;
+      p = pkgs.python311Packages;
     in
       p.buildPythonPackage rec {
         pname = "dppd_plotnine";

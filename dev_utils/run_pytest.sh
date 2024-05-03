@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-
+set -eou pipefail
 export CARGO_TARGET_DIR=target_pyloop c 
-./prep_for_tests.sh
 echo "cargo test"
 cargo test
+dev_utils/prep_for_tests.sh
 echo "pytest"
-RUST_BACKTRACE=1 RUST_LOG=debug pytest $@
+PYTHONPATH=python RUST_BACKTRACE=1 RUST_LOG=debug pytest $@
