@@ -51,4 +51,7 @@ def do_b(of):
 ppg.FileGeneratingJob("B", do_b)
 
 
+c = ppg.FileGeneratingJob("C", do_a, resources=ppg.Resources.Exclusive)
+
+
 ppg.run()

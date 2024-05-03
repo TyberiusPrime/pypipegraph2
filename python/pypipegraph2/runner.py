@@ -81,8 +81,12 @@ def watcher_unexpected_death_of_parent(_signum, _frame):
     os._exit(0)
 
 
+def ignore_ctrl_c(_signum, _frame):
+    log_info("Watcher ignored ctrl-c")
+
+
 def watcher_expected_death_of_parent(_signum, _frame):
-    log_debug("Watcher discovered parent process ended regularly")
+    log_debug("Watcher was informed parent process ended regularly")
     kill_process_group_but_ppg_runner()
     os._exit(0)
 
@@ -122,11 +126,12 @@ def spawn_watcher():
         # these guys were around before, so we don't kill tehm.
 
         signal.signal(signal.SIGTERM, watcher_unexpected_death_of_parent)
-        signal.signal(signal.SIGINT, watcher_expected_death_of_parent)
+        signal.signal(signal.SIGUSR2, watcher_expected_death_of_parent)
+        signal.signal(signal.SIGINT, ignore_ctrl_c)
         # get watcher to detect parent's death
         prtcl = ctypes.CDLL("libc.so.6")["prctl"]
         PR_SET_PDEATHSIG = 1
-        prtcl(PR_SET_PDEATHSIG, signal.SIGTERM)  # 1 =
+        prtcl(PR_SET_PDEATHSIG, signal.SIGUSR2)  # 1 =
         log_debug("entering watcher loop")
         send.send_bytes(b"go")
         send.close()
@@ -436,7 +441,8 @@ class Runner:
             self._interactive_stop()
             # unregister_reaper(reaper)
             assert psutil.pid_exists(self.watcher_pid)
-            os.kill(self.watcher_pid, signal.SIGINT)
+            ljt("Sending sigusr2 to watcher")
+            os.kill(self.watcher_pid, signal.SIGUSR2)
             gone, alive = psutil.wait_procs(
                 [psutil.Process(self.watcher_pid)], timeout=10
             )
@@ -496,12 +502,12 @@ class Runner:
             self.interactive.stop()
 
     def _interactive_report(self):
-        if hasattr(self, "interactive") and hasattr(self.interactive, 'status'):
+        if hasattr(self, "interactive") and hasattr(self.interactive, "status"):
             t = time.time()
             if (
-                # t - self.last_status_time >= 0.5
+                # t - self.last_status_time >= 0.5  # don't update more than every half second.
                 True
-            ):  # don't update more than every half second.
+            ):
                 waiting = len(
                     [
                         x
@@ -909,7 +915,7 @@ class Runner:
                                         outputs, sort_keys=True, indent=1
                                     )
                                     ljt(f"success {job_id} str_history {str_history}")
-                                    finish_msg = f"Job finished: {job_id}. Runtime: {job.stop_time - job.start_time:.2f}s"
+                                    finish_msg = f"Job finished: '{job_id}'. Runtime: {job.stop_time - job.start_time:.2f}s"
                                     if (job.stop_time != job.stop_time) or (
                                         job.stop_time - job.start_time > 1
                                     ):

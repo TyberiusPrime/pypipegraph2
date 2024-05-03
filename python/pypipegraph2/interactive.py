@@ -24,29 +24,22 @@ StatusReport = namedtuple(
 )
 
 
+class UnbufferedContext:
+    def __init__(self, file):
+        self.fd = file.fileno()
+        self.file = file
+        self.settings = termios.tcgetattr(file)
+
+    def __enter__(self, *foo):
+        tty.setcbreak(self.file)
+
+    def __exit__(self, *foo):
+        termios.tcsetattr(self.fd, termios.TCSADRAIN, self.settings)
+
+
 class ConsoleInteractive:
-    def _set_terminal_raw(self):
-        """Set almost all raw settings on the terminal, except for the output meddling
-        - if we did that we get weird newlines from rich"""
-        try:
-            self.old_settings = termios.tcgetattr(sys.stdin)
-            fd = sys.stdin.fileno()
-            when = termios.TCSAFLUSH
-            tty.setraw(fd)
-            mode = termios.tcgetattr(sys.stdin.fileno())
-            mode[1] = mode[1] | termios.OPOST  # termios.tcgetattr(fd)
-            termios.tcsetattr(sys.stdin.fileno(), when, mode)
-        except io.UnsupportedOperation:  # happens in tests that set it to console mode
-            pass
-
-    def _end_terminal_raw(self):
-        if hasattr(self, "old_settings"):
-            try:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
-            except io.UnsupportedOperation:  # see _set_terminal_raw
-                pass
-
     def start(self, runner):
+        self.counter = 0
         self.runner = runner
         self.last_report_status_args = StatusReport(0, 0, 0, len(runner.jobs), 0)
         self.breaker = os.pipe()
@@ -69,7 +62,7 @@ class ConsoleInteractive:
             self.leave_thread = True
             # async_raise(self.thread.ident, KeyboardInterrupt)
             os.write(self.breaker[1], b"x")
-            self._end_terminal_raw()
+            # self._end_terminal_raw()
             log_job_trace("Terminating interactive thread")
             self.thread.join()
             log_job_trace("Terminated interactive thread")
@@ -90,55 +83,61 @@ class ConsoleInteractive:
         log_debug("Entering interactive loop")
         while True:
             try:
-                if self.leave_thread:
-                    break
-                try:
-                    input = select.select([sys.stdin, self.breaker[0]], [], [], 10)[0]
-                except io.UnsupportedOperation as e:
-                    if "redirected stdin is pseudofile" in str(
-                        e
-                    ):  # running under pytest - no interactivity, but suport requesting it?
-                        input = False
-                    else:
-                        raise
-                if input:
-                    if self.breaker[0] in input:
+                with UnbufferedContext(sys.stdin):
+                    if self.leave_thread:
                         break
-                    else:  # must have been stdin.
-                        value = sys.stdin.read(1)
-                        # log_info(f"received {repr(value)}")
-                        if value == "\x03":  # ctrl-c:
-                            self.cmd = ""
-                        elif value == "\x1a":  # ctrl-z
-                            os.kill(os.getpid(), signal.SIGTSTP)
-                        elif value and (
-                            ord("0") <= ord(value) <= ord("z") or value == " "
-                        ):
-                            self.cmd += value
-                        elif value == "\x7f":  # backspace
-                            self.cmd = self.cmd[:-1]
-                        elif value == "\n" or value == "\r":
-                            try:
-                                if self.cmd:
-                                    command = self.cmd
-                                    args = ""
-                                    if " " in command:
-                                        command = command[: command.find(" ")]
-                                        args = self.cmd[len(command) + 1 :].strip()
-                                    self.cmd = ""
-                                    if hasattr(self, "_cmd_" + command):
-                                        getattr(self, "_cmd_" + command)(args)
-                                    else:
-                                        print("No such command")
-                                else:
-                                    self._cmd_default()
-                                self.report_status(self.last_report_status_args)
-                            except Exception as e:
-                                log_error(
-                                    f"An exception occured during command: {e} {type(e)}"
-                                )
+                    try:
+                        input = select.select([sys.stdin, self.breaker[0]], [], [], 10)[
+                            0
+                        ]
+                    except io.UnsupportedOperation as e:
+                        if "redirected stdin is pseudofile" in str(
+                            e
+                        ):  # running under pytest - no interactivity, but suport requesting it?
+                            input = False
+                        else:
+                            raise
+                    if input:
+                        if self.breaker[0] in input:
+                            break
+                        else:  # must have been stdin.
+                            value = sys.stdin.read(1)
+                            # log_info(f"received {repr(value)}")
+                            if value == "\x03":  # ctrl-c:
                                 self.cmd = ""
-                                continue
+                            elif value == "\x1a":  # ctrl-z
+                                os.kill(os.getpid(), signal.SIGTSTP)
+                            elif value and (
+                                ord("0") <= ord(value) <= ord("z") or value == " "
+                            ):
+                                self.cmd += value
+                            elif value == "\x7f":  # backspace
+                                self.cmd = self.cmd[:-1]
+                            elif value == "\n" or value == "\r":
+                                try:
+                                    if self.cmd:
+                                        command = self.cmd
+                                        args = ""
+                                        if " " in command:
+                                            command = command[: command.find(" ")]
+                                            args = self.cmd[len(command) + 1 :].strip()
+                                        self.cmd = ""
+                                        if hasattr(self, "_cmd_" + command):
+                                            getattr(self, "_cmd_" + command)(args)
+                                        else:
+                                            print(f"No such command '{command}'")
+                                    else:
+                                        self._cmd_default()
+                                    # self.report_status(self.last_report_status_args)
+                                except Exception as e:
+                                    log_error(
+                                        f"An exception occured during command: {e} {type(e)}"
+                                    )
+                                    self.cmd = ""
+                                    continue
+                            else:
+                                # print("received", repr(value))
+                                pass
 
             except KeyboardInterrupt:
                 break
@@ -146,8 +145,9 @@ class ConsoleInteractive:
 
     def report_status(self, report):
         self.last_report_status_args = report
+        self.counter += 1
         # msg = f"[dim]Running/Waiting Done/Total[/dim] {report.running} / {report.waiting} {report.done} / {report.total}."  # In flight: {len(self.runner.jobs_in_flight)} "
-        msg = f"[dim]T:[/dim]{report.total} D:{report.done} R:{report.running} W:{report.waiting} F:{report.failed}"
+        msg = f"[dim]T:[/dim]{report.total} D:{report.done} R:{report.running} W:{report.waiting} F:{report.failed} {self.counter}"
         if hasattr(self, "cmd") and self.cmd:
             msg += f" Cmd: {self.cmd}"
         else:
@@ -156,7 +156,7 @@ class ConsoleInteractive:
             else:
                 # msg += "Type help<enter> for commands"
                 pass
-        self.status.update(status=msg + "\r\n")
+        self.status.update(status=msg)
 
     def _cmd_help(self, _args):
         """print help"""

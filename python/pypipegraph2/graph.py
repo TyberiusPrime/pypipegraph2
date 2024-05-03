@@ -332,7 +332,6 @@ class PyPipeGraph:
             except KeyboardInterrupt:
                 self.do_raise.append(KeyboardInterrupt())
             del result
-            print("leave history")
             log_debug(f"Left graph loop. Final result len {len(final_result)}")
             jobs_failed = False
             for job_id, job_state in final_result.items():
@@ -354,7 +353,7 @@ class PyPipeGraph:
             ok = True
             return final_result
         except Exception as e:
-            print(e)
+            log_error(e)
             raise
         finally:
             if ok:
@@ -609,6 +608,7 @@ class PyPipeGraph:
             log_warning("user logged off - continuing run")
 
         def sigint(*args, **kwargs):
+            log_info("Received SIGINT")
             if self.run_mode is (RunMode.CONSOLE):
                 if self._debug_allow_ctrl_c == "abort":  # pragma: no cover
                     log_info("CTRL-C from debug - calling interactive abort")
@@ -634,7 +634,7 @@ class PyPipeGraph:
             else:  # pragma: no cover - todo: interactive
                 log_info("CTRL-C received. Killing all running jobs.")
                 if hasattr(self, "runner"):
-                    print("calling abort")
+                    log_error("calling abort")
                     self.runner.abort()
 
         if self.run_mode is (RunMode.CONSOLE):
