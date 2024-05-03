@@ -834,6 +834,16 @@ class TestMultiFileGeneratingJob:
         with pytest.raises(TypeError):
             ppg.MultiFileGeneratingJob("A", lambda of: write("out/A", param))
 
+    def test_order_of_files_is_kept_for_callback(self):
+        def do_b(ofs):
+            assert ofs[0].name == "b"
+            assert ofs[1].name == "B1"
+            ofs[0].write_text("B")
+            ofs[1].write_text("B")
+
+        ppg.MultiFileGeneratingJob(["b", "B1"], do_b)
+        ppg.run()
+
 
 test_modifies_shared_global = []
 shared_value = ""
@@ -1392,7 +1402,6 @@ class TestAttributeJob:
             ppg.CachedAttributeLoadingJob("out/A", o2, "a", cache)
 
     def test_no_swapping_callbacks(self):
-
         o = Dummy()
         ppg.AttributeLoadingJob("out/A", o, "a", lambda: 55, depend_on_function=False)
 
@@ -1402,7 +1411,6 @@ class TestAttributeJob:
             )
 
     def test_no_swapping_callbacks_cached(self):
-
         o = Dummy()
         ppg.CachedAttributeLoadingJob(
             "out/A", o, "a", lambda: 55, depend_on_function=False
@@ -1932,6 +1940,19 @@ class TestTempFileGeneratingJob:
         assert Path("C").read_text() == "C"
         assert Path("a").read_text() == "4"
         assert Path("c").read_text() == "1"
+
+    def test_order_of_files_is_kept_for_callback(self):
+        def do_b(ofs):
+            assert ofs[0].name == "b"
+            assert ofs[1].name == "B1"
+            ofs[0].write_text("B")
+            ofs[1].write_text("B")
+
+        a = ppg.MultiTempFileGeneratingJob(["b", "B1"], do_b)
+        b = ppg.FileGeneratingJob("c", lambda of: of.write_text("b"))
+        b.depends_on(a)
+
+        ppg.run()
 
 
 @pytest.mark.usefixtures("create_out_dir")

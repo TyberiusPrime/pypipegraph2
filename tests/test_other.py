@@ -401,10 +401,10 @@ class TestCleanup:
             3 + 1,
         ]
         assert lc == [
-            1,
-            2,
-            3,  # latest exluded by *.log
-            3,
+            1 * 2,  # includes messages.log and lookup.log
+            2 * 2,
+            3 * 2,  # latest exluded by *.log
+            3 * 2,
         ]
 
 

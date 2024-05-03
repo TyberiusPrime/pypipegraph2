@@ -681,3 +681,14 @@ class TestSharedJob:
         ppg.SharedMultiFileGeneratingJob("out", ["a"], doit)
         with pytest.raises(ppg.JobOutputConflict):
             ppg.SharedMultiFileGeneratingJob("out", ["b"], doit)
+
+    def test_file_order(self):
+        def doit(ofs, prefix):
+            print(ofs)
+            assert ofs[0].name == "b"
+            assert ofs[1].name == "B1"
+            ofs[0].write_text("B")
+            ofs[1].write_text("B")
+
+        ppg.SharedMultiFileGeneratingJob("out", ["b", "B1"], doit)
+        ppg.run()

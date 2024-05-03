@@ -616,7 +616,13 @@ class MultiFileGeneratingJob(Job):
                 raise ValueError(
                     f"{self.job_id} has no lookup dictionary - files was not a dict, and key was not an integer index(into files)"
                 )
-        return self._map_filename(self._lookup[key])
+        try:
+            query = self._lookup[key]
+        except TypeError:
+            raise ValueError(
+                "Can not access a MultiFileGeneratingJob with a string if it was passed a list of files to generate. Either use an integer index, or pass in a dict"
+            )
+        return self._map_filename(query)
 
     @staticmethod
     def _validate_func_argument(func):
@@ -664,6 +670,10 @@ class MultiFileGeneratingJob(Job):
         abs_files = [_normalize_path(x) for x in path_files]
         if lookup:
             lookup = {lookup[ii]: abs_files[ii] for ii in range(len(lookup))}
+        else:
+            temp = sorted([(f, ii) for (ii, f) in enumerate(abs_files)])
+            temp = {ii: f for (f, ii) in temp}
+            lookup = [temp[ii] for ii in range(len(temp))]
         return sorted(abs_files), lookup
 
     def readd(self):
@@ -760,7 +770,8 @@ class MultiFileGeneratingJob(Job):
                 "w+",
             )
             exception_out = open(
-                runner.job_graph.dir_config.run_dir / f"{self.job_number}.exception", "w+b"
+                runner.job_graph.dir_config.run_dir / f"{self.job_number}.exception",
+                "w+b",
             )  # note the binary!
 
             def aborted(sig, stack):
@@ -2405,10 +2416,17 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             (self.output_dir_prefix / "__never_placed_here__" / f) for f in self.files
         ]
         if self._lookup:
-            self._lookup = {
-                k: self.org_files[self.files.index(v)]
-                for (k, v) in self._lookup.items()
-            }
+            if isinstance(self._lookup, list):
+                self._lookup_for_org_order = [
+                    (self.output_dir_prefix / "__never_placed_here__" / f)
+                    for f in self._lookup
+                ]
+                self._lookup = None
+            else:
+                self._lookup = {
+                    k: self.org_files[self.files.index(v)]
+                    for (k, v) in self._lookup.items()
+                }
         self.files = self.org_files[:]
 
         if len(self.files) != len(set(self.files)):
@@ -2557,6 +2575,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             # self._raise_partial_result_exception()
         missing = [x for x in fns if not x.exists()]
         if missing:  # pragma: no cover - defensive
+            for mm in sorted(missing):
+                log_error("Job '{self.job_id}' - missing output: '{mm}'")
             raise ValueError(
                 "missing output files - did somebody go and delete them?!", missing
             )
@@ -2633,7 +2653,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         if did_build or not self.job_id in runner.history:
             self._cleanup(runner)
         lock_file = (
-            global_pipegraph.dir_config.history_dir / SharedMultiFileGeneratingJob.log_filename
+            global_pipegraph.dir_config.history_dir
+            / SharedMultiFileGeneratingJob.log_filename
         ).with_suffix(".lock")
         lock = filelock.FileLock(lock_file, timeout=random.randint(8, 20))
         try:
@@ -2656,7 +2677,10 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         and find the files"""
         from . import global_pipegraph
 
-        fn = global_pipegraph.dir_config.history_dir / SharedMultiFileGeneratingJob.log_filename
+        fn = (
+            global_pipegraph.dir_config.history_dir
+            / SharedMultiFileGeneratingJob.log_filename
+        )
         with _SharedMultiFileGeneratingJob_log_local_lock:
             if fn.exists():
                 keys = json.loads(fn.read_text())
@@ -2698,16 +2722,17 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         return Path(*out_parts)
 
     def get_input(self):  # todo: fold in?
-        # if self._single_file:
-        # return self._map_filename(self.files[0])
-        # else:
         if self._lookup:
             return (
                 {k: self._map_filename(f) for (k, f) in self._lookup.items()},
                 self.target_folder,
             )
         else:
-            return ([self._map_filename(f) for f in self.files], self.target_folder)
+            # return ([self._map_filename(f) for f in self.files], self.target_folder)
+            return (
+                [self._map_filename(f) for f in self._lookup_for_org_order],
+                self.target_folder,
+            )
 
     def output_needed(self, _runner):
         # output needed is called at the very beginning
@@ -2804,6 +2829,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         return self[output_filename]
 
     def __getitem__(self, key):
+        print(self._lookup)
         if not self._lookup:
             if isinstance(key, int):
                 return self._map_filename(self.org_files[key])

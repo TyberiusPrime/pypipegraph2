@@ -30,8 +30,6 @@ from .util import (
     escape_logging,
 )
 from . import util
-from rich.logging import RichHandler
-from rich.console import Console
 
 
 logger.level("JT", no=6, color="<yellow>", icon="🐍")
@@ -239,7 +237,7 @@ class PyPipeGraph:
                         str(next_number)
                     )
                     log_position_lookup_file.write(
-                            "{} | {:>15}:{:>4} | {}\n".format(
+                        "{} | {:>15}:{:>4} | {}\n".format(
                             log_position_lookup[key],
                             x["file"],
                             x["line"],

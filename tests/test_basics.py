@@ -1559,27 +1559,27 @@ class TestPypipegraph2:
             assert len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*.log"))) == 0
             ppg.run()
             assert (
-                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*")))
-                == 1 + 1 + 1  # for latest
+                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*messages*")))
+                == 1 + 1  # for latest
             )  # runtimes
             ppg.run()
             assert (
-                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*")))
-                == 2 + 1 + 1  # for latest
+                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*messages*")))
+                == 2 + 1  # for latest
             )  # runtimes
             ppg.new(log_retention=2)
             ppg.run()
-            prior = list(ppg.global_pipegraph.dir_config.log_dir.glob("*"))
+            prior = list(ppg.global_pipegraph.dir_config.log_dir.glob("*messages*"))
             assert (
-                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*")))
-                == 3 + 1 + 1  # for latest
+                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*messages*")))
+                == 3 + 1  # for latest
             )  # runtimes
             # no new.. still new log file please
             ppg.run()
-            after = list(ppg.global_pipegraph.dir_config.log_dir.glob("*"))
+            after = list(ppg.global_pipegraph.dir_config.log_dir.glob("*messages*"))
             assert (
-                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*")))
-                == 3 + 1 + 1  # for latest
+                len(list(ppg.global_pipegraph.dir_config.log_dir.glob("*messages*")))
+                == 3 + 1  # for latest
             )  # runtimes
             assert set([x.name for x in prior]) != set([x.name for x in after])
 
