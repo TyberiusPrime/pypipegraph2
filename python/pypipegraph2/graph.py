@@ -244,7 +244,7 @@ class PyPipeGraph:
                             x["function"],
                         )
                     )
-                return f"{x['level']:<5} | {log_position_lookup[key]} | {x['time']:HH:mm::ss} | {escape_logging(x['message'])}\n"
+                return f"{x['level']:<5} | {log_position_lookup[key]} | {x['time']:HH:mm::ss:SS} | {escape_logging(x['message'])}\n"
 
             logger.add(
                 open(self.log_file, "w"),
