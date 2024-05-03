@@ -21,10 +21,11 @@ from .interactive import ConsoleInteractive, StatusReport
 from .util import (
     log_info,
     log_error,
-    # log_warning,
-    # log_debug,
+    log_warning,
+    log_debug,
     log_trace,
     log_job_trace,
+    console,
 )
 import copy
 from .job_status import RecordedJobOutcome
@@ -48,11 +49,11 @@ def get_same_session_id_processes():
 
 
 def kill_process_group_but_ppg_runner():
-    log_info("kill_process_group_but_ppg_runner")
+    log_debug("kill_process_group_but_ppg_runner")
     children_to_reap = []
     my_pid = os.getpid()
     for proc in get_same_session_id_processes():
-        log_info(f"{proc} ignored: {proc in watcher_ignored_processes}")
+        log_debug(f"{proc} ignored: {proc in watcher_ignored_processes}")
         if not proc in watcher_ignored_processes:
             children_to_reap.append(proc)
     for p in children_to_reap:
@@ -81,7 +82,7 @@ def watcher_unexpected_death_of_parent(_signum, _frame):
 
 
 def watcher_expected_death_of_parent(_signum, _frame):
-    log_info("Watcher discovered parent process ended regularly")
+    log_debug("Watcher discovered parent process ended regularly")
     kill_process_group_but_ppg_runner()
     os._exit(0)
 
@@ -99,7 +100,7 @@ def spawn_watcher():
     """
     global watcher_parent_pid, watcher_ignored_processes, watcher_session_id
     if watcher_session_id is None:
-        log_info("Capturing watcher process group id")
+        log_debug("Capturing watcher process group id")
         my_pid = os.getpid()
         my_pgid = os.getpgid(my_pid)
         # ok, the shell gives us a group id, right?
@@ -107,10 +108,12 @@ def spawn_watcher():
         # and we don't fork for the top level managment process.
         # (messing with setgrp and so on has only lead to pain...)
         watcher_session_id = my_pgid
-        log_info(f"Watcher identifies process by process group id {watcher_session_id}")
+        log_debug(
+            f"Watcher identifies process by process group id {watcher_session_id}"
+        )
     recv, send = multiprocessing.Pipe()
-    log_info("Collecting already running process that will be ignored by teh watcher")
-    log_info("%s" % (watcher_ignored_processes,))
+    log_debug("Collecting already running process that will be ignored by teh watcher")
+    log_debug("%s" % (watcher_ignored_processes,))
     pid = os.fork()
     if pid == 0:
         watcher_ignored_processes = list(get_same_session_id_processes())
@@ -124,13 +127,13 @@ def spawn_watcher():
         prtcl = ctypes.CDLL("libc.so.6")["prctl"]
         PR_SET_PDEATHSIG = 1
         prtcl(PR_SET_PDEATHSIG, signal.SIGTERM)  # 1 =
-        log_info("entering watcher loop")
+        log_debug("entering watcher loop")
         send.send_bytes(b"go")
         send.close()
         sys.stdin.close()
         while True:
             time.sleep(100)  # we Live by signal from here on
-        log_info("watcher loop exit - should be unreachable?")
+        log_error("watcher loop exit - should be unreachable?!")
         os._exit(0)
     else:
         recv.recv_bytes()
@@ -173,7 +176,7 @@ class Runner:
             self.next_job_number = self.job_graph.next_job_number
             self.core_lock = CoreLock(job_graph.cores)
             self.fail_counter = 0
-            self.jobs_done = 0
+            self.done_counter = 0
             self.run_id = (
                 run_id  # to allow jobgenerating jobs to run just once per graph.run()
             )
@@ -181,7 +184,9 @@ class Runner:
             if not networkx.algorithms.is_directed_acyclic_graph(
                 self.job_graph.job_dag
             ):  # pragma: no cover - defensive
-                error_fn = self.job_graph.dir_config.log_dir / "debug_edges_with_cycles.txt"
+                error_fn = (
+                    self.job_graph.dir_config.log_dir / "debug_edges_with_cycles.txt"
+                )
                 networkx.write_edgelist(
                     self.job_graph.job_dag, error_fn, delimiter="\t"
                 )
@@ -227,7 +232,9 @@ class Runner:
             if not networkx.algorithms.is_directed_acyclic_graph(
                 self.dag
             ):  # pragma: no cover - defensive
-                error_fn = self.job_graph.dir_config.log_dir / "debug_edges_with_cycles.txt"
+                error_fn = (
+                    self.job_graph.dir_config.log_dir / "debug_edges_with_cycles.txt"
+                )
                 networkx.write_edgelist(self.dag, error_fn, delimiter="\t")
                 cycles = list(networkx.simple_cycles(self.dag))
                 raise exceptions.NotADag(
@@ -436,7 +443,7 @@ class Runner:
             if alive:
                 log_error("Watcher was still hanging around?!")
             # os.waitpid(self.watcher_pid, 1)
-            log_info("finished waiting for watcher")
+            log_debug("finished waiting for watcher")
 
         for job_id in self.pruned:
             if job_id in self.job_outcomes:
@@ -489,10 +496,11 @@ class Runner:
             self.interactive.stop()
 
     def _interactive_report(self):
-        if hasattr(self, "interactive"):
+        if hasattr(self, "interactive") and hasattr(self.interactive, 'status'):
             t = time.time()
             if (
-                t - self.last_status_time >= 0.5
+                # t - self.last_status_time >= 0.5
+                True
             ):  # don't update more than every half second.
                 waiting = len(
                     [
@@ -505,7 +513,7 @@ class Runner:
                     StatusReport(
                         len(self.jobs_in_flight) - waiting,
                         waiting,
-                        self.jobs_done,
+                        self.done_counter,
                         len(self.dag),
                         self.fail_counter,
                     )
@@ -569,7 +577,7 @@ class Runner:
         if self.print_failures:
             log = log_error
         else:
-            log = log_job_trace
+            log = log_debug
         if True:  # not self._job_failed_last_time(job_id): # Todo
             try:
                 job = self.jobs[job_id]
@@ -593,22 +601,16 @@ class Runner:
 
                 if hasattr(error.args[1], "stacks"):
                     stacks = error.args[1]
-                    log_info(
-                        f"\n{job_id}\n\t"
-                        + escape_logging(
-                            stacks._format_rich_traceback_fallback(False, False)
-                        ).replace("\n", "\n\t")
-                        + "\n"
-                    )
                 else:
                     stacks = None
-                    log(error)
-                    log("no stack available")
 
                 if self.job_graph.dir_config.error_dir is not None:
                     with open(error_file, "w") as ef:
                         ef.write(f"JobId: {job_id}\n")
                         ef.write(f"Class: {job.__class__.__name__}\n")
+                        ef.write(
+                            f"Runtime until failure: {job.stop_time - job.start_time:.2f}s\n"
+                        )
                         ef.write("Input jobs:\n")
                         for parent_id in sorted(self.dag.predecessors(job_id)):
                             ef.write(
@@ -623,7 +625,7 @@ class Runner:
                             )
                         else:
                             ef.write(str(error))
-                            ef.write("no stack available")
+                            ef.write("(no stack available)")
                         if hasattr(job, "stdout"):
                             ef.write("\n\n")
                             ef.write("job stdout:\n")
@@ -639,12 +641,31 @@ class Runner:
                         ef.flush()
 
                     log(
+                        f"Job failed: {job_id}\n"
                         f"\n\tMore details (stdout, locals) in {error_file}\n"
                         f"\tFailed after {job.run_time:.2}s.\n"
-                        f"\t{job_id}\n"
                     )
                 else:
-                    log(f"Failed job: {job_id}")
+                    log(
+                        f"\tJob failed: {job_id}\n"
+                        f"\n\t(Error directory not configured - no extended error log)\n"
+                        f"\tFailed after {job.run_time:.2}s.\n"
+                    )
+                if stacks is not None:
+                    if self.job_graph.run_mode is RunMode.CONSOLE:
+                        console.print(
+                            stacks._format_rich_traceback_fallback(False, True).replace(
+                                "\n", "\n\t"
+                            )
+                        )
+                    else:
+                        log_warning(
+                            stacks._format_rich_traceback_fallback(False, False)
+                        )
+
+                else:
+                    log(error)
+                    log("(no stack available)")
 
             except Exception as e:
                 log_error(
@@ -861,7 +882,7 @@ class Runner:
                             with self.evaluator_lock:
                                 if outputs is None and error is None:
                                     # this happes when the job get's terminated by abort
-                                    log_error(f"job aborted {job_id}")
+                                    log_debug(f"job aborted {job_id}")
                                     error = exceptions.JobError(
                                         "Aborted", KeyboardInterrupt()
                                     )
@@ -888,7 +909,15 @@ class Runner:
                                         outputs, sort_keys=True, indent=1
                                     )
                                     ljt(f"success {job_id} str_history {str_history}")
-                                    self.jobs_done += 1
+                                    finish_msg = f"Job finished: {job_id}. Runtime: {job.stop_time - job.start_time:.2f}s"
+                                    if (job.stop_time != job.stop_time) or (
+                                        job.stop_time - job.start_time > 1
+                                    ):
+                                        log_info(finish_msg)
+                                    else:
+                                        log_debug(finish_msg)
+                                    self.done_counter += 1
+                                    self._interactive_report()
                                     try:
                                         self.evaluator.event_job_success(
                                             job_id, str_history
@@ -904,6 +933,7 @@ class Runner:
 
                                 else:
                                     self.fail_counter += 1
+                                    self._interactive_report()
                                     ljt(f"failure {job_id} - {error}")
                                     self.job_outcomes[job_id] = RecordedJobOutcome(
                                         job_id, JobOutcome.Failed, error

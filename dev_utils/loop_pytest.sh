@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -eou pipefail
 
-fd "\\.rs|\\.py" | entr ./run_pytest.sh $@
+fd "\\.rs|\\.py" | entr ./dev_utils/run_pytest.sh $@

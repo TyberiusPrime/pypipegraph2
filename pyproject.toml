@@ -60,3 +60,4 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 [tool.pytest.ini_options]
 pythonpath = "python"
+addopts="--ignore=dev_utils"

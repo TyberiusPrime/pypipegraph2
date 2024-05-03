@@ -651,11 +651,12 @@ def test_spawned_processes_get_killed_on_catastrophic_process_failure(
     import psutil
 
     path = Path(__file__).parent / "test_parent_termination_kills_children"
-    p = subprocess.Popen(["python", path / "stage2.py"])
+    p = subprocess.Popen([sys.executable, path / "stage2.py"], env=os.environ)
     p.communicate()
 
     for proc in psutil.process_iter(["cmdline"]):
-        if "ppg2_test_parallel_sentinel" in proc.info["cmdline"]:
+        cmdline = proc.info["cmdline"] or ""
+        if "ppg2_test_parallel_sentinel" in cmdline:
             raise ValueError(
                 "children not killed, found a ppg2_test_parallel_sentinel",
                 "pid",
@@ -663,7 +664,7 @@ def test_spawned_processes_get_killed_on_catastrophic_process_failure(
                 "ppid",
                 proc.ppid(),
             )
-        if "sleep" in proc.info["cmdline"] and "5.51234" in proc.info["cmdline"]:
+        if "sleep" in cmdline and "5.51234" in cmdline:
             raise ValueError(
                 "children not killed, found a sleep",
                 "pid",

@@ -5,4 +5,5 @@ echo "cargo test"
 cargo test
 dev_utils/prep_for_tests.sh
 echo "pytest"
-PYTHONPATH=python RUST_BACKTRACE=1 RUST_LOG=debug pytest $@
+# turn python into absolute path
+PYTHONPATH=$(pwd)/python RUST_BACKTRACE=1 RUST_LOG=debug pytest $@

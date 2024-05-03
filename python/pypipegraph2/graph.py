@@ -25,7 +25,7 @@ from .util import (
     log_info,
     log_error,
     log_warning,
-    # log_debug,
+    log_debug,
     log_trace,
 )
 from . import util
@@ -170,6 +170,7 @@ class PyPipeGraph:
         dump_graphml=False,
     ) -> Dict[str, JobOutcome]:
         """Run the complete pypipegraph"""
+        do_raise = [False, None, None]
         try:
             return self._run(
                 print_failures,
@@ -179,7 +180,9 @@ class PyPipeGraph:
                 dump_graphml=dump_graphml,
             )
         except JobsFailed as e:  # shorten the traceback considerably!
-            raise JobsFailed(e.args[0], exceptions=e.exceptions)
+            do_raise = True, e.args[0], e.exceptions
+        if do_raise[0]:
+            raise JobsFailed(do_raise[1], exceptions=do_raise[2])
 
     def _run(
         self,
@@ -250,7 +253,7 @@ class PyPipeGraph:
 
             self._link_logs()
 
-            log_info(
+            log_debug(
                 f"Run is go {threading.get_ident()} pid: {os.getpid()}, run_id {self.run_id}, log_level = {self.log_level}"
             )
         self.do_raise = []
@@ -285,7 +288,6 @@ class PyPipeGraph:
                     do_break = False
                     job_count = len(self.job_dag)
                     try:
-                        print("Run history")
                         self.runner = Runner(
                             self,
                             history,
@@ -312,7 +314,7 @@ class PyPipeGraph:
                     jobs_already_run.update(
                         (k for k in result.keys() if k in self.jobs)
                     )
-                    log_info(f"Result len {len(result)}")
+                    log_debug(f"Result len {len(result)}")
                     for k, v in result.items():
                         if (
                             not k in final_result
@@ -331,7 +333,7 @@ class PyPipeGraph:
                 self.do_raise.append(KeyboardInterrupt())
             del result
             print("leave history")
-            log_info(f"Left graph loop {len(final_result)}")
+            log_debug(f"Left graph loop. Final result len {len(final_result)}")
             jobs_failed = False
             for job_id, job_state in final_result.items():
                 if job_state.outcome == JobOutcome.Failed:
@@ -464,7 +466,7 @@ class PyPipeGraph:
             with gzip.GzipFile(fn, "rb") as op:
                 history = json.loads(op.read().decode("utf-8"))
 
-        log_info(f"Loaded {len(history)} history entries")
+        log_debug(f"Loaded {len(history)} history entries")
         return history
 
     def _save_history(self, historical):

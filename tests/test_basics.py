@@ -1721,7 +1721,7 @@ class TestPypipegraph2:
             import pandas
 
             df = pandas.DataFrame()
-            df["shu"]
+            df["shu"]  # which should raise
 
         ppg.FileGeneratingJob("a", a)
         with pytest.raises(ppg.JobsFailed):
@@ -1731,7 +1731,8 @@ class TestPypipegraph2:
             / ppg.global_pipegraph.time_str
             / "0_exception.txt"
         ).read_text()
-        if sys.version_info[:2] > (3, 8):
+        if (3, 8) < sys.version_info[:2] < (3, 11):
+            # other versions have the source.
             assert "# no source available" in e
         assert "KeyError" in e
 

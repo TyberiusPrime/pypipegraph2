@@ -181,7 +181,7 @@ class Trace:
                 out.append(
                     f"{bold('Exception')}: {red(bold(stack.exc_type) + ' ' + exc_value)}"
                 )
-                out.append("{bold('Traceback')} (most recent call last):")
+                out.append(f"{bold('Traceback')} (most recent call last):")
 
                 for frame in stack.frames:
                     out.append(f'{frame.filename}":{frame.lineno}, in {frame.name}')

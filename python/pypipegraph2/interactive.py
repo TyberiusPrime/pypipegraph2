@@ -7,7 +7,7 @@ from .util import (
     log_info,
     log_error,
     # log_warning,
-    # log_debug,
+    log_debug,
     log_job_trace,
     shorten_job_id,
 )
@@ -55,7 +55,7 @@ class ConsoleInteractive:
         self.stopped = False
         self.leave_thread = False
         self.thread.start()
-        log_info("Type 'help<enter>' to receive a list of valid commands")
+        log_info("PPG online. Type 'help<enter>' to receive a list of valid commands")
         self._cmd = ""
         self.status = rich.status.Status("", console=console)
         self.status.start()
@@ -75,7 +75,7 @@ class ConsoleInteractive:
             log_job_trace("Terminated interactive thread")
             self.status.stop()
         del self.runner
-        log_info("Left interactive mode")
+        log_job_trace("Left interactive mode")
 
     @property
     def cmd(self):
@@ -87,7 +87,7 @@ class ConsoleInteractive:
         self.report_status(self.last_report_status_args)
 
     def loop(self):
-        log_info("Entering interactive loop")
+        log_debug("Entering interactive loop")
         while True:
             try:
                 if self.leave_thread:
@@ -111,7 +111,9 @@ class ConsoleInteractive:
                             self.cmd = ""
                         elif value == "\x1a":  # ctrl-z
                             os.kill(os.getpid(), signal.SIGTSTP)
-                        elif value and (ord("0") <= ord(value) <= ord("z") or value == " "):
+                        elif value and (
+                            ord("0") <= ord(value) <= ord("z") or value == " "
+                        ):
                             self.cmd += value
                         elif value == "\x7f":  # backspace
                             self.cmd = self.cmd[:-1]
@@ -146,7 +148,7 @@ class ConsoleInteractive:
         self.last_report_status_args = report
         # msg = f"[dim]Running/Waiting Done/Total[/dim] {report.running} / {report.waiting} {report.done} / {report.total}."  # In flight: {len(self.runner.jobs_in_flight)} "
         msg = f"[dim]T:[/dim]{report.total} D:{report.done} R:{report.running} W:{report.waiting} F:{report.failed}"
-        if self.cmd:
+        if hasattr(self, "cmd") and self.cmd:
             msg += f" Cmd: {self.cmd}"
         else:
             if self.stopped:
