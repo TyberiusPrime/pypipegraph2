@@ -26,15 +26,21 @@ StatusReport = namedtuple(
 
 class UnbufferedContext:
     def __init__(self, file):
-        self.fd = file.fileno()
-        self.file = file
-        self.settings = termios.tcgetattr(file)
+        try:
+            self.fd = file.fileno()
+            self.file = file
+            self.settings = termios.tcgetattr(file)
+        except io.UnsupportedOperation as e:
+            if "redirected stdin is pseudofile" in str(e):
+                pass
 
     def __enter__(self, *foo):
-        tty.setcbreak(self.file)
+        if hasattr(self, "file"):
+            tty.setcbreak(self.file)
 
     def __exit__(self, *foo):
-        termios.tcsetattr(self.fd, termios.TCSADRAIN, self.settings)
+        if hasattr(self, "file"):
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.settings)
 
 
 class ConsoleInteractive:
@@ -48,7 +54,9 @@ class ConsoleInteractive:
         self.stopped = False
         self.leave_thread = False
         self.thread.start()
-        log_info("PPG online. Type 'help' and press enter to receive a list of valid commands")
+        log_info(
+            "PPG online. Type 'help' and press enter to receive a list of valid commands"
+        )
         self._cmd = ""
         self.status = rich.status.Status("", console=console)
         self.status.start()
