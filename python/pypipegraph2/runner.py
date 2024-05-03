@@ -874,7 +874,7 @@ class Runner:
                             captured_tb = ppg_traceback.Trace(
                                 exception_type, exception_value, tb
                             )
-                            print(captured_tb)
+                            # print(captured_tb)
                             e = exceptions.JobError(
                                 e,
                                 captured_tb,

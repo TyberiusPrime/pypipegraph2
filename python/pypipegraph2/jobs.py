@@ -945,6 +945,8 @@ class MultiFileGeneratingJob(Job):
             self.generating_function(*input)
         missing_files = [x for x in self.files if not x.exists()]
         if missing_files:
+            for m in sorted(missing_files):
+                log_error(f"Job '{self.job_id}' - file not created: '{m}'")
             raise exceptions.JobContractError(
                 f"Job {self.job_id} did not create the following files: {[str(x) for x in missing_files]}"
             )
@@ -2829,7 +2831,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         return self[output_filename]
 
     def __getitem__(self, key):
-        print(self._lookup)
         if not self._lookup:
             if isinstance(key, int):
                 return self._map_filename(self.org_files[key])

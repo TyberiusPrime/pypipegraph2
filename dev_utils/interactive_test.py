@@ -45,7 +45,7 @@ def do_b(ofs):
     ofs[0].write_text("B")
 
 
-ppg.MultiFileGeneratingJob(["b", 'B1'], do_b)
+ppg.MultiFileGeneratingJob(["b", 'B1', 'shubidudb'], do_b)
 
 
 c = ppg.FileGeneratingJob("C", do_a, resources=ppg.Resources.Exclusive)
