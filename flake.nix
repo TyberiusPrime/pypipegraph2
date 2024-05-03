@@ -4,7 +4,7 @@
   inputs = {
     import-cargo.url = github:edolstra/import-cargo;
 
-    nixpkgs.url = "github:NixOS/nixpkgs/22.05"; # that's 21.05
+    nixpkgs.url = "github:NixOS/nixpkgs/23.11";
     naersk.url = "github:nmattia/naersk";
     naersk.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay.url = "github:oxalica/rust-overlay";
@@ -22,7 +22,7 @@
     system = "x86_64-linux";
     overlays = [(import rust-overlay)];
     pkgs = import nixpkgs {inherit system overlays;};
-    rust = pkgs.rust-bin.stable."1.65.0".default.override {
+    rust = pkgs.rust-bin.stable."1.78.0".default.override {
       targets = ["x86_64-unknown-linux-gnu" "x86_64-unknown-linux-musl"];
       extensions = ["llvm-tools-preview"];
     };
@@ -187,7 +187,7 @@
         doCheck = false;
       };
 
-    mypython = pkgs.python39.withPackages (p: [
+    mypython = pkgs.python311.withPackages (p: [
       #todo: figure out how to derive this from pyproject.toml
       p.pytest
       p.pytest-mock
