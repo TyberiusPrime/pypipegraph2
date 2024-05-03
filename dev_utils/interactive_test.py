@@ -40,15 +40,12 @@ def do_a(of):
 ppg.FileGeneratingJob("A", do_a)
 
 
-def do_b(of):
-    shu = 5
-    raise ValueError()
-    time.sleep(min(5, runtime))
-    print(shu)
-    of.write_text("B")
+def do_b(ofs):
+    assert ofs[0].name == 'b'
+    ofs[0].write_text("B")
 
 
-ppg.FileGeneratingJob("B", do_b)
+ppg.MultiFileGeneratingJob(["b", 'B1'], do_b)
 
 
 c = ppg.FileGeneratingJob("C", do_a, resources=ppg.Resources.Exclusive)

@@ -48,7 +48,7 @@ class ConsoleInteractive:
         self.stopped = False
         self.leave_thread = False
         self.thread.start()
-        log_info("PPG online. Type 'help<enter>' to receive a list of valid commands")
+        log_info("PPG online. Type 'help' and press enter to receive a list of valid commands")
         self._cmd = ""
         self.status = rich.status.Status("", console=console)
         self.status.start()

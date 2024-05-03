@@ -93,7 +93,7 @@ def new(
         for name, default_arg in [
             ("cores", ALL_CORES),
             ("dir_config", DirConfig(".ppg")),
-            ("log_level", logging.DEBUG),  # that's the one for the log file
+            ("log_level", logging.INFO),  # that's the one for the log file
             ("allow_short_filenames", False),
             ("run_mode", RunMode.CONSOLE),
             ("log_retention", 3),

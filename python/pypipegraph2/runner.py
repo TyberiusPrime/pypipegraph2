@@ -116,8 +116,8 @@ def spawn_watcher():
             f"Watcher identifies process by process group id {watcher_session_id}"
         )
     recv, send = multiprocessing.Pipe()
-    log_debug("Collecting already running process that will be ignored by teh watcher")
-    log_debug("%s" % (watcher_ignored_processes,))
+    ljt("Collecting already running process that will be ignored by the watcher")
+    ljt("%s" % (watcher_ignored_processes,))
     pid = os.fork()
     if pid == 0:
         watcher_ignored_processes = list(get_same_session_id_processes())
@@ -647,7 +647,7 @@ class Runner:
                         ef.flush()
 
                     log(
-                        f"Job failed: {job_id}\n"
+                        f"Job failed  : '{job_id}'\n"
                         f"\n\tMore details (stdout, locals) in {error_file}\n"
                         f"\tFailed after {job.run_time:.2}s.\n"
                     )
@@ -699,7 +699,7 @@ class Runner:
 
                             for cleanup_job_id in cleanups:
                                 try:
-                                    log_info(f"Cleanup for {cleanup_job_id}")
+                                    log_debug(f"Cleanup for {cleanup_job_id}")
                                     self.jobs[cleanup_job_id].cleanup()
                                 except Exception as e:
                                     log_error(f"Cleanup had an exception {repr(e)}")
@@ -814,6 +814,7 @@ class Runner:
                             if self.stopped or self.aborted:
                                 continue  # -> while not stopped -> break
                             job.start_time = time.time()  # the *actual* start time
+                            log_info(f"Job started : '{job_id}'")
                             job.waiting = False
                             self._interactive_report()
                             ljt(f"Go {job_id}")

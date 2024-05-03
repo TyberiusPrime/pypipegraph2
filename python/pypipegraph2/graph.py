@@ -27,6 +27,7 @@ from .util import (
     log_warning,
     log_debug,
     log_trace,
+    escape_logging,
 )
 from . import util
 from rich.logging import RichHandler
@@ -219,29 +220,45 @@ class PyPipeGraph:
         if self.dir_config.log_dir:
             self._cleanup_logs()
             fn = Path(sys.argv[0]).name
-            self.log_file = self.dir_config.log_dir / f"{fn}-{self.time_str}.log"
-            logger.remove()  # no default logging
-            logger.add(
-                open(self.log_file, "w"), level=min(self.log_level, logging.DEBUG)
+            self.log_file = (
+                self.dir_config.log_dir / f"{fn}-{self.time_str}.messages.log"
             )
-            if False:
-                logger.add(
-                    RichHandler(
-                        markup=False,
-                        console=Console(
-                            file=open(
-                                self.dir_config.log_dir / f"{fn}-{self.time_str}.log",
-                                "w",
-                            ),
-                            width=120,  #
-                        ),
-                    ),
-                    level=self.log_level,
-                )
+            self.log_file_lookup = (
+                self.dir_config.log_dir / f"{fn}-{self.time_str}.lookup.log"
+            )
+            log_position_lookup = {}
+            log_position_lookup_file = open(self.log_file_lookup, "w", buffering=1)
+            logger.remove()  # no default logging
+
+            def smart_format(x):
+                key = x["file"], x["function"], x["line"]
+                if not key in log_position_lookup:
+                    next_number = len(log_position_lookup)
+                    min_len = max(3, len(str(next_number)))
+                    log_position_lookup[key] = ("{0:>" + str(min_len) + "}").format(
+                        str(next_number)
+                    )
+                    log_position_lookup_file.write(
+                            "{} | {:>15}:{:>4} | {}\n".format(
+                            log_position_lookup[key],
+                            x["file"],
+                            x["line"],
+                            x["function"],
+                        )
+                    )
+                return f"{x['level']:<5} | {log_position_lookup[key]} | {x['time']:HH:mm::ss} | {escape_logging(x['message'])}\n"
+
+            logger.add(
+                open(self.log_file, "w"),
+                level=self.log_level,
+                format=smart_format,
+            )
+            log_info(f"See {self.log_file_lookup} for code positions (2nd column)")
+
             # if "pytest" in sys.modules:  # pragma: no branch
             log_id = logger.add(
                 sink=sys.stdout,
-                level=logging.INFO
+                level=logging.WARNING
                 if not util.do_jobtrace_log
                 else 6,  # don't spam stdout
                 format=(
@@ -380,18 +397,21 @@ class PyPipeGraph:
         )
 
     def _cleanup_logs(self):
-        """Clean up old logs and drop a 'latest' symlink"""
+        """Clean up old logs"""
         if (
             not self.dir_config.log_dir or self.log_retention is None
         ):  # pragma: no cover
             return
         fn = Path(sys.argv[0]).name
-        pattern = f"{fn}-*.log"
+        pattern = f"{fn}-*.messages.log"
         files = sorted(self.dir_config.log_dir.glob(pattern))
         if len(files) > self.log_retention:
             remove = files[: -self.log_retention]
             for f in remove:
-                os.unlink(f)
+                f.unlink()
+                lf = f.with_name(f.name[: -1 * len(".messages.log")] + ".lookup.log")
+                if lf.exists():
+                    lf.unlink()
 
     def _link_latest(self, dir, pattern, latest_name, target_is_directory):
         link_name = dir / latest_name
@@ -409,7 +429,12 @@ class PyPipeGraph:
 
     def _link_logs(self):
         fn = Path(sys.argv[0]).name
-        self._link_latest(self.dir_config.log_dir, f"{fn}-*.log", "latest", False)
+        self._link_latest(
+            self.dir_config.log_dir, f"{fn}-*.messages.log", "latest.messages", False
+        )
+        self._link_latest(
+            self.dir_config.log_dir, f"{fn}-*.lookup.log", "latest.lookup", False
+        )
 
     def _cleanup_errors(self):
         """Cleanup old errors and drop a 'latest' symlink"""
