@@ -27,7 +27,8 @@ import filelock
 from .util import (
     log_info,
     log_error,
-    log_warning,  # log_debug,
+    log_warning,
+    log_debug,
     log_trace,
     log_job_trace,
 )
@@ -1085,11 +1086,20 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
         self._single_file = False
 
     def run(self, runner, historical_output):
+        log_error(f"running {self.job_id}")
         if historical_output and self.all_files_exist():
-            new_hashes = {
-                str(of): hashers.hash_file(self._map_filename(of))
-                for of in self.org_files
-            }
+            new_hashes = {}
+            for filename in self.org_files:
+                filename = str(filename)
+                if filename in historical_output:
+                    stat = Path(self._map_filename(filename)).stat()
+                    if int(stat.st_mtime) == historical_output[filename].get(
+                        "mtime", -1
+                    ) and stat.st_size == historical_output[filename].get("size", -1):
+                        new_hashes[filename] = historical_output[filename]
+                        continue
+                new_hashes[filename] = hashers.hash_file(self._map_filename(filename))
+
             all_ok = True
             for filename in self.org_files:
                 key = str(filename)
@@ -1099,10 +1109,11 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
                 else:
                     all_ok = False
             if all_ok:
-                log_job_trace(
+                log_debug(
                     "Temp file output existed and had same hashes. No recalc, but job 'ran'"
                 )
                 return new_hashes
+
         return MultiFileGeneratingJob.run(self, runner, historical_output)
 
     def all_files_exist(self):

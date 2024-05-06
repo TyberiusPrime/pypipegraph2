@@ -40,15 +40,16 @@ def do_a(of):
 ppg.FileGeneratingJob("A", do_a)
 
 
-def do_b(ofs):
-    assert ofs[0].name == 'b'
+def do_b(ofs, prefix):
+    assert ofs[0].name == "b"
     ofs[0].write_text("B")
 
 
-ppg.MultiFileGeneratingJob(["b", 'B1', 'shubidudb'], do_b)
+b = ppg.SharedMultiFileGeneratingJob("shi", ["b", "B1", "shubidudb"], do_b)
 
 
 c = ppg.FileGeneratingJob("C", do_a, resources=ppg.Resources.Exclusive)
+c.depends_on(b)
 
 
 ppg.run()

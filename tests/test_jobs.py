@@ -1941,19 +1941,6 @@ class TestTempFileGeneratingJob:
         assert Path("a").read_text() == "4"
         assert Path("c").read_text() == "1"
 
-    def test_order_of_files_is_kept_for_callback(self):
-        def do_b(ofs):
-            assert ofs[0].name == "b"
-            assert ofs[1].name == "B1"
-            ofs[0].write_text("B")
-            ofs[1].write_text("B")
-
-        a = ppg.MultiTempFileGeneratingJob(["b", "B1"], do_b)
-        b = ppg.FileGeneratingJob("c", lambda of: of.write_text("b"))
-        b.depends_on(a)
-
-        ppg.run()
-
 
 @pytest.mark.usefixtures("create_out_dir")
 @pytest.mark.usefixtures("ppg2_per_test")
@@ -2029,6 +2016,50 @@ class TestMultiTempFileGeneratingJob:
         param = "A"
         with pytest.raises(TypeError):
             ppg.MultiTempFileGeneratingJob(25, lambda of: write("out/A", param))
+
+    def test_order_of_files_is_kept_for_callback(self):
+        def do_b(ofs):
+            assert ofs[0].name == "b"
+            assert ofs[1].name == "B1"
+            ofs[0].write_text("B")
+            ofs[1].write_text("B")
+
+        a = ppg.MultiTempFileGeneratingJob(["b", "B1"], do_b)
+        b = ppg.FileGeneratingJob("c", lambda of: of.write_text("b"))
+        b.depends_on(a)
+
+        ppg.run()
+
+    def test_no_reshash_on_fail_of_dep(self, mocker):
+        def gen():
+            def do_b(ofs):
+                ofs[0].write_text("b")
+                ofs[1].write_text("B1")
+
+            b = ppg.MultiTempFileGeneratingJob(["b", "B1"], do_b)
+
+            def do_c(of):
+                raise ValueError()
+
+            c = ppg.FileGeneratingJob("c", lambda of: do_c)
+            c.depends_on(b)
+
+        gen()
+        spy = mocker.spy(ppg.hashers, "hash_file")
+        with pytest.raises(ppg.JobsFailed):
+            ppg.run()
+        assert Path("b").exists()
+        assert Path("B1").exists()
+        assert not Path("c").exists()
+
+        till_here = spy.call_count
+
+        ppg.new()
+        gen()
+        with pytest.raises(ppg.JobsFailed):
+            ppg.run()
+        now = spy.call_count
+        assert now == till_here
 
 
 @pytest.mark.usefixtures("ppg2_per_test")
