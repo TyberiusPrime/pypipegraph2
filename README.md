@@ -2,20 +2,21 @@
 
 
 Fine-grained tracking of what goes into generated artifacts,
-and when do we actually need to recalculate them.
+and when it's necessary to recalculate them.
 
 Also, trivial parallelization.
+
 
 
 ## Description
 
 There's a bunch of 'pipeline' packages out there.
 
-For scientific workflow managment.
+For scientific workflow management.
 
 Often with a lot of 'magic'.
 
-SnakeMake is popular.
+SnakeMake for example is popular.
 
 Pypipegraph2 is a bit different.
 

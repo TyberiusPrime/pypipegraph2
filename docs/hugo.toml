@@ -1,0 +1,5 @@
+#baseURL = 'https://tyberiusprime@github.io/pypipegraph2'
+#canonifyURLs = true
+languageCode = 'en-us'
+title = 'Pypipegraph2 documentation'
+theme = "hugo-book"
