@@ -57,6 +57,7 @@ jobs:
           HUGO_ENV: production
           TZ: America/Los_Angeles
         run: |
+          cd docs && \
           hugo \
             --gc \
             --minify \
