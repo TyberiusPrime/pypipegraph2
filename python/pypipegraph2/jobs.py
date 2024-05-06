@@ -1025,7 +1025,7 @@ class MultiFileGeneratingJob(Job):
             return self.files
 
     def _map_filename(self, f):
-        return f
+        return Path(f)
 
     def kill_if_running(self):  # pragma: no cover - todo: interactive testing
         if self.pid is not None:
