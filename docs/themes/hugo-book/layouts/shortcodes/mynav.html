@@ -1,0 +1,8 @@
+<dl>
+{{ range .Page.Pages }}
+<dt>
+    <a href="{{ .RelPermalink }}">{{ partial "docs/title" . }}</a>
+	</td>
+
+{{ end }}
+</dl>

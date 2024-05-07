@@ -3,39 +3,54 @@ title: Introduction
 type: docs
 ---
 
-# Acerbo datus maxime
+# PyPipegraph2
 
 {{< columns >}}
-## Astris ipse furtiva
+## A modern make for the hashes-are-cheap age
 
-Est in vagis et Pittheus tu arge accipiter regia iram vocatur nurus. Omnes ut
-olivae sensit **arma sorori** deducit, inesset **crudus**, ego vetuere aliis,
-modo arsit? Utinam rapta fiducia valuere litora _adicit cursu_, ad facies
+PyPipegraph2 tracks every single one of our inputs and outputs with hashes,
+and rebuilds just what is necessary. 
 
 <--->
 
-## Suis quot vota
+## Advanced python introspection
 
-Ea _furtique_ risere fratres edidit terrae magis. Colla tam mihi tenebat:
-miseram excita suadent es pecudes iam. Concilio _quam_ velatus posset ait quod
-nunc! Fragosis suae dextra geruntur functus vulgata.
+PyPipegraph2 jobs wrap python functions. And they track the source code of those functions.
+If it changes, the job [invalidates](concepts#invalidation) it's downstreams.
+
 {{< /columns >}}
 
+# What is tracked?
 
-## Tempora nisi nunc
+* input files (d'oh), 
+* intermediary files, 
+* output files,
+* parameters,
+* python function definitions,
 
-Lorem **markdownum** emicat gestu. Cannis sol pressit ducta. **Est** Idaei,
-tremens ausim se tutaeque, illi ulnis hausit, sed, lumina cutem. Quae avis
-sequens!
 
-    var panel = ram_design;
-    if (backup + system) {
-        file.readPoint = network_native;
-        sidebar_engine_device(cell_tftp_raster,
-                dual_login_paper.adf_vci.application_reader_design(
-                graphicsNvramCdma, lpi_footer_snmp, integer_model));
-    }
+## Minimal example
 
-## Locis suis novi cum suoque decidit eadem
+```python
+import pypipegraph2 as ppg
 
-Idmoniae ripis, at aves, ali missa adest, ut _et autem_, et ab?
+ppg.new()
+
+job_a = ppg.FileGeneratingJob("a.txt", lambda of: of.write_text("hello"))
+job_b = ppg.FileGeneratingJob("b.txt", 
+                lambda of: of.write_text(Path('a.txt').read_text() + " world")
+        ).depends_on(job_a)
+
+ppg.run()
+```
+
+
+## Diátaxis 
+
+Our documentation follows the [Diátaxis](https://diataxis.fr) standard, 
+so head on by using the side bar to the left to learn more.
+
+
+## Source code
+Source code for the MIT-Licenced PyPipegraph2 is available on [GitHub](https://github.com/TyberiusPrime/pypipegraph2).
+
