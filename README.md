@@ -1,5 +1,11 @@
 # pypipegraph2
-
+[
+![Docs available](https://badgen.net/badge/Docs/available/green?icon=docs)
+](https://tyberiusprime.github.io/pypipegraph2/)
+[![PyPI version](https://badge.fury.io/py/pypipegraph2.svg)](https://pypi.org/projects/pypipegraph2)
+[
+![Nix flake](https://badgen.net/badge/Nix%20flake/available/blue?icon=docs)
+](https://github.com/TyberiusPrime/pypipegraph2/blob/main/flake.nix)
 
 Fine-grained tracking of what goes into generated artifacts,
 and when it's necessary to recalculate them.
