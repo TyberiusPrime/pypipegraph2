@@ -469,7 +469,7 @@ class PyPipeGraph:
                             f"{job_id}\t{int(run_start_time)}\t{job_result.run_time:.2f}"
                         )
             with open(rt_file, "a+") as op:
-                op.write("\n".join(lines))
+                op.write("\n".join(lines) + "\n")
 
     def get_history_filename(self):
         """where do we store the graph's history?"""
