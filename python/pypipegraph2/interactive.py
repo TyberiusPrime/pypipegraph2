@@ -189,13 +189,14 @@ class ConsoleInteractive:
         for job_id in self.runner.jobs_in_flight:
             try:
                 rt = t - self.runner.jobs[job_id].start_time
-                to_sort.append((rt, job_id))
+                status = self.runner.jobs[job_id].waiting
+                to_sort.append((not status, rt, job_id))
             except KeyError:
                 pass
         to_sort.sort()
         print(" | ".join(("Job_no", "Runtime", "Cores", "Job_id")))
         print(" | ".join(("------", "-------", "-----", "------")))
-        for rt, job_id in to_sort:
+        for status,rt, job_id in to_sort:
             job = self.runner.jobs[job_id]
             job_no = job.job_number
             if job.waiting:
@@ -204,6 +205,7 @@ class ConsoleInteractive:
                 rt = f"{rt:>6.2f}s"
             display_job_id = shorten_job_id(job_id)
             cores = job.actual_cores_needed if job.actual_cores_needed != -1 else "?"
+            cores = f"{cores:>5}"
             print(f"{job_no:>6} | {rt} | {cores} | {display_job_id}")
         print("")
 
