@@ -229,6 +229,7 @@
         pkgs.py-spy
         pkgs.file
         pkgs.pre-commit
+        pkgs.black
       ];
     };
   };

@@ -36,6 +36,7 @@ dev = [
 	"pytest",
 	"pytest-cov",
 	"pre-commit",
+	"black",
 ]
 
 test = [

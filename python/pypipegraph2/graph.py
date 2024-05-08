@@ -32,7 +32,7 @@ from .util import (
 from . import util
 
 
-logger.level("JT", no=6, color="<yellow>", icon="🐍")
+logger.level("JT", no=6, color="<yellow>", icon="?")
 logger.level("INFO", color="")
 # if "pytest" in sys.modules:  # pragma: no branch
 # log_out = sys.stderr
@@ -247,7 +247,7 @@ class PyPipeGraph:
                                 key
                             )
                         )
-                return f"{x['level']:<5} | {log_position_lookup[key]} | {x['time']:HH:mm::ss:SS} | {escape_logging(x['message'])}\n"
+                return f"{x['level']:<5} | {log_position_lookup[key]} | {x['time']:HH:mm:ss:SS} | {escape_logging(x['message'])}\n"
 
             logger.add(
                 open(self.log_file, "w"),
@@ -693,9 +693,9 @@ class PyPipeGraph:
                     raise exceptions.JobOutputConflict(
                         job, self.jobs[self.outputs_to_job_ids[output]]
                     )
-            self.outputs_to_job_ids[output] = (
-                job.job_id
-            )  # todo: seperate this into two dicts?
+            self.outputs_to_job_ids[
+                output
+            ] = job.job_id  # todo: seperate this into two dicts?
         # we use job numbers during run
         # to keep output files unique etc.
 
