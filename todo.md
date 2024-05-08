@@ -135,3 +135,5 @@ Open stuff
 - recheck everything above
    - sort interactive jobs by 'status' (running, waiting)
    - much better default log output... tell me what jobs spawned & finished
+
+- check the runtime log, I think it's sometimes missing newlines?

@@ -78,3 +78,4 @@ examples/simplest/
 tests/run
 tests/**/run
 *shu*
+examples/run

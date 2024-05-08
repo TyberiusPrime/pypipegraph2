@@ -7,6 +7,28 @@
 ![Nix flake](https://badgen.net/badge/Nix%20flake/available/blue?icon=docs)
 ](https://github.com/TyberiusPrime/pypipegraph2/blob/main/flake.nix)
 
+<svg width="93.8" height="20" viewBox="0 0 938 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="docs: available">
+  <title>docs: available</title>
+  <linearGradient id="FaUuN" x2="0" y2="100%">
+    <stop offset="0" stop-opacity=".1" stop-color="#EEE"/>
+    <stop offset="1" stop-opacity=".1"/>
+  </linearGradient>
+  <mask id="MaZyA"><rect width="938" height="200" rx="30" fill="#FFF"/></mask>
+  <g mask="url(#MaZyA)">
+    <rect width="350" height="200" fill="#555"/>
+    <rect width="588" height="200" fill="#08C" x="350"/>
+    <rect width="938" height="200" fill="url(#FaUuN)"/>
+  </g>
+  <g aria-hidden="true" fill="#fff" text-anchor="start" font-family="Verdana,DejaVu Sans,sans-serif" font-size="110">
+    <text x="60" y="148" textLength="250" fill="#000" opacity="0.25">docs</text>
+    <text x="50" y="138" textLength="250">docs</text>
+    <text x="405" y="148" textLength="488" fill="#000" opacity="0.25">available</text>
+    <text x="395" y="138" textLength="488">available</text>
+  </g>
+  
+</svg>
+[docs](https://tyberiusprime.github.io/pypipegraph2/)
+
 Fine-grained tracking of what goes into generated artifacts,
 and when it's necessary to recalculate them.
 

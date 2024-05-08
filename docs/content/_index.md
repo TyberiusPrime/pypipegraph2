@@ -21,6 +21,18 @@ If it changes, the job [invalidates](concepts#invalidation) it's downstreams.
 {{< /columns >}}
 
 # What is tracked?
+{{< mermaid class="optional" >}}
+graph TD;
+    Input_Files-->Intermediary_and_Temporary_Files;
+    Intermediary_and_Temporary_Files-->Output_files;
+    Python_Functions-->Output_files;
+    Python_Functions-->Intermediary_and_Temporary_Files;
+    Parameters-->Output_files;
+    Parameters-->Intermediary_and_Temporary_Files;
+    Intermediary_and_Temporary_Files-->Output_files;
+{{< /mermaid >}}
+
+
 
 * input files (d'oh), 
 * intermediary files, 
