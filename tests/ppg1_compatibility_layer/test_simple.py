@@ -33,7 +33,6 @@ class TestSimple:
 
     @pytest.mark.skip  # ppg2 can run twice
     def test_can_not_run_twice(self):
-
         ppg.new_pipegraph(dump_graph=False, interactive=False)
         ppg.run_pipegraph()
         try:
@@ -45,7 +44,6 @@ class TestSimple:
 
     @pytest.mark.skip  # ppg2 can run again, even with more jobs
     def test_can_not_add_jobs_after_run(self):
-
         ppg.new_pipegraph(dump_graph=False)
         ppg.run_pipegraph()
         try:

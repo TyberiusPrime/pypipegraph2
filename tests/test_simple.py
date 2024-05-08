@@ -38,13 +38,11 @@ class TestSimple:
             ppg.run()
 
     def test_can_run_twice(self):
-
         ppg.run()
         ppg.run()
         ppg.run()
 
     def test_can_add_jobs_after_run(self):
-
         ppg.new()
         ppg.run()
         ppg.FileGeneratingJob("A", lambda of: write(of, "A"))

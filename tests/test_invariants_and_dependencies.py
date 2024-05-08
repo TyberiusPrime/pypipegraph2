@@ -1259,7 +1259,6 @@ class TestDependency:
         assert read("out/D") == "D"
 
     def test_invariant_job_depends_on_raises(self):
-
         with pytest.raises(ppg.JobContractError):
             ppg.jobs._InvariantMixin().depends_on(ppg.Job(["B"]))
 

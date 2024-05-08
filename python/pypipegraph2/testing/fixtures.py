@@ -79,7 +79,6 @@ def new_pipegraph(request):
 
         def finalize():
             if hasattr(request.node, "rep_setup"):
-
                 if request.node.rep_setup.passed and (
                     request.node.rep_call.passed
                     or request.node.rep_call.outcome == "skipped"
@@ -123,7 +122,6 @@ def no_pipegraph(request):
 
         def finalize():
             if hasattr(request.node, "rep_setup"):
-
                 if request.node.rep_setup.passed and (
                     request.node.rep_call.passed
                     or request.node.rep_call.outcome == "skipped"
@@ -203,7 +201,6 @@ def both_ppg_and_no_ppg(request):
 
             def finalize():
                 if hasattr(request.node, "rep_setup"):
-
                     if request.node.rep_setup.passed and (
                         hasattr(request.node, "rep_call")
                         and (
@@ -257,7 +254,6 @@ def both_ppg_and_no_ppg(request):
 
             def finalize():
                 if hasattr(request.node, "rep_setup"):
-
                     if request.node.rep_setup.passed and (
                         request.node.rep_call.passed
                         or request.node.rep_call.outcome == "skipped"

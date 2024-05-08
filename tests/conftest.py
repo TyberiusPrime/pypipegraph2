@@ -65,7 +65,6 @@ def dir_per_test(request):
 
         def finalize():
             if hasattr(request.node, "rep_setup"):
-
                 if request.node.rep_setup.passed and (
                     request.node.rep_call.passed
                     or request.node.rep_call.outcome == "skipped"
@@ -148,7 +147,6 @@ def ppg1_compatibility_test(request):
 
         def finalize():
             if hasattr(request.node, "rep_setup"):
-
                 if request.node.rep_setup.passed and (
                     request.node.rep_call.passed
                     or request.node.rep_call.outcome == "skipped"

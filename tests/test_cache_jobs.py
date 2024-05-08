@@ -43,7 +43,6 @@ class TestCachedDataLoadingJob:
         assert Path("out/mycalc").exists()
 
     def test_passing_non_function_to_calc(self):
-
         with pytest.raises(TypeError):
             ppg.CachedDataLoadingJob("out/a", "shu", lambda value: 55)
 

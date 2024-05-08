@@ -1132,7 +1132,6 @@ class TestFunctionInvariant:
     @pytest.mark.skip  # ppg2 does it's own smart thing - no need to test here
     # @pytest.mark.xfail was marked fail
     def test_invariant_caching(self):
-
         a = ppg.FunctionInvariant("a", ppg.inside_ppg)
         old_dis = a.dis_code
         counter = [0]
@@ -1734,7 +1733,6 @@ class TestDependency:
         assert read("out/D") == "D"
 
     def test_invariant_job_depends_on_raises(self):
-
         with pytest.raises(ppg.JobContractError):
             ppg.ParameterInvariant("A", "a").depends_on(
                 ppg.Job(["B"])
@@ -1810,7 +1808,6 @@ class TestDependency:
         assert read("out/A") == "ABC"
 
     def test_dependency_placeholder_dynamic_auto_invariants(self):
-
         jobA = ppg.FileGeneratingJob(
             "out/A", lambda: write("out/A", "A" + read("out/B"))
         )
