@@ -196,7 +196,7 @@ class ConsoleInteractive:
         to_sort.sort()
         print(" | ".join(("Job_no", "Runtime", "Cores", "Job_id")))
         print(" | ".join(("------", "-------", "-----", "------")))
-        for status,rt, job_id in to_sort:
+        for status, rt, job_id in to_sort:
             job = self.runner.jobs[job_id]
             job_no = job.job_number
             if job.waiting:

@@ -12,6 +12,6 @@ while True:
     try:
         q.get(timeout=5)
         break
-    except (queue.Empty):
+    except queue.Empty:
         print("timeout")
 print("leaving - all OK")

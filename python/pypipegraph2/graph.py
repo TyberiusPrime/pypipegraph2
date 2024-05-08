@@ -256,9 +256,9 @@ class PyPipeGraph:
             # if "pytest" in sys.modules:  # pragma: no branch
             log_id = logger.add(
                 sink=sys.stdout,
-                level=logging.WARNING
-                if not util.do_jobtrace_log
-                else 6,  # don't spam stdout
+                level=(
+                    logging.WARNING if not util.do_jobtrace_log else 6
+                ),  # don't spam stdout
                 format=(
                     "\r  <blue>{elapsed}s</blue> <bold>|</bold> <level>{message}</level>"
                     if not util.do_jobtrace_log
@@ -690,9 +690,9 @@ class PyPipeGraph:
                     raise exceptions.JobOutputConflict(
                         job, self.jobs[self.outputs_to_job_ids[output]]
                     )
-            self.outputs_to_job_ids[
-                output
-            ] = job.job_id  # todo: seperate this into two dicts?
+            self.outputs_to_job_ids[output] = (
+                job.job_id
+            )  # todo: seperate this into two dicts?
         # we use job numbers during run
         # to keep output files unique etc.
 

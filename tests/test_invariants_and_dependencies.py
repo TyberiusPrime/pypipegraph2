@@ -440,9 +440,7 @@ class TestInvariant:
             "out/A", w2, depend_on_function=False
         )  # and this job crashes
         fg.depends_on(func_dep)  # so a get's deleted, and rebuild
-        ppg.FileGeneratingJob(
-            "out/C", lambda of: counter("out/c") and append(of, "C")
-        )
+        ppg.FileGeneratingJob("out/C", lambda of: counter("out/c") and append(of, "C"))
         assert not hasattr(ppg.global_pipegraph, "last_run_result")
         ppg.global_pipegraph._test_failing_outside_of_job = True
         with pytest.raises(ppg.JobsFailed):
@@ -467,9 +465,7 @@ class TestInvariant:
             "out/A", w, depend_on_function=False
         )  # but this was not done the last time...
         fg.depends_on(func_dep)
-        ppg.FileGeneratingJob(
-            "out/C", lambda of: counter("out/c") and append(of, "C")
-        )
+        ppg.FileGeneratingJob("out/C", lambda of: counter("out/c") and append(of, "C"))
         ppg.run()
         assert read("out/A") == "A"
         assert read("out/B") == "BB"
@@ -544,7 +540,9 @@ class TestInvariant:
         write("out/b", "a")
         import pickle
 
-        Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(parents=True, exist_ok=True)
+        Path(ppg.global_pipegraph.get_history_filename()).parent.mkdir(
+            parents=True, exist_ok=True
+        )
         with gzip.GzipFile(ppg.global_pipegraph.get_history_filename(), "wb") as op:
             pickle.dump(a.job_id, op, pickle.HIGHEST_PROTOCOL)
             op.write(b"This breaks")

@@ -30,9 +30,7 @@ def gen_jobs_stack(name, runtime, total_runtime=total_runtime):
 
     out_jobs = []
     for ii in range(0, total_runtime + 1, runtime):
-        ppg.FileGeneratingJob(
-            f"{name}_{ii}", inner, resources=ppg.Resources.SingleCore
-        )
+        ppg.FileGeneratingJob(f"{name}_{ii}", inner, resources=ppg.Resources.SingleCore)
         if out_jobs:
             out_jobs[-1].depends_on(ii)
     return out_jobs

@@ -228,6 +228,7 @@
         pkgs.maturin
         pkgs.py-spy
         pkgs.file
+        pkgs.pre-commit
       ];
     };
   };

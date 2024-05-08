@@ -1,5 +1,6 @@
 +++
 title = "FAQ"
+BookFlatSection = true
 +++
 
 ## I'm defining jobs in a loop, but they all have the same output.

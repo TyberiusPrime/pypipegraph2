@@ -269,7 +269,7 @@ def both_ppg_and_no_ppg(request):
 
             request.addfinalizer(finalize)
             ppg2.change_global_pipegraph(None)
-            print('gloabl', ppg2.global_pipegraph)
+            print("gloabl", ppg2.global_pipegraph)
             yield np()
 
         finally:

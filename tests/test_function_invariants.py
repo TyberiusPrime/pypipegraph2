@@ -50,7 +50,7 @@ def b():
         assert actual == should
 
         actual = self.source_via_func_invariant("b", func2)
-        should = '    def b():\n        shu = 55\n    \n        return shu'
+        should = "    def b():\n        shu = 55\n    \n        return shu"
         assert actual == should
 
         ppg.FunctionInvariant("a", func)  # not a redefinition
