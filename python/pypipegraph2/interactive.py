@@ -54,6 +54,7 @@ class ConsoleInteractive:
         self.stopped = False
         self.leave_thread = False
         self.thread.start()
+        self.again = False 
         log_info(
             "PPG online. Type 'help' and press enter to receive a list of valid commands"
         )
@@ -156,6 +157,8 @@ class ConsoleInteractive:
         self.counter += 1
         # msg = f"[dim]Running/Waiting Done/Total[/dim] {report.running} / {report.waiting} {report.done} / {report.total}."  # In flight: {len(self.runner.jobs_in_flight)} "
         msg = f"[dim]T:[/dim]{report.total} D:{report.done} R:{report.running} W:{report.waiting} F:{report.failed} {self.counter}"
+        if self.again:
+            msg += ' (again) '
         if hasattr(self, "cmd") and self.cmd:
             msg += f" Cmd: {self.cmd}"
         else:
@@ -240,6 +243,7 @@ class ConsoleInteractive:
     def _cmd_again(self, _args):
         """Restart the current python program after all jobs have completed"""
         log_info("Again command issued")
+        self.again = True
         self.runner.job_graph.restart_afterwards()
 
     def _cmd_stop_and_again(self, _args):
@@ -248,6 +252,7 @@ class ConsoleInteractive:
         # self.runner.stop()
         # self.stopped = True
         # self.runner.job_graph.restart_afterwards()
+        self.again = True
         self._cmd_stop(_args)
         self._cmd_again(_args)
 
