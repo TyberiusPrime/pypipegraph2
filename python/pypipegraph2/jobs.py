@@ -2961,3 +2961,160 @@ def NotebookJob(notebook_file, input_files, output_files, html_output_folder):
     )  # todo: replace with 'code in notebook'
     job.depends_on(input_files)
     return job
+
+
+class ExternalOutputPath:
+    """This allows you to refer to the output path
+    in your ExternalJob commands in a don't-need-to-know-the -path way
+    Just plug cmd = [..., ExternalOutputPath / "output.txt",...]
+    in there
+    """
+
+    def __init__(self):
+        self.path = ""
+
+    # implement /
+    def __truediv__(self, other):
+        new = ExternalOutputPath()
+        if self.path:
+            new.path = self.path + "/" + other
+        else:
+            new.path = other
+        return new
+
+
+class ExternalOutputPath:
+    """This allows you to refer to the output path
+    in your ExternalJob commands in a don't-need-to-know-the -path way
+    Just plug cmd = [..., ExternalOutputPath / "output.txt",...]
+    in there
+    """
+
+    def __init__(self):
+        self.path = ""
+
+    # implement /
+    def __truediv__(self, other):
+        new = ExternalOutputPath()
+        if self.path:
+            new.path = self.path + "/" + other
+        else:
+            new.path = other
+        return new
+
+
+def ExternalJob(
+    output_path: Union[str, Path],
+    additional_created_files: Dict[str, Union[str, Path, ExternalOutputPath]],
+    cmd_or_cmd_func: Union[
+        List[Union[str, ExternalOutputPath]], Callable[[], List[str]]
+    ],
+    allowed_return_codes: List[int] = [0],
+    call_before: Optional[Callable[[Job], None]] = None,
+    call_after: Optional[Callable[[Job], None]] = None,
+    job_cls: Job = MultiFileGeneratingJob,
+    resources: Resources = Resources.SingleCore,
+    cwd: Option[Union(Path, str)] = None,
+    start_new_session: bool = False
+):
+    """A job that calls an external program,
+    logging the command, stdout & stderr to files
+    in @output_path (directory!).
+
+    If the process creates additional files that you want to track,
+    add them as dictionary in @additional_created_files.
+    The values are relative to output_path.
+    (job.files has them resolved!)
+
+    The @cmd_or_cmd_func may be a callback - in that case it's called once,
+    when the job is actually executed, allowing you to access all dependencies.
+
+    It may contain ExternalOutputPath objects, which are resolved to the output_path,
+    and passed as str(path.absolute()) to your called process
+
+    If the command returns something else than 0 on success,
+    adjust allowed_return_codes.
+
+    use @call_before(job) and @call_after(job) for pre/postprocessing.
+    Use job.files[key] to access our output files
+    (default keys are 'stdout', 'stderr', 'cmd' and 'return_code').
+
+    You can create tempfile generating jobs by adjusting the job_cls to
+    ppg.TempFileGeneratingJob.
+
+    The working dir of the called process is by default the output_path,
+    but can be overwritten with cwd.
+
+    The @output_path is stored in job.output_path
+
+    @start_new_session is passed on to subprocess.Popen
+
+    """
+    output_path = Path(output_path)
+    assert isinstance(additional_created_files, dict)
+
+    def run(output_files):
+        import subprocess
+
+        if call_before is not None:
+            call_before(res)
+        output_files["stdout"].parent.mkdir(exist_ok=True, parents=True)
+        if callable(cmd_or_cmd_func):
+            cmd = cmd_or_cmd_func()
+        else:
+            cmd = cmd_or_cmd_func
+        cmd = [
+            (
+                x
+                if not isinstance(x, ExternalOutputPath)
+                else str((output_path / x.path).absolute())
+            )
+            for x in cmd
+        ]
+        output_files["cmd"].write_text(" ".join([str(x) for x in cmd]))
+        p = subprocess.Popen(
+            cmd,
+            stdout=open(output_files["stdout"], "wb"),
+            stderr=open(output_files["stderr"], "wb"),
+            cwd=output_path if cwd is None else cwd,
+            start_new_session=start_new_session,
+        )
+        _, _ = p.communicate()
+        output_files["return_code"].write_text(str(p.returncode))
+        if p.returncode not in allowed_return_codes:
+            raise ValueError(
+                "Failed to run",
+                cmd,
+                "return code was",
+                p.returncode,
+                "check files: ",
+                str(output_files["stdout"]),
+                str(output_files["stderr"]),
+            )
+        if call_after is not None:
+            call_after(res)
+
+    files = {k: output_path / v for (k, v) in additional_created_files.items()}
+    for k in ["stdout", "stderr", "cmd", "return_code"]:
+        if k in files:
+            raise KeyError(f"Can not redefine this output file: {k}")
+    files.update(
+        {
+            "stdout": output_path / "stdout.txt",
+            "stderr": output_path / "stderr.txt",
+            "cmd": output_path / "cmd.txt",
+            "return_code": output_path / "return_code.txt",
+        }
+    )
+
+    res = job_cls(files, run, resources=resources)
+    res.output_path = output_path
+    if callable(cmd_or_cmd_func):
+        res.depends_on(FunctionInvariant(res.job_id + "_cmd", cmd_or_cmd_func))
+    else:
+        res.depends_on(ParameterInvariant(res.job_id + "_cmd", cmd_or_cmd_func))
+    if call_before is not None:
+        res.depends_on(FunctionInvariant(res.job_id + "_call_before", call_before))
+    if call_after is not None:
+        res.depends_on(FunctionInvariant(res.job_id + "_call_after", call_after))
+    return res

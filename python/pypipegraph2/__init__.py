@@ -25,6 +25,8 @@ from .jobs import (
     SharedMultiFileGeneratingJob,
     NotebookInvariant,
     NotebookJob,
+    ExternalJob,
+    ExternalOutputPath,
 )
 from .exceptions import (
     PPGException,
@@ -210,6 +212,8 @@ __all__ = [
     "NotebookJob",
     "JobGeneratingJob",
     "SharedMultiFileGeneratingJob",
+    "ExternalJob",
+    "ExternalOutputPath",
     "PPGException",
     "NotADag",
     "FatalGraphException",
