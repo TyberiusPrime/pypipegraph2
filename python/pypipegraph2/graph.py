@@ -196,7 +196,7 @@ class PyPipeGraph:
         """
         ts = str(
             time.time()
-        )  # include subsecond in log names - usefull for the testing, I suppose.
+        )  # include subsecond in log names - useful for the testing, I suppose.
         ts = ts[ts.rfind(".") :]
         self.time_str = datetime.datetime.now().strftime(time_format) + ts
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
@@ -227,23 +227,26 @@ class PyPipeGraph:
             log_position_lookup = {}
             log_position_lookup_file = open(self.log_file_lookup, "w", buffering=1)
             logger.remove()  # no default logging
+            log_lock = threading.Lock()
 
             def smart_format(x):
-                key = x["file"], x["function"], x["line"]
-                if not key in log_position_lookup:
-                    next_number = len(log_position_lookup)
-                    min_len = max(3, len(str(next_number)))
-                    log_position_lookup[key] = ("{0:>" + str(min_len) + "}").format(
-                        str(next_number)
-                    )
-                    log_position_lookup_file.write(
-                        "{} | {:>15}:{:>4} | {}\n".format(
-                            log_position_lookup[key],
-                            x["file"],
-                            x["line"],
-                            x["function"],
+                with log_lock:
+                    key = str((x["file"], x["function"], x["line"]))
+                    if not key in log_position_lookup:
+                        next_number = len(log_position_lookup)
+                        min_len = max(3, len(str(next_number)))
+                        log_position_lookup[key] = ("{0:>" + str(min_len) + "}").format(
+                            str(next_number)
                         )
-                    )
+                        log_position_lookup_file.write(
+                            "{} | {:>15}:{:>4} | {}\nkey: {}\n".format(
+                                log_position_lookup[key],
+                                x["file"],
+                                x["line"],
+                                x["function"],
+                                key
+                            )
+                        )
                 return f"{x['level']:<5} | {log_position_lookup[key]} | {x['time']:HH:mm::ss:SS} | {escape_logging(x['message'])}\n"
 
             logger.add(
