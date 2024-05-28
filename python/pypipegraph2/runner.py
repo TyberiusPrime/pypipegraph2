@@ -814,7 +814,7 @@ class Runner:
                             if self.stopped or self.aborted:
                                 continue  # -> while not stopped -> break
                             job.start_time = time.time()  # the *actual* start time
-                            log_info(f"Job started : '{job_id}'")
+                            log_info(f"Job started : '{job.job_id}'")
                             job.waiting = False
                             self._interactive_report()
                             ljt(f"Go {job_id}")
