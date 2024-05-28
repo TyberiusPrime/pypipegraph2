@@ -1604,9 +1604,11 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         if match:
             line_no = int(match.group("line"))
             filename = match.group("file_name")
-        else:  # pragma: no cover - could use a test case, but uargh...
+            if Path(filename).exists():
+                return filename, line_no
+            log_error(f"cython filename, found but did not exist. Relative path?")
+        else:
             first_doc_line = cython_func.__doc__.split("\n")[0]
-            module_name = cython_func.__module__
             if not first_doc_line.startswith("File:"):
                 raise ValueError(
                     "No file/line information in doc string. Make sure your cython is compiled with -p (or #embed_pos_in_docstring=True atop your pyx"
@@ -1617,9 +1619,15 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                     + len("starting at line ") : first_doc_line.find(")")
                 ]
             )
-            # find the right module
+        try:
             module_name = cython_func.im_class.__module__
-            found = False
+        except AttributeError:
+            module_name = cython_func.__module__
+        log_error(f"mn: {module_name}")
+        found = False
+        if module_name in sys.modules:
+            found = sys.modules[module_name]
+        else:
             for name in sorted(sys.modules):
                 if name == module_name or name.endswith("." + module_name):
                     try:
@@ -1642,12 +1650,18 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                             break
                     except AttributeError:
                         continue
-            if not found:  # pragma: no cover
-                raise ValueError("Could not find module for %s" % cython_func)
-            filename = found.__file__.replace(".so", ".pyx").replace(
-                ".pyc", ".py"
-            )  # pyc replacement is for mock testing
-        return filename, line_no
+        if not found:  # pragma: no cover
+            raise ValueError("Could not find module for %s" % cython_func)
+        log_error(f"found cython module {found}, {found.__file__}")
+        out_filename = found.__file__.replace(".so", ".pyx").replace(
+            ".pyc", ".py"
+        )  # pyc replacement is for mock testing
+        if Path(out_filename).exists():
+            return out_filename, line_no
+        out_filename = found.__file__.split(".")[0] + ".pyx"
+        if Path(out_filename).exists():
+            return out_filename, line_no
+        raise ValueError("Failed to find cython source file")
 
     def verify_arguments(self, job_id, function):
         if not callable(function) and function is not None:
