@@ -54,7 +54,7 @@ class ConsoleInteractive:
         self.stopped = False
         self.leave_thread = False
         self.thread.start()
-        self.again = False 
+        self.again = False
         log_info(
             "PPG online. Type 'help' and press enter to receive a list of valid commands"
         )
@@ -158,7 +158,7 @@ class ConsoleInteractive:
         # msg = f"[dim]Running/Waiting Done/Total[/dim] {report.running} / {report.waiting} {report.done} / {report.total}."  # In flight: {len(self.runner.jobs_in_flight)} "
         msg = f"[dim]T:[/dim]{report.total} D:{report.done} R:{report.running} W:{report.waiting} F:{report.failed} {self.counter}"
         if self.again:
-            msg += ' (again) '
+            msg += " (again) "
         if hasattr(self, "cmd") and self.cmd:
             msg += f" Cmd: {self.cmd}"
         else:

@@ -1731,7 +1731,7 @@ class TestPypipegraph2:
             / ppg.global_pipegraph.time_str
             / "0_exception.txt"
         ).read_text()
-        if (3, 8) < sys.version_info[:2] < (3, 11):
+        if (3, 8, 0) < sys.version_info[:3] < (3, 10, 11):
             # other versions have the source.
             assert "# no source available" in e
         assert "KeyError" in e

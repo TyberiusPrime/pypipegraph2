@@ -1606,7 +1606,7 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             filename = match.group("file_name")
             if Path(filename).exists():
                 return filename, line_no
-            log_error(f"cython filename, found but did not exist. Relative path?")
+            log_error("cython filename, found but did not exist. Relative path?")
         else:
             first_doc_line = cython_func.__doc__.split("\n")[0]
             if not first_doc_line.startswith("File:"):
@@ -2983,26 +2983,6 @@ class ExternalOutputPath:
         return new
 
 
-class ExternalOutputPath:
-    """This allows you to refer to the output path
-    in your ExternalJob commands in a don't-need-to-know-the -path way
-    Just plug cmd = [..., ExternalOutputPath / "output.txt",...]
-    in there
-    """
-
-    def __init__(self):
-        self.path = ""
-
-    # implement /
-    def __truediv__(self, other):
-        new = ExternalOutputPath()
-        if self.path:
-            new.path = self.path + "/" + other
-        else:
-            new.path = other
-        return new
-
-
 def ExternalJob(
     output_path: Union[str, Path],
     additional_created_files: Dict[str, Union[str, Path, ExternalOutputPath]],
@@ -3014,8 +2994,8 @@ def ExternalJob(
     call_after: Optional[Callable[[Job], None]] = None,
     job_cls: Job = MultiFileGeneratingJob,
     resources: Resources = Resources.SingleCore,
-    cwd: Option[Union(Path, str)] = None,
-    start_new_session: bool = False
+    cwd: Optional[Union(Path, str)] = None,
+    start_new_session: bool = False,
 ):
     """A job that calls an external program,
     logging the command, stdout & stderr to files
