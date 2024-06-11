@@ -53,3 +53,12 @@ Contact the authors, and we will walk you threw them.
 In the meantime, you can often get the ppg2 unstuck 
 by deleting the right output files.
 
+
+## What happens if the machine looses power, or the process is killed?
+
+We only write the history once the graph is done evaluating.
+That means on the next run, the same jobs will be reevaluated,
+wasting the compute.
+
+(PR welcome. There's no technical reason we we can't pull the history
+every few minutes from the rust engine)

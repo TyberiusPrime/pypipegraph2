@@ -26,7 +26,8 @@ And it shows a counter for
 The log file (.ppg/logs/latest.messages) contains more info.
 
 Compared to the console log it omits the counters,
-but logs every job start/stop (together with it's runtime).
+but logs every job start. For jobs that took more than one second 
+(or if the log level is <= log_debug), every job finish is also logged.
 
 It's messages contain references into the ppg2 source, these
 are abstracted away into latest.lookup to denoise the log.
@@ -47,4 +48,17 @@ By default the log files and error logs of the last few ppg2 runs are kept. Tech
 
 ## Runtimes:
 Every time a job takes more than a second, we log it's runtime at the end of the run to .ppg/logs/runtimes.tsv.
+
+
+
+## History
+
+The information necessary to decide wether jobs are invalidate is stored in .ppg/history/ppg_history.2.gz. It's a gziped json, key -> recorded job output.
+
+The keys follow the following format:
+
+* "A" -> The last output of job "A"
+* "A!!!" -> The [job_ids](../../concepts/#job-names-job_ids) of the inputs of job "A" (to detect when an input is added or removed)
+* "A!!!B" the last output of job "A" that was used as input for job "B". 
+
 
