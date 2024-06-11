@@ -32,7 +32,7 @@ from .util import (
 from . import util
 
 
-logger.level("JT", no=6, color="<yellow>", icon="?")
+logger.level("JT", no=6, color="<yellow>", icon="🐍")
 logger.level("INFO", color="")
 # if "pytest" in sys.modules:  # pragma: no branch
 # log_out = sys.stderr
@@ -227,26 +227,35 @@ class PyPipeGraph:
             log_position_lookup = {}
             log_position_lookup_file = open(self.log_file_lookup, "w", buffering=1)
             logger.remove()  # no default logging
-            # log_lock = threading.Lock()
+            log_lock = threading.Lock()
 
             def smart_format(x):
-                key = str((x["file"], x["function"], x["line"]))
-                if not key in log_position_lookup:
-                    next_number = len(log_position_lookup)
-                    min_len = max(3, len(str(next_number)))
-                    log_position_lookup[key] = ("{0:>" + str(min_len) + "}").format(
-                        str(next_number)
-                    )
-                    log_position_lookup_file.write(
-                        "{} | {:>15}:{:>4} | {}\nkey: {}\n".format(
-                            log_position_lookup[key],
-                            x["file"],
-                            x["line"],
-                            x["function"],
-                            key,
+                with log_lock:
+                    key = str((x["file"], x["function"], x["line"]))
+                    if not key in log_position_lookup:
+                        next_number = len(log_position_lookup)
+                        min_len = max(3, len(str(next_number)))
+                        log_position_lookup[key] = ("{0:>" + str(min_len) + "}").format(
+                            str(next_number)
                         )
+                        log_position_lookup_file.write(
+                            "{} | {:>15}:{:>4} | {}\nkey: {}\n".format(
+                                log_position_lookup[key],
+                                x["file"],
+                                x["line"],
+                                x["function"],
+                                key
+                            )
+                        )
+<<<<<<< HEAD
+                return f"{x['level']:<5} | {log_position_lookup[key]} | {x['time']:HH:mm::ss:SS} | {escape_logging(x['message'])}\n"
+||||||| parent of 0182e42 (add black to dev dependencies)
+                    )
+                return f"{x['level']:<5} | {log_position_lookup[key]} | {x['time']:HH:mm::ss:SS} | {escape_logging(x['message'])}\n"
+=======
                     )
                 return f"{x['level']:<5} | {log_position_lookup[key]} | {x['time']:HH:mm:ss:SS} | {escape_logging(x['message'])}\n"
+>>>>>>> 0182e42 (add black to dev dependencies)
 
             logger.add(
                 open(self.log_file, "w"),
