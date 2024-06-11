@@ -840,10 +840,14 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             }
                             JobState::Always(JobStateAlways::FinishedFailure)
                             | JobState::Always(JobStateAlways::FinishedUpstreamFailure)
+                            | JobState::Always(JobStateAlways::FinishedAborted)
                             | JobState::Output(JobStateOutput::FinishedFailure)
                             | JobState::Output(JobStateOutput::FinishedUpstreamFailure)
+                            | JobState::Output(JobStateOutput::FinishedAborted)
                             | JobState::Ephemeral(JobStateEphemeral::FinishedFailure)
-                            | JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) => {
+                            | JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) 
+                            | JobState::Ephemeral(JobStateEphemeral::FinishedAborted) 
+                            => {
                                 match self.history.get(&key) {
                                     //we have an old edge
                                     Some(old_run_history) => old_run_history,
