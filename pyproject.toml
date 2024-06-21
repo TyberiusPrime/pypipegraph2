@@ -1,6 +1,9 @@
 [build-system]
 requires = ["maturin>=0.12"]
 build-backend = "maturin"
+[tool.maturin]
+python-source = "python"
+module-name = "pypipegraph2.pypipegraph2"
 
 [project]
 name = "pypipegraph2"
