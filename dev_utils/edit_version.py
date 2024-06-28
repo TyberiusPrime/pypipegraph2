@@ -26,7 +26,7 @@ if error:
     input("press enter")
     subprocess.check_call(["nvim"] + files)
 else:
-    print(f"Old version {old_version} found exactly once in all files.")
+    print(f"Old version {old_version} found in relevant all files exactly once.")
     print("going to autoreplace")
     new_version = input("please enter new version: ")
     for fn in files:

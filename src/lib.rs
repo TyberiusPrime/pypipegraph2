@@ -541,6 +541,10 @@ impl PyPPG2Evaluator {
     pub fn jobs_ready_to_run(&self) -> Vec<String> {
         self.evaluator.query_ready_to_run().into_iter().collect()
     }
+    pub fn next_job_ready_to_run(&self) -> Option<String> {
+        self.evaluator.next_job_ready_to_run()
+    }
+
 
     pub fn jobs_running(&self) -> Vec<String> {
         self.evaluator.query_jobs_running().into_iter().collect()

@@ -1214,6 +1214,11 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         name, function = self._parse_args(function, name)
         self.verify_arguments(name, function)
         self.function = function  # must assign after verify!
+        if not hasattr(function, "ppg_source_filename"):
+            try:  # can't set this on *all* function kinds
+                function.ppg_source_filename = self.get_source_file_name()
+            except AttributeError:
+                pass
 
         Job.__init__(self, [name], Resources.RunsHere)
 
@@ -1224,7 +1229,10 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         # todo: Don't recalc if file / source did not change.
         # Actually I suppose we can (ab)use the the graph and a FileInvariant for that?
         res = {}
-        sf = self.get_source_file_name()
+        try:
+            sf = self.function.ppg_source_filename  # self.get_source_file_name()
+        except AttributeError:
+            sf = self.get_source_file_name()
         if historical_output:
             historical_output = historical_output[
                 self.job_id
@@ -1237,7 +1245,12 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             "<"
         ):  # we only have a source file for python functions.
             # sf = Path(sf)
-            stat = sf.stat()
+            try:
+                if not sf in runner.stat_cache:
+                    runner.stat_cache[sf] = sf.stat()
+                stat = runner.stat_cache[sf]
+            except AttributeError:  # test case passing None for runner?
+                stat = sf.stat()
             if historical_output:
                 if "source_file" in historical_output:
                     if int(stat.st_mtime) == historical_output["source_file"].get(
@@ -1321,7 +1334,8 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                 return non_chdired_path / sf  # pragma: no cover
             else:
                 return Path(sf)
-        return None
+        else:
+            return None
 
     @staticmethod
     def is_python_function(function):

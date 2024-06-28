@@ -584,6 +584,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     pub fn query_ready_to_run(&self) -> HashSet<String> {
         self.jobs_ready_to_run.clone()
     }
+    pub fn next_job_ready_to_run(&self) -> Option<String> {
+        let next_job = self.jobs_ready_to_run.iter().next();
+        next_job.cloned()
+    }
 
     pub fn query_jobs_running(&self) -> HashSet<String> {
         self.jobs
@@ -845,9 +849,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             | JobState::Output(JobStateOutput::FinishedUpstreamFailure)
                             | JobState::Output(JobStateOutput::FinishedAborted)
                             | JobState::Ephemeral(JobStateEphemeral::FinishedFailure)
-                            | JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) 
-                            | JobState::Ephemeral(JobStateEphemeral::FinishedAborted) 
-                            => {
+                            | JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure)
+                            | JobState::Ephemeral(JobStateEphemeral::FinishedAborted) => {
                                 match self.history.get(&key) {
                                     //we have an old edge
                                     Some(old_run_history) => old_run_history,

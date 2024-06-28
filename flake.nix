@@ -200,7 +200,9 @@
       p.networkx
       p.cython
       p.setproctitle
+      p.snakeviz
       dppd
+      p.yappi
       dppd_plotnine
       # for testing...
       ppg1

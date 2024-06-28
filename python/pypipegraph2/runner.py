@@ -43,9 +43,12 @@ watcher_session_id = None
 
 def get_same_session_id_processes():
     for proc in psutil.process_iter():
-        proc_sid = os.getpgid(proc.pid)
-        if proc_sid == watcher_session_id:
-            yield proc
+        try:
+            proc_sid = os.getpgid(proc.pid)
+            if proc_sid == watcher_session_id:
+                yield proc
+        except psutil.ProcessLookupError:
+            continue
 
 
 def kill_process_group_but_ppg_runner():
@@ -182,6 +185,8 @@ class Runner:
             self.core_lock = CoreLock(job_graph.cores)
             self.fail_counter = 0
             self.done_counter = 0
+            self.stat_cache = {}
+            self.should_report = True
             self.run_id = (
                 run_id  # to allow jobgenerating jobs to run just once per graph.run()
             )
@@ -411,6 +416,18 @@ class Runner:
         self.watcher_pid = spawn_watcher()
         self._start_job_executing_threads()
 
+        def report():
+            while not self.stopped and not self.aborted:
+                if self.should_report:
+                    self.should_report = False
+                    self._do_interactive_report()
+                time.sleep(1)
+
+        if hasattr(self, "interactive") and hasattr(self.interactive, "status"):
+            t = Thread(target=report)
+            self.threads.append(t)
+            t.start()
+
         try:
             self._interactive_start()
             while True:
@@ -502,6 +519,9 @@ class Runner:
             self.interactive.stop()
 
     def _interactive_report(self):
+        self.should_report = True
+
+    def _do_interactive_report(self):
         if hasattr(self, "interactive") and hasattr(self.interactive, "status"):
             t = time.time()
             if (
@@ -705,8 +725,8 @@ class Runner:
                                     log_error(f"Cleanup had an exception {repr(e)}")
                                 self.evaluator.event_job_cleanup_done(cleanup_job_id)
 
-                            rr = self.evaluator.jobs_ready_to_run()
-                            if not rr:
+                            rr = self.evaluator.next_job_ready_to_run()
+                            if rr is None:
                                 if self.evaluator.is_finished():
                                     # ljt("detected finished")
                                     self.stopped = True
@@ -751,8 +771,8 @@ class Runner:
                                             self.interactive._cmd_die(False)
 
                             else:
-                                ljt(f"to run {rr}")
-                                job_id = rr[0]
+                                # ljt(f"to run {rr}") # nice accidential O(n^2) there...
+                                job_id = rr
                                 self.jobs_in_flight.append(job_id)
                                 # ljt(f"added {job_id} {self.jobs_in_flight}")
                                 self.evaluator.event_now_running(job_id)
@@ -886,77 +906,78 @@ class Runner:
                             job.run_time = job.stop_time - job.start_time
                             # ljt(f"end {job_id} {self.jobs_in_flight}")
                             # log_trace(f"Leaving thread for {job_id}")
-                            with self.evaluator_lock:
-                                if outputs is None and error is None:
-                                    # this happes when the job get's terminated by abort
-                                    log_debug(f"job aborted {job_id}")
-                                    error = exceptions.JobError(
-                                        "Aborted", KeyboardInterrupt()
-                                    )
-                                    # raise ValueError("Should not happen")
-                                if outputs is not None and set(outputs.keys()) != set(
-                                    self.jobs[job_id].outputs
-                                ):  # the 2nd one is a list...
-                                    log_trace(
-                                        f"\t{job_id} returned the wrong set of outputs. "
-                                        f"Should be {escape_logging(str(set(self.jobs[job_id].outputs)))}, was {escape_logging(str(set(outputs.keys())))}"
-                                    )
+                            if outputs is None and error is None:
+                                # this happes when the job get's terminated by abort
+                                # log_debug(f"job aborted {job_id}")
+                                error = exceptions.JobError(
+                                    "Aborted", KeyboardInterrupt()
+                                )
+                                # raise ValueError("Should not happen")
+                            if outputs is not None and set(outputs.keys()) != set(
+                                self.jobs[job_id].outputs
+                            ):  # the 2nd one is a list...
+                                # log_trace(
+                                #     f"\t{job_id} returned the wrong set of outputs. "
+                                #     f"Should be {escape_logging(str(set(self.jobs[job_id].outputs)))}, was {escape_logging(str(set(outputs.keys())))}"
+                                # )
 
-                                    error = exceptions.JobContractError(
-                                        f"\t{job_id} returned the wrong set of outputs. "
-                                        f"Should be {escape_logging(str(set((self.jobs[job_id].outputs))))}, was {escape_logging(str(set(outputs.keys())))}",
-                                    )
-                                    outputs = None
+                                error = exceptions.JobContractError(
+                                    f"\t{job_id} returned the wrong set of outputs. "
+                                    f"Should be {escape_logging(str(set((self.jobs[job_id].outputs))))}, was {escape_logging(str(set(outputs.keys())))}",
+                                )
+                                outputs = None
 
-                                if outputs is not None:
-                                    self.job_outcomes[job_id] = RecordedJobOutcome(
-                                        job_id, JobOutcome.Success, outputs
-                                    )
-                                    str_history = json.dumps(
-                                        outputs, sort_keys=True, indent=1
-                                    )
-                                    ljt(f"success {job_id} str_history {str_history}")
+                            if outputs is not None:
+                                self.job_outcomes[job_id] = RecordedJobOutcome(
+                                    job_id, JobOutcome.Success, outputs
+                                )
+                                str_history = json.dumps(
+                                    outputs, sort_keys=True, indent=1
+                                )
+                                # ljt(f"success {job_id} str_history {str_history}")
+                                if (job.stop_time != job.stop_time) or (
+                                    job.stop_time - job.start_time > 1
+                                ):
                                     finish_msg = f"Job finished: '{job_id}'. Runtime: {job.stop_time - job.start_time:.2f}s"
-                                    if (job.stop_time != job.stop_time) or (
-                                        job.stop_time - job.start_time > 1
-                                    ):
-                                        log_info(finish_msg)
-                                    else:
-                                        log_debug(finish_msg)
-                                    self.done_counter += 1
-                                    self._interactive_report()
-                                    try:
+                                    log_info(finish_msg)
+                                # else:
+                                # log_debug(finish_msg)
+                                self.done_counter += 1
+                                try:
+                                    with self.evaluator_lock:
                                         self.evaluator.event_job_success(
                                             job_id, str_history
                                         )
-                                        failed = False
-                                    except Exception as e:
-                                        log_error(
-                                            f"Recording job success failed for {job_id}. Likely constraint violation?: Message was '{e}'"
-                                        )
-                                        self.job_outcomes[job_id] = RecordedJobOutcome(
-                                            job_id, JobOutcome.Failed, str(e)
-                                        )
-
-                                else:
-                                    self.fail_counter += 1
-                                    self._interactive_report()
-                                    ljt(f"failure {job_id} - {error}")
-                                    self.job_outcomes[job_id] = RecordedJobOutcome(
-                                        job_id, JobOutcome.Failed, error
+                                    failed = False
+                                except Exception as e:
+                                    log_error(
+                                        f"Recording job success failed for {job_id}. Likely constraint violation?: Message was '{e}'"
                                     )
-                                    self.evaluator.event_job_failure(job_id)
-                                    try:
-                                        self.log_failed_job(job_id, error)
-                                    except Exception as e:
-                                        log_error(
-                                            f"logging job failure failed {job_id} {e}"
-                                        )
-                                self.jobs_in_flight.remove(job_id)
-                                if c > 1:
-                                    self.jobs_all_cores_in_flight -= 1
+                                    self.job_outcomes[job_id] = RecordedJobOutcome(
+                                        job_id, JobOutcome.Failed, str(e)
+                                    )
 
-                                self.job_outcomes[job_id].run_time = job.run_time
+                            else:
+                                self.fail_counter += 1
+                                ljt(f"failure {job_id} - {error}")
+                                self.job_outcomes[job_id] = RecordedJobOutcome(
+                                    job_id, JobOutcome.Failed, error
+                                )
+                                with self.evaluator_lock:
+                                    self.evaluator.event_job_failure(job_id)
+                                try:
+                                    self.log_failed_job(job_id, error)
+                                except Exception as e:
+                                    log_error(
+                                        f"logging job failure failed {job_id} {e}"
+                                    )
+                            self.jobs_in_flight.remove(job_id)
+                            if c > 1:
+                                self.jobs_all_cores_in_flight -= 1
+
+                            self.job_outcomes[job_id].run_time = job.run_time
+
+                            self._interactive_report()
                             self.check_for_new_jobs.set()
                         elif error:
                             print(error)
