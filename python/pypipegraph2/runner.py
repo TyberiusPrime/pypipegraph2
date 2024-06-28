@@ -416,20 +416,9 @@ class Runner:
         self.watcher_pid = spawn_watcher()
         self._start_job_executing_threads()
 
-        def report():
-            while not self.stopped and not self.aborted:
-                if self.should_report:
-                    self.should_report = False
-                    self._do_interactive_report()
-                time.sleep(1)
-
-        if hasattr(self, "interactive") and hasattr(self.interactive, "status"):
-            t = Thread(target=report)
-            self.threads.append(t)
-            t.start()
-
         try:
             self._interactive_start()
+
             while True:
                 # ljt("Waiting for evaluation done")
                 if self.evaluation_done.wait(5):  # todo: timeout, sanity checks.
@@ -512,6 +501,17 @@ class Runner:
             self.interactive = ConsoleInteractive()
             self.last_status_time = time.time()
             self.interactive.start(self)
+
+            def report():
+                while not self.stopped and not self.aborted:
+                    if self.should_report:
+                        self.should_report = False
+                        self._do_interactive_report()
+                    time.sleep(1)
+
+            t = Thread(target=report)
+            self.threads.append(t)
+            t.start()
 
     def _interactive_stop(self):
         """Stop the interactive thread (if present)"""
