@@ -1901,7 +1901,11 @@ def _hash_object(obj):
         my_hash = obj.hexdigest
         obj = obj.value
     else:
-        my_hash = DeepHash(obj, hasher=hashers.hash_str)[obj]
+        my_hash = DeepHash(obj, hasher=hashers.hash_str)
+        if UNPROCESSED_KEY in my_hash:
+            raise ValueError("hashing failed for", obj)
+        my_hash = my_hash[obj]
+
         # raise ValueError(f"Could not derive a hash for {type(obj)}")
     return obj, my_hash
 
@@ -1951,9 +1955,9 @@ class DataLoadingJob(Job):
         load_res = self.load_function()
 
         log_trace(
-            f"dl {self.job_id} - historical: {historical_output.get(self.outputs[0], False)}"
+            f"dl {self.job_id} run - historical: {historical_output.get(self.outputs[0], False)}"
         )
-        log_trace(f"dl {self.job_id} - {escape_logging(historical_output)}")
+        # log_trace(f"dl {self.job_id} - {escape_logging(historical_output)}")
         if load_res is None:
             log_warning(
                 f"DataLoadingJob {self.job_id} returned None - downstreams will never be invalidated by this"
@@ -1967,6 +1971,7 @@ class DataLoadingJob(Job):
             # but potentially wasteful
         else:
             _, my_hash = _hash_object(load_res)  # could be a ValuePlusHash
+        # log_trace( f"dl {self.job_id} run - new: {my_hash}")
         return {self.outputs[0]: my_hash}
 
     def extract_strict_hash(self, a_hash) -> bytes:
