@@ -1710,6 +1710,66 @@ class TestsFromTheField:
         assert ppg.global_pipegraph.find_job_from_file("b") is b
         assert ppg.global_pipegraph.find_job_from_file("c") is b
 
+    def test_returning_dataframe_from_dataloading(self):
+        import pandas as pd
+
+        a = (pd.DataFrame({"a": [1]}), pd.DataFrame({"b": [1, 3, 3]}))
+        b = (pd.DataFrame({"a": [1, 2]}), pd.DataFrame({"b": [1, 3, 3]}))
+        hash_a = ppg.jobs._hash_object(a)[1]
+        hash_b = ppg.jobs._hash_object(b)[1]
+        print(hash_a)
+        print(hash_b)
+        assert hash_a != hash_b
+
+        ppg.new(log_level=5)
+        storage = {}
+
+        def dl():
+            res = pd.DataFrame({"a": [1]})
+            storage["dl"] = res
+            storage["dl2"] = pd.DataFrame({"b": [1, 3, 3]})
+            return storage["dl"], storage["dl2"]
+
+        def doit(filename, storage=storage):
+            counter("doit")
+            filename.write_text(str(len(storage["dl"]) + len(storage["dl2"])))
+
+        a = ppg.DataLoadingJob("a", dl)
+        b = ppg.FileGeneratingJob("b", doit)
+        b.depends_on(a)
+        ppg.run()
+        assert Path("doit").read_text() == "1"
+        assert Path("b").read_text() == "4"
+        ppg.new(log_level=5)
+
+        def dl():  # same output
+            res = pd.DataFrame({"a": [1]})
+            storage["dl"] = res
+            storage["dl2"] = pd.DataFrame({"b": [1, 3, 3]})
+            return storage["dl"], storage["dl2"]
+
+        a = ppg.DataLoadingJob("a", dl)
+        b = ppg.FileGeneratingJob("b", doit)
+        b.depends_on(a)
+        ppg.run()
+        assert Path("doit").read_text() == "1"
+        assert Path("b").read_text() == "4"
+
+        ppg.new()
+
+        def dl():
+            res = pd.DataFrame({"a": [1, 2]})
+            storage["dl"] = res
+            storage["dl2"] = pd.DataFrame({"b": [1, 3, 3]})
+            return storage["dl"], storage["dl2"]
+
+        a = ppg.DataLoadingJob("a", dl)
+        b = ppg.FileGeneratingJob("b", doit)
+        b.depends_on(a)
+        ppg.run()
+        assert Path("doit").read_text() == "2"
+        assert Path("b").read_text() == "5"
+
 
 def gen_20211221(func):
     global do_fail
