@@ -4,7 +4,7 @@
   inputs = {
     import-cargo.url = github:edolstra/import-cargo;
 
-    nixpkgs.url = "github:NixOS/nixpkgs/23.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/24.05";
     naersk.url = "github:nmattia/naersk";
     naersk.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay.url = "github:oxalica/rust-overlay";
@@ -200,9 +200,8 @@
       p.networkx
       p.cython
       p.setproctitle
-      p.snakeviz
+      p.setuptools
       dppd
-      p.yappi
       dppd_plotnine
       # for testing...
       ppg1
