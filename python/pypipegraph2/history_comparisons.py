@@ -12,6 +12,15 @@ from . import ppg_traceback
 
 
 def history_is_different(runner, job_upstream_id, job_downstream_id, str_last, str_now):
+    while True:
+        try: 
+            # bad things happen if a KeyboardInterrupt happens here.
+            # the Rust code really does not expect this to fail ever.
+            return _history_is_different(runner, job_upstream_id, job_downstream_id, str_last, str_now)
+        except KeyboardInterrupt:
+            raise
+
+def _history_is_different(runner, job_upstream_id, job_downstream_id, str_last, str_now):
     # note that at this point, we already know str_last != str_now,
     # that was tested in rust
     # log_error(f"history is maybe different {job_upstream_id} {job_downstream_id} {str_last == str_now}")
