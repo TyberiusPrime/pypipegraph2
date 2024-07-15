@@ -21,7 +21,7 @@ pub enum JobKind {
 trait JobQueries {
     fn is_finished(&self) -> bool;
     fn is_failed(&self) -> bool;
-    fn is_skipped(&self) -> bool;
+    //fn is_skipped(&self) -> bool;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -136,9 +136,9 @@ impl JobQueries for JobStateAlways {
         )
     }
 
-    fn is_skipped(&self) -> bool {
+    /* fn is_skipped(&self) -> bool {
         false
-    }
+    } */
 }
 impl JobQueries for JobStateOutput {
     fn is_finished(&self) -> bool {
@@ -163,9 +163,9 @@ impl JobQueries for JobStateOutput {
         )
     }
 
-    fn is_skipped(&self) -> bool {
+    /* fn is_skipped(&self) -> bool {
         matches!(self, JobStateOutput::FinishedSkipped)
-    }
+    } */
 }
 
 impl JobQueries for JobStateEphemeral {
@@ -195,9 +195,9 @@ impl JobQueries for JobStateEphemeral {
         )
     }
 
-    fn is_skipped(&self) -> bool {
+    /* fn is_skipped(&self) -> bool {
         matches!(self, JobStateEphemeral::FinishedSkipped,)
-    }
+    } */
 }
 
 #[derive(Clone, Debug)]
@@ -2434,7 +2434,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     !Self::has_upstreams(&self.dag, node_idx)
                 }
             };
-            let mut job = &mut self.jobs[node_idx as usize];
+            let job = &mut self.jobs[node_idx as usize];
 
             if inputs_changed {
                 debug!("Input to job {} changed.", job.job_id);

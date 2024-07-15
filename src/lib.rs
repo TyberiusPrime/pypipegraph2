@@ -480,7 +480,7 @@ impl PyPPG2Evaluator {
     #[new]
     fn __new__(
         _py: Python,
-        py_history: &PyDict,
+        py_history: &Bound<PyDict>,
         history_compare_callable: PyObject,
         get_job_inputs_str_callback: PyObject,
     ) -> Result<Self, PyErr> {
@@ -614,7 +614,7 @@ fn enable_logging_to_file(filename: &str) -> PyResult<()> {
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn pypipegraph2(_py: Python, m: &PyModule) -> PyResult<()> {
+fn pypipegraph2(_py: Python, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(enable_logging, m)?)?;
     m.add_function(wrap_pyfunction!(enable_logging_to_file, m)?)?;
     m.add_class::<PyPPG2Evaluator>()?;
