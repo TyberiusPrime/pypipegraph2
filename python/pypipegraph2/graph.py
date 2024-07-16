@@ -13,6 +13,7 @@ import networkx
 import subprocess
 import time
 import datetime
+import pyzstd
 from pathlib import Path
 from loguru import logger
 
@@ -478,16 +479,21 @@ class PyPipeGraph:
         # we by default share the history file
         # if it's the same history dir, it's the same project
         # and you'd retrigger the calculations too often otherwise
-        return self.dir_config.history_dir / "ppg_history.2.gz"  # don't end on .py
+        return self.dir_config.history_dir / "ppg_history.2.zstd"  # don't end on .py
 
     def _load_history(self):
         log_trace("_load_history")
         fn = self.get_history_filename()
+        old_fn = self.dir_config.history_dir / "ppg_history.2.gz"
         self._convert_old_history()
         history = {}
         if fn.exists():
             log_trace("Historical existed")
-            with gzip.GzipFile(fn, "rb") as op:
+            with pyzstd.ZstdFile(fn, "rb") as op:
+                history = json.loads(op.read().decode("utf-8"))
+        elif old_fn.exists():
+            log_trace("Historical existed - in gzip format. will be converted")
+            with gzip.GzipFile(old_fn, "rb") as op:
                 history = json.loads(op.read().decode("utf-8"))
 
         log_debug(f"Loaded {len(history)} history entries")
@@ -502,7 +508,7 @@ class PyPipeGraph:
 
         try_again = True
         while try_again:
-            with gzip.GzipFile(fn, "wb") as op:
+            with pyzstd.ZstdFile(fn, "wb") as op:
                 try:
                     op.write(json.dumps(historical, indent=2).encode("utf-8"))
                     if self._test_failing_outside_of_job:  # for unit test
@@ -692,9 +698,9 @@ class PyPipeGraph:
                     raise exceptions.JobOutputConflict(
                         job, self.jobs[self.outputs_to_job_ids[output]]
                     )
-            self.outputs_to_job_ids[
-                output
-            ] = job.job_id  # todo: seperate this into two dicts?
+            self.outputs_to_job_ids[output] = (
+                job.job_id
+            )  # todo: seperate this into two dicts?
         # we use job numbers during run
         # to keep output files unique etc.
 

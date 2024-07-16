@@ -22,7 +22,7 @@
     system = "x86_64-linux";
     overlays = [(import rust-overlay)];
     pkgs = import nixpkgs {inherit system overlays;};
-    rust = pkgs.rust-bin.stable."1.78.0".default.override {
+    rust = pkgs.rust-bin.stable."1.79.0".default.override {
       targets = ["x86_64-unknown-linux-gnu" "x86_64-unknown-linux-musl"];
       extensions = ["llvm-tools-preview"];
     };
@@ -92,6 +92,7 @@
            networkx
            cython
            filelock
+           pyzstd
         '';
         format = "pyproject";
       };
@@ -186,6 +187,20 @@
         };
         doCheck = false;
       };
+    pyzstd = let
+      p = pkgs.python311Packages;
+    in
+      p.buildPythonPackage rec {
+        pname = "pyzstd";
+        version = "0.16.0";
+        buildInputs = [];
+        propagatedBuildInputs = [];
+        src = p.fetchPypi {
+          inherit pname version;
+          sha256 = "sha256-/UOgrjiuFSI/sQV3KQAYKcMzbpD0rPBM8S697DM0Zlg=";
+        };
+        doCheck = false;
+      };
 
     mypython = pkgs.python311.withPackages (p: [
       #todo: figure out how to derive this from pyproject.toml
@@ -207,6 +222,7 @@
       ppg1
       plotnine
       p.filelock
+      pyzstd
     ]);
   in {
     # pass in nixpkgs, mach-nix and what you want it to report back as a version
