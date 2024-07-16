@@ -30,6 +30,7 @@ dependencies = [
 	"psutil",
 	"networkx",
 	"filelock",
+	"pyzstd",
 ]
 
 
