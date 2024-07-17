@@ -467,7 +467,7 @@ class PyPipeGraph:
                 lines.append("jobid\trun_start_time\truntime_s")
             for job_id, job_result in job_results.items():  # pragma: no branch
                 if job_result.outcome is JobOutcome.Success:
-                    if job_result.run_time >= 1:
+                    if getattr(job_result, 'run_time', 0) >= 1:
                         lines.append(
                             f"{job_id}\t{int(run_start_time)}\t{job_result.run_time:.2f}"
                         )
