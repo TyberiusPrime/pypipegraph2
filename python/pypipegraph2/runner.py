@@ -677,7 +677,7 @@ class Runner:
                         f"\n\t(Error directory not configured - no extended error log)\n"
                         f"\tFailed after {job.run_time:.2}s.\n"
                     )
-                if stacks is not None:
+                if stacks is not None and self.print_failures:
                     if self.job_graph.run_mode is RunMode.CONSOLE:
                         console.print(
                             stacks._format_rich_traceback_fallback(False, True).replace(

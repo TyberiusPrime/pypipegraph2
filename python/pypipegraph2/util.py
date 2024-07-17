@@ -132,22 +132,18 @@ do_jobtrace_log = False
 
 
 def log_warning(msg):
-    return
     logger.opt(depth=1).warning(msg)
 
 
 def log_error(msg):
-    return
     logger.opt(depth=1).error(msg)
 
 
 def log_info(msg):
-    return
     logger.opt(depth=1).info(msg)
 
 
 def log_debug(msg):
-    return
     logger.opt(depth=1).debug(msg)
 
 
