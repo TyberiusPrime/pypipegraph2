@@ -22,7 +22,7 @@
     system = "x86_64-linux";
     overlays = [(import rust-overlay)];
     pkgs = import nixpkgs {inherit system overlays;};
-    rust = pkgs.rust-bin.stable."1.79.0".default.override {
+    rust = pkgs.rust-bin.stable."1.78.0".default.override {
       targets = ["x86_64-unknown-linux-gnu" "x86_64-unknown-linux-musl"];
       extensions = ["llvm-tools-preview"];
     };

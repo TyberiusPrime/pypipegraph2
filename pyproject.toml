@@ -7,7 +7,7 @@ module-name = "pypipegraph2.pypipegraph2"
 
 [project]
 name = "pypipegraph2"
-version = "3.1.1"
+version = "3.1.2"
 description = "Advanced python 'what changed and what do we need to do' tracking"
 # long-description = "README.md"
 authors = [

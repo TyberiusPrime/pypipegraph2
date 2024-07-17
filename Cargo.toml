@@ -1,6 +1,6 @@
 [package]
 name = "pypipegraph2"
-version = "3.1.1"
+version = "3.1.2"
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -23,7 +23,7 @@ path = "src/main_iterations_with_fail.rs"
 
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "abi3", "abi3-py38"] }
+pyo3 = { version = "0.21", features = ["extension-module", "abi3", "abi3-py38"] }
 petgraph = "0.6.2"
 env_logger = "0.9.3"
 log = "0.4.14"
