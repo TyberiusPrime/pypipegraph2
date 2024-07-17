@@ -34,3 +34,5 @@ else:
         new = old.replace(old_version, new_version)
         Path(fn).write_text(new)
         print(f"Replaced in {fn}")
+
+    subprocess.check_call(['cargo','check'])
