@@ -2801,7 +2801,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         for input_filename in input_names:
             upstream_job_id = runner.outputs_to_job_ids[input_filename]
             try:
-                job_output = runner.evaluator.get_job_output(upstream_job_id)
+                with runner.evaluator_lock:
+                    job_output = runner.evaluator.get_job_output(upstream_job_id)
                 job_output = json.loads(job_output)
                 jj = job_output[input_filename]
                 updated_input[input_filename] = jj
