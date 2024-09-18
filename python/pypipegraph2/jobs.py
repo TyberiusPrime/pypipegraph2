@@ -1086,7 +1086,7 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
         self._single_file = False
 
     def run(self, runner, historical_output):
-        log_error(f"running {self.job_id}")
+        log_info(f"running {self.job_id}")
         if historical_output and self.all_files_exist():
             new_hashes = {}
             for filename in self.org_files:
