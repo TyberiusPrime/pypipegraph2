@@ -86,7 +86,7 @@ def assert_uniqueness_of_object(
 
     if object_with_name_attribute.name.find("/") != -1:
         raise ValueError(
-            "Names must not contain /, it confuses the directory calculations"
+            f"Names must not contain /, it confuses the directory calculations. Name was {object_with_name_attribute.name}"
         )
     if pipegraph is None:  # pragma: no cover
         return
