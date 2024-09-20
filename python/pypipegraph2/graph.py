@@ -142,9 +142,7 @@ class PyPipeGraph:
         self.job_inputs = collections.defaultdict(
             set
         )  # necessary inputs (ie. outputs of other jobs)
-        self.outputs_to_job_ids = (
-            {}
-        )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
+        self.outputs_to_job_ids = {}  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
         self.run_id = 0
         self._test_failing_outside_of_job = False
         self.allow_short_filenames = allow_short_filenames
@@ -502,13 +500,12 @@ class PyPipeGraph:
     def _save_history(self, historical):
         log_trace("_save_history")
         fn = self.get_history_filename()
-        if Path(fn).exists():
-            fn.rename(fn.with_suffix(fn.suffix + ".backup"))
+        fn_temp = fn.with_suffix(".temp")
         raise_keyboard_interrupt = False
 
         try_again = True
         while try_again:
-            with pyzstd.ZstdFile(fn, "wb") as op:
+            with pyzstd.ZstdFile(fn_temp, "wb") as op:
                 try:
                     op.write(json.dumps(historical, indent=2).encode("utf-8"))
                     if self._test_failing_outside_of_job:  # for unit test
@@ -518,10 +515,14 @@ class PyPipeGraph:
                     try_again = False
                 except KeyboardInterrupt:
                     raise_keyboard_interrupt = True
+        if Path(fn).exists():
+            fn.rename(fn.with_suffix(fn.suffix + ".backup"))
+        fn_temp.rename(fn)
+        log_info("History was saved")
+
         if raise_keyboard_interrupt:
             log_error("Keyboard interrupt during history dumping")
             raise KeyboardInterrupt()
-        log_info("History was saved")
 
     def _convert_old_history(self):
         """Convert pre-rust history,
@@ -622,9 +623,7 @@ class PyPipeGraph:
             return
         for j in with_callback:
             dc = j.dependency_callbacks
-            j.dependency_callbacks = (
-                []
-            )  # must reset before run, might add new ones, right?
+            j.dependency_callbacks = []  # must reset before run, might add new ones, right?
             for c in dc:
                 # log_info(f"{j.job_id}, {c}")
                 j.depends_on(c())
