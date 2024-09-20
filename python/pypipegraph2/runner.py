@@ -752,7 +752,7 @@ class Runner:
                                         # enable_logging_to_file("rust_debug.log")
 
                                         self.evaluator.debug_is_finished()
-                                        Path("debug.txt").write_text(
+                                        Path("ppg_evaluator_debug.txt").write_text(
                                             self.evaluator.debug()
                                         )
                                         # self.evaluator.reconsider_all_jobs() # if this helps' we're looking at a propagation failure. Somewhere.
@@ -781,9 +781,7 @@ class Runner:
                                 job.waiting = True
                                 job.actual_cores_needed = -1
                                 self._interactive_report()
-                                job.start_time = (
-                                    time.time()
-                                )  # assign it just in case anything fails before acquiring the lock
+                                job.start_time = time.time()  # assign it just in case anything fails before acquiring the lock
                                 job.stop_time = float("nan")
                                 job.run_time = float("nan")
 
@@ -876,9 +874,7 @@ class Runner:
                                     outputs = None
                                     raise error
 
-                    except (
-                        SystemExit
-                    ) as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
+                    except SystemExit as e:  # pragma: no cover - happens in spawned process, and we don't get coverage logging for it thanks to os._exit
                         log_trace(
                             "SystemExit in spawned process -> converting to hard exit"
                         )
@@ -953,6 +949,18 @@ class Runner:
                                     log_error(
                                         f"Recording job success failed for {job_id}. Likely constraint violation?: Message was '{e}'"
                                     )
+                                    with self.evaluator_lock:  # just so we don't mess up the file.
+                                        log_filename = (
+                                            self.job_graph.dir_config.error_dir
+                                            / self.job_graph.time_str
+                                            / "constraint_violations.jobs"
+                                        )
+                                        log_error(
+                                            f"Job id has been logged to {log_filename}\n. You might want to use ppg-filter-constraint-violations after fixing the problem."
+                                        )
+                                        with open(log_filename, "a") as op:
+                                            op.write(f"{job_id}\n")
+
                                     self.job_outcomes[job_id] = RecordedJobOutcome(
                                         job_id, JobOutcome.Failed, str(e)
                                     )
