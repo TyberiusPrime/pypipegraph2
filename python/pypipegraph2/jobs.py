@@ -33,6 +33,15 @@ from .util import (
     log_job_trace,
 )
 
+try:
+    import pandas as pd
+    import deepdiff
+
+    deep_diff_too_old_for_dataframes = int(deepdiff.__version__.split(".")[0]) < 8
+except ImportError:
+    pd = None
+    deep_diff_too_old_for_dataframes = False  # doesn't matter
+
 module_type = type(sys)
 is_hex_re = re.compile("^[a-fA-F0-9]+$")
 
@@ -566,9 +575,7 @@ def dummy_fg(of):
     of.parent.mkdir(exist_ok=True, parents=True)
     of.write_text("fg")
 
-""".split(
-                "\n"
-            )
+""".split("\n")
             lines += nodes
             lines += edges
             lines += ["", "ppg.run()", "ppg.run"]
@@ -1864,13 +1871,7 @@ class ParameterInvariant(_InvariantMixin, Job):
         # if isinstance(obj, str) and len(obj) == 32 and is_hex_re.match(obj):
         # If it's already a hash, we keep it that way
         #   return obj
-        res = DeepHash(obj, hasher=hashers.hash_str)
-        if UNPROCESSED_KEY in res:  # pragma: no cover
-            errs = []
-            for k in res[UNPROCESSED_KEY]:
-                errs.append(k)
-            raise ValueError("Hashing failed on parent obj", obj, "reasons", errs)
-        return res[obj]
+        return _hash_object(obj)
 
     def extract_strict_hash(self, a_hash) -> bytes:
         return str(ParameterInvariant.freeze(a_hash)).encode("utf-8")
@@ -1884,7 +1885,11 @@ class ValuePlusHash:
         self.hexdigest = hexdigest
 
 
+undefined = object()
+
+
 def _hash_object(obj):
+    my_hash = undefined
     if isinstance(obj, str):
         my_hash = hashers.hash_bytes(obj.encode("utf-8"))
     elif isinstance(obj, bytes):
@@ -1892,7 +1897,7 @@ def _hash_object(obj):
     elif isinstance(
         obj, (int, float, complex)
     ):  # for these types, the build in hash should be good enough. This also covers numpy floats
-        # todo: does it vary across python versionS?
+        # todo: does it vary across python versions?
         # todo: these do not get salted. at least up to 3.8..
         # todo: probably would be better to choose something deterministic...
         # but also lot of work.
@@ -1900,11 +1905,26 @@ def _hash_object(obj):
     elif isinstance(obj, ValuePlusHash):
         my_hash = obj.hexdigest
         obj = obj.value
+    elif (
+        pd is not None
+        and isinstance(obj, pd.DataFrame)
+        and deep_diff_too_old_for_dataframes
+    ):
+        # note that this, like deepdiff, is not involving the index.names
+        calc_obj = [("dtype", obj.dtypes), ("index", obj.index)] + [
+            x for x in obj.items()
+        ]
     else:
-        my_hash = DeepHash(obj, hasher=hashers.hash_str)
-        if UNPROCESSED_KEY in my_hash:
-            raise ValueError("hashing failed for", obj)
-        my_hash = my_hash[obj]
+        calc_obj = obj
+    # if my hash was set
+    if my_hash is undefined:
+        my_hash = DeepHash(calc_obj, hasher=hashers.hash_str)
+        if UNPROCESSED_KEY in my_hash:  # pragma: no cover
+            errs = []
+            for k in res[UNPROCESSED_KEY]:
+                errs.append(k)
+            raise ValueError("Hashing failed on parent obj", obj, "reasons", errs)
+        my_hash = my_hash[calc_obj]
 
         # raise ValueError(f"Could not derive a hash for {type(obj)}")
     return obj, my_hash
@@ -2287,7 +2307,8 @@ def PlotJob(  # noqa:C901
     if cache_calc:
 
         def do_cache():  # pragma: no cover - runs in spawned job
-            import pandas as pd
+            if pd is None:
+                raise ValueError("no pandas available")
 
             Path(output_filename.parent).mkdir(exist_ok=True, parents=True)
             df = calc_function()
@@ -2333,7 +2354,8 @@ def PlotJob(  # noqa:C901
     if create_table:
 
         def dump_table(output_filename):  # pragma: no cover - runs in spawned job
-            import pandas as pd
+            if pd is None:
+                raise ValueError("no pandas available")
 
             if not hasattr(plot_job, "data_"):
                 plot_job.data_ = calc_function()

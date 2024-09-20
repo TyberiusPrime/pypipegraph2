@@ -1807,3 +1807,67 @@ def gen_20211221(func):
         if a in cjobs_by_no and b in cjobs_by_no:
             cjobs_by_no[a].depends_on(cjobs_by_no[b])
             # print(f"ea(('{a}', '{b}'))")
+
+
+def test_pandas_hashing():
+    import pandas as pd
+
+    # we only care about the hash.
+    hf = lambda x: ppg.jobs._hash_object(x)[1]
+
+    df_a = pd.DataFrame(
+        {"A": [1, 2, 3], "B": ["4", "5", "6"]},
+        index=pd.MultiIndex.from_tuples(
+            [(1, "2"), (3, "4"), (5, "6")], names=["a", "b"]
+        ),
+    )
+    df_a2 = pd.DataFrame(
+        {"A": [1, 2, 3], "B": ["4", "5", "6"]},
+        index=pd.MultiIndex.from_tuples(
+            [(1, "2"), (3, "4"), (5, "6")], names=["a", "b"]
+        ),
+    )
+    df_b = pd.DataFrame(
+        {"A": [1, 2, 4], "B": ["4", "5", "6"]},
+        index=pd.MultiIndex.from_tuples(
+            [(1, "2"), (3, "4"), (5, "6")], names=["a", "b"]
+        ),
+    )
+    df_c = pd.DataFrame(
+        {"A": [1, 2, 3], "B": ["x", "5", "6"]},
+        index=pd.MultiIndex.from_tuples(
+            [(1, "2"), (3, "4"), (5, "6")], names=["a", "b"]
+        ),
+    )
+    df_d = pd.DataFrame(
+        {"A": [1, 2, 3], "B": ["4", "5", "6"]},
+        index=pd.MultiIndex.from_tuples(
+            [(2, "2"), (3, "4"), (5, "6")], names=["a", "b"]
+        ),
+    )
+    df_e = pd.DataFrame(
+        {"A": [1, 2, 3], "B": ["4", "5", "6"]},
+        index=pd.MultiIndex.from_tuples([(1, 2), (3, 4), (5, 6)], names=["a", "b"]),
+    )
+    df_f = pd.DataFrame(
+        {"A": [1.0, 2.0, 3.0], "B": ["4", "5", "6"]},
+        index=pd.MultiIndex.from_tuples(
+            [(1, "2"), (3, "4"), (5, "6")], names=["a", "b"]
+        ),
+    )
+    df_g = pd.DataFrame({"A": [1, 2, 3], "B": ["4", "5", "6"]}, index=[1, 3, 5])
+    # we are not checking the names of indices
+    # df_h = pd.DataFrame(
+    #     {"A": [1, 2, 3], "B": ["4", "5", "6"]},
+    #     index=pd.MultiIndex.from_tuples([(1, "2"), (3, "4"), (5, "6")]),
+    # )
+
+    assert hf(df_a) == hf(df_a)
+    assert hf(df_a) == hf(df_a2)
+    assert hf(df_a) != hf(df_b)
+    assert hf(df_a) != hf(df_c)
+    assert hf(df_a) != hf(df_d)
+    assert hf(df_a) != hf(df_e)
+    assert hf(df_a) != hf(df_f)
+    assert hf(df_a) != hf(df_g)
+    # assert hf(df_a) != hf(df_h)
