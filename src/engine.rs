@@ -1653,10 +1653,16 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     fn all_upstreams_done(dag: &GraphType, jobs: &mut [NodeInfo], node_idx: NodeIndex) -> bool {
         //there's no point caching this - it never get's called again if it ever returned true
         let upstreams = dag.neighbors_directed(node_idx, Direction::Incoming);
+        info!(
+            "all_upstreams_done for node_idx:{}",
+            node_idx
+        );
+
         for upstream_idx in upstreams {
             if !jobs[upstream_idx as usize].state.is_finished() {
                 return false;
             }
+            info!("upstream index {} is done", upstream_idx);
         }
         true
     }
