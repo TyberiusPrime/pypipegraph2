@@ -1871,7 +1871,7 @@ class ParameterInvariant(_InvariantMixin, Job):
         # if isinstance(obj, str) and len(obj) == 32 and is_hex_re.match(obj):
         # If it's already a hash, we keep it that way
         #   return obj
-        return _hash_object(obj)
+        return _hash_object(obj)[1]
 
     def extract_strict_hash(self, a_hash) -> bytes:
         return str(ParameterInvariant.freeze(a_hash)).encode("utf-8")
@@ -1894,14 +1894,14 @@ def _hash_object(obj):
         my_hash = hashers.hash_bytes(obj.encode("utf-8"))
     elif isinstance(obj, bytes):
         my_hash = hashers.hash_bytes(obj)
-    elif isinstance(
-        obj, (int, float, complex)
-    ):  # for these types, the build in hash should be good enough. This also covers numpy floats
-        # todo: does it vary across python versions?
-        # todo: these do not get salted. at least up to 3.8..
-        # todo: probably would be better to choose something deterministic...
-        # but also lot of work.
-        my_hash = str(hash(obj))  # since the others are also strings.
+    # elif isinstance(
+    #     obj, (int, float, complex)
+    # ):  # for these types, the build in hash should be good enough. This also covers numpy floats
+    #     # todo: does it vary across python versions?
+    #     # todo: these do not get salted. at least up to 3.8..
+    #     # todo: probably would be better to choose something deterministic...
+    #     # but also lot of work.
+    #     my_hash = str(hash(obj))  # since the others are also strings.
     elif isinstance(obj, ValuePlusHash):
         my_hash = obj.hexdigest
         obj = obj.value
