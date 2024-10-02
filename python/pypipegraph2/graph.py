@@ -268,7 +268,6 @@ class PyPipeGraph:
                     else "<blue>{elapsed}s</blue> | <level>{level.icon}</level> <bold>|</bold>{file:8.8}:{line:4} <level>{message}</level>"
                 ),
             )  # pragma: no cover
-
             self._link_logs()
 
             log_debug(
@@ -641,7 +640,7 @@ class PyPipeGraph:
 
         def sigint(*args, **kwargs):
             log_info("Received SIGINT")
-            if self.run_mode is (RunMode.CONSOLE):
+            if self.run_mode in (RunMode.CONSOLE, RunMode.CONSOLE_INTERACTIVE):
                 if self._debug_allow_ctrl_c == "abort":  # pragma: no cover
                     log_info("CTRL-C from debug - calling interactive abort")
                     self.runner.interactive._cmd_abort(
@@ -669,7 +668,7 @@ class PyPipeGraph:
                     log_error("calling abort")
                     self.runner.abort()
 
-        if self.run_mode is (RunMode.CONSOLE):
+        if self.run_mode in (RunMode.CONSOLE, RunMode.CONSOLE_INTERACTIVE):
             self._old_signal_hup = signal.signal(signal.SIGHUP, hup)
         # if self.run_mode in (RunMode.CONSOLE, RunMode.NOTEBOOK):
         # we always steal ctrl c
