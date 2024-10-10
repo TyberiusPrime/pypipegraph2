@@ -32,6 +32,7 @@ dependencies = [
 	"filelock",
 	"pyzstd",
 	"watchfiles",
+	"lib_programname",
 ]
 
 

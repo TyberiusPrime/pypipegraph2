@@ -93,6 +93,7 @@
            cython
            filelock
            pyzstd
+           lib_programname
         '';
         format = "pyproject";
       };
@@ -201,6 +202,55 @@
         };
         doCheck = false;
       };
+    lib-detect-testenv = let
+      p = pkgs.python311Packages;
+    in
+      p.buildPythonPackage rec {
+        pname = "lib-detect-testenv";
+        version = "2.0.8";
+        buildInputs = [p.setuptools p.setuptools-scm];
+        propagatedBuildInputs = [];
+        format = "pyproject";
+        src = p.fetchPypi {
+          inherit version;
+          pname = "lib_detect_testenv";
+          sha256 = "sha256-llJ7MRRyfnDoD2ccIEoiWuaqrxF5g/j6T1blQrI2jUM=";
+        };
+        doCheck = false;
+      };
+
+    cli-exit-tools = let
+      p = pkgs.python311Packages;
+    in
+      p.buildPythonPackage rec {
+        pname = "cli-exit-tools";
+        version = "1.2.7";
+        buildInputs = [p.setuptools p.setuptools-scm];
+        propagatedBuildInputs = [p.click lib-detect-testenv];
+        format = "pyproject";
+        src = p.fetchPypi {
+          inherit version;
+          pname = "cli_exit_tools";
+          sha256 = "sha256-51JCekqp2x8YNwyNwR6+9uJFzFiR7C+nnnFpvlg8JCM=";
+        };
+        doCheck = false;
+      };
+
+    lib_programname = let
+      p = pkgs.python311Packages;
+    in
+      p.buildPythonPackage rec {
+        pname = "lib_programname";
+        version = "2.0.9";
+        buildInputs = [p.setuptools p.setuptools-scm];
+        propagatedBuildInputs = [p.click cli-exit-tools lib-detect-testenv];
+        format = "pyproject";
+        src = p.fetchPypi {
+          inherit pname version;
+          sha256 = "sha256-3eAMcs9bea7fl4HVoO5DGCVeFMD1T+9NNL2xFVzEwrw=";
+        };
+        doCheck = false;
+      };
 
     mypython = pkgs.python311.withPackages (p: [
       #todo: figure out how to derive this from pyproject.toml
@@ -223,6 +273,7 @@
       plotnine
       p.filelock
       pyzstd
+      lib_programname
     ]);
   in {
     # pass in nixpkgs, mach-nix and what you want it to report back as a version

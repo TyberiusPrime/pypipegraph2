@@ -3,6 +3,7 @@ __version__ = "3.1.4"
 
 import logging
 import contextlib
+from pathlib import Path
 from .graph import PyPipeGraph, ALL_CORES, DirConfig
 from .jobs import (
     FileGeneratingJob,
@@ -57,9 +58,15 @@ _ppg1_compatibility_mode = False
 
 def _last_or_default(name, value, default_value):
     if value is default:  # pragma: no cover
-        result = default_value
+        if hasattr(default_value, "callme"):
+            result = default_value()
+        else:
+            result = default_value
     elif value is reuse_last_or_default:
-        result = _last_new_arguments.get(name, default_value)
+        result = _last_new_arguments.get(
+            name,
+            default_value if not hasattr(default_value, "callme") else default_value(),
+        )
     else:
         result = value
     _last_new_arguments[name] = result
@@ -94,7 +101,7 @@ def new(
         name: _last_or_default(name, locs[name], default_arg)
         for name, default_arg in [
             ("cores", ALL_CORES),
-            ("dir_config", DirConfig(".ppg")),
+            ("dir_config", _get_default_dir_config),
             ("log_level", logging.INFO),  # that's the one for the log file
             ("allow_short_filenames", False),
             ("run_mode", RunMode.CONSOLE),
@@ -115,6 +122,28 @@ def new(
 
     return global_pipegraph
 
+
+def _get_default_dir_config():
+    # we need the script name
+    import lib_programname
+    path_to_program = lib_programname.get_path_executed_script()  # type: pathlib.Path
+    if path_to_program is None:
+        raise ValueError(
+            "Could not determine path to executed script. Set a DirConfig when calling ppg2.new()"
+        )
+    pn = Path(path_to_program).name
+    if ( # fallback for before this change.
+        Path(".ppg/history/ppg_history.2.zstd").exists()
+        and (pn == 'run.py') and not
+        Path(".ppg/per_script/run.py/history/ppg_history.2.zstd").exists()
+    ):
+        return DirConfig(".ppg")
+    else:
+        print(f"defaulting to dirconfig = .ppg/per_script/{pn}")
+        return DirConfig(".ppg/per_script/" + pn)
+
+
+_get_default_dir_config.callme = True
 
 global_pipegraph = None
 
