@@ -93,7 +93,9 @@
            cython
            filelock
            pyzstd
+           watchfiles
            lib_programname
+
         '';
         format = "pyproject";
       };

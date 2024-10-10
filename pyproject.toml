@@ -31,7 +31,6 @@ dependencies = [
 	"networkx",
 	"filelock",
 	"pyzstd",
-	"watchfiles",
 	"lib_programname",
 ]
 
