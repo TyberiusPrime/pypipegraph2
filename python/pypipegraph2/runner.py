@@ -678,7 +678,10 @@ class Runner:
                         f"\tFailed after {job.run_time:.2}s.\n"
                     )
                 if stacks is not None and self.print_failures:
-                    if self.job_graph.run_mode in (RunMode.CONSOLE, RunMode.CONSOLE_INTERACTIVE):
+                    if self.job_graph.run_mode in (
+                        RunMode.CONSOLE,
+                        RunMode.CONSOLE_INTERACTIVE,
+                    ):
                         console.print(
                             stacks._format_rich_traceback_fallback(False, True).replace(
                                 "\n", "\n\t"
@@ -934,11 +937,24 @@ class Runner:
                                 if (job.stop_time != job.stop_time) or (
                                     job.stop_time - job.start_time > 1
                                 ):
-                                    finish_msg = f"Job finished: '{job_id}'. Runtime: {job.stop_time - job.start_time:.2f}s"
+                                    runtime = job.stop_time - job.start_time
+                                    finish_msg = f"Job finished: '{job_id}'. Runtime: {runtime:.2f}s"
                                     log_info(finish_msg)
-                                # else:
+                                else:
+                                    runtime = -1
                                 # log_debug(finish_msg)
                                 self.done_counter += 1
+                                # only on output jobs..
+                                if job.eval_job_kind == "Output":
+                                    self.job_graph.post_event(
+                                        {
+                                            "type": "job_done",
+                                            "job_id": job_id,
+                                            "run_time": runtime,
+                                            "start_time": getattr(job, "start_time", 0),
+                                            "stop_time": getattr(job, "stop_time", 0),
+                                        }
+                                    )
                                 try:
                                     with self.evaluator_lock:
                                         self.evaluator.event_job_success(

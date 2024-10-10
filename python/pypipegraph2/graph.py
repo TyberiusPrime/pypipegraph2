@@ -32,9 +32,11 @@ from .util import (
 )
 from . import util
 
-
-logger.level("JT", no=6, color="<yellow>", icon="?")
-logger.level("INFO", color="")
+try:
+    logger.level("JT", no=6, color="<yellow>", icon="?")
+    logger.level("INFO", color="")
+except TypeError:
+    pass
 # if "pytest" in sys.modules:  # pragma: no branch
 # log_out = sys.stderr
 # else:  # pragma: no cover
@@ -118,6 +120,7 @@ class PyPipeGraph:
         log_retention=None,
         prevent_absolute_paths=True,
         report_done_filter=1,
+        push_events=False,
     ):
         if cores is ALL_CORES:
             self.cores = CPUs()
@@ -142,9 +145,7 @@ class PyPipeGraph:
         self.job_inputs = collections.defaultdict(
             set
         )  # necessary inputs (ie. outputs of other jobs)
-        self.outputs_to_job_ids = (
-            {}
-        )  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
+        self.outputs_to_job_ids = {}  # so we can find the job that generates an output: todo: should be outputs_to_job_id or?
         self.run_id = 0
         self._test_failing_outside_of_job = False
         self.allow_short_filenames = allow_short_filenames
@@ -161,6 +162,7 @@ class PyPipeGraph:
         self._jobs_do_dump_subgraph_debug = False
         self._jobs_to_prune_unrelated = False
         self._jobs_to_prune_but = False
+        self.push_events = push_events
 
     def run(
         self,
@@ -225,6 +227,7 @@ class PyPipeGraph:
             self.log_file_lookup = (
                 self.dir_config.log_dir / f"{fn}-{self.time_str}.lookup.log"
             )
+            self.create_event_socket()
             log_position_lookup = {}
             log_position_lookup_file = open(self.log_file_lookup, "w", buffering=1)
             logger.remove()  # no default logging
@@ -295,6 +298,7 @@ class PyPipeGraph:
             jobs_already_run = set()
             final_result = {}
             aborted = False
+            self.post_event({"type": "run_start", "time": time.time()})
             try:
                 while True:
                     max_runs -= 1
@@ -358,21 +362,40 @@ class PyPipeGraph:
             self.last_run_result = final_result
             if raise_on_job_error and self.do_raise and not self._restart_afterwards:
                 if jobs_failed:
+                    self.post_event(
+                        {
+                            "type": "run_stop",
+                            "time": time.time(),
+                            "outcome": "job_failure",
+                        }
+                    )
                     raise exceptions.JobsFailed(
                         "At least one job failed", self.do_raise
                     )
                 else:
+                    self.post_event(
+                        {
+                            "type": "run_stop",
+                            "time": time.time(),
+                            "outcome": "internal_failure",
+                        }
+                    )
                     raise exceptions.RunFailedInternally()
             elif not raise_on_job_error and self.do_raise:
                 log_error("At least one job failed")
             if aborted:
+                self.post_event(
+                    {"type": "run_stop", "time": time.time(), "outcome": "aborted"}
+                )
                 raise KeyboardInterrupt("Run aborted")  # pragma: no cover
             ok = True
+            self.post_event({"type": "run_stop", "time": time.time(), "outcome": "ok"})
             return final_result
         except Exception as e:
             log_error(e)
             raise
         finally:
+            self.close_event_socket()
             if ok:
                 log_info("Run is done")
             else:
@@ -621,9 +644,7 @@ class PyPipeGraph:
             return
         for j in with_callback:
             dc = j.dependency_callbacks
-            j.dependency_callbacks = (
-                []
-            )  # must reset before run, might add new ones, right?
+            j.dependency_callbacks = []  # must reset before run, might add new ones, right?
             for c in dc:
                 # log_info(f"{j.job_id}, {c}")
                 j.depends_on(c())
@@ -839,3 +860,39 @@ class PyPipeGraph:
         for j in self.jobs:
             if not j in keep:
                 self.jobs[j].prune()
+
+    def create_event_socket(self):
+        if self.push_events:
+            self._event_socket_path = self.dir_config.log_dir / "ppg_event_socket"
+            import socket
+
+            # only try to reconnect every few seconds.
+            now = time.time()
+            if (not hasattr(self, "_event_socket_last_connect_time")) or (
+                now - self._event_socket_last_connect_time > 5
+            ):
+                self._event_socket_last_connect_time = now
+                try:
+                    self._event_socket = socket.socket(
+                        socket.AF_UNIX, socket.SOCK_DGRAM
+                    )
+                except:
+                    print("No listener found")
+
+    def close_event_socket(self):
+        if hasattr(self, "_event_socket"):
+            self._event_socket.close()
+            del self._event_socket
+
+    def post_event(self, event_dict):
+        if self.push_events:
+            message = json.dumps(event_dict).encode("utf-8") + b"\n"
+            if not hasattr(self, "_event_socket"):
+                self.create_event_socket()
+            if hasattr(self, "_event_socket"):
+                try:
+                    self._event_socket.sendto(message, str(self._event_socket_path))
+                except (ConnectionRefusedError, TypeError) as e:
+                    # log_error(f"closed graph connection {self._event_socket_path}")
+                    self._event_socket.close()
+                    del self._event_socket

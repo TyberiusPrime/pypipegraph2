@@ -83,6 +83,7 @@ def new(
     cache_dir=reuse_last_or_default,
     prevent_absolute_paths=reuse_last_or_default,
     report_done_filter=reuse_last_or_default,
+    push_events=reuse_last_or_default,
 ):
     """create a new pipegraph.
     You may pass reuse_last_or_default to all values
@@ -108,6 +109,7 @@ def new(
             ("log_retention", 3),
             ("prevent_absolute_paths", True),
             ("report_done_filter", 1),
+            ("push_events", False),
         ]
     }
     util.do_jobtrace_log = arguments["log_level"] <= 6
