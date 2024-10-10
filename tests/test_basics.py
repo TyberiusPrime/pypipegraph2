@@ -1529,10 +1529,11 @@ class TestPypipegraph2:
         import shutil
 
         try:
-            shutil.rmtree(Path(".ppg/history"))  # from the default created ppg
+            default_path = Path(".ppg/per_script/.pytest-wrapped/history")
+            shutil.rmtree(default_path)  # from the default created ppg
             ppg.new(dir_config=ppg.DirConfig(".ppg2"))
             ppg.run()
-            assert not Path(".ppg/history").exists()
+            assert not default_path.exists()
             assert Path(".ppg2/history").exists()
             ppg.new(dir_config="ppg3")
             ppg.run()
