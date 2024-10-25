@@ -1529,7 +1529,19 @@ class TestPypipegraph2:
         import shutil
 
         try:
-            default_path = Path(".ppg/per_script/.pytest-wrapped/history")
+            default_paths = [
+                Path(".ppg/per_script/.pytest-wrapped/history"),
+                Path(".ppg/per_script/pytest/history"),
+            ]
+            for d in default_paths:
+                if d.exists():
+                    default_path = d
+                    break
+            else:
+                raise ValueError(
+                    f"default path not found. We have {list(Path('.ppg/per_script').glob('*'))} available"
+                )
+
             shutil.rmtree(default_path)  # from the default created ppg
             ppg.new(dir_config=ppg.DirConfig(".ppg2"))
             ppg.run()
