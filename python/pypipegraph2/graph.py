@@ -524,13 +524,12 @@ class PyPipeGraph:
     def _save_history(self, historical):
         log_trace("_save_history")
         fn = self.get_history_filename()
-        if Path(fn).exists():
-            fn.rename(fn.with_suffix(fn.suffix + ".backup"))
+        fn_temp = fn.with_suffix(".temp")
         raise_keyboard_interrupt = False
 
         try_again = True
         while try_again:
-            with pyzstd.ZstdFile(fn, "wb") as op:
+            with pyzstd.ZstdFile(fn_temp, "wb") as op:
                 try:
                     op.write(json.dumps(historical, indent=2).encode("utf-8"))
                     if self._test_failing_outside_of_job:  # for unit test
@@ -540,10 +539,14 @@ class PyPipeGraph:
                     try_again = False
                 except KeyboardInterrupt:
                     raise_keyboard_interrupt = True
+        if Path(fn).exists():
+            fn.rename(fn.with_suffix(fn.suffix + ".backup"))
+        fn_temp.rename(fn)
+        log_info("History was saved")
+
         if raise_keyboard_interrupt:
             log_error("Keyboard interrupt during history dumping")
             raise KeyboardInterrupt()
-        log_info("History was saved")
 
     def _convert_old_history(self):
         """Convert pre-rust history,

@@ -191,7 +191,7 @@ class ConsoleInteractive:
         to_sort = []
         for job_id in self.runner.jobs_in_flight:
             try:
-                rt = t - self.runner.jobs[job_id].start_time
+                rt = t - getattr(self.runner.jobs[job_id], 'start_time', t) # if it's not set, we're at the very start of this job's existance
                 status = self.runner.jobs[job_id].waiting
                 to_sort.append((not status, rt, job_id))
             except KeyError:
