@@ -1454,7 +1454,10 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                         except:  # noqa: E722  pragma: no cover
                             pass
                     for x in b.__closure__:
-                        xc = x.cell_contents
+                        try:
+                            xc = x.cell_contents
+                        except ValueError:
+                            xc = "<cell is empty>"
                         in_b += f"\t{id(xc)} {type(xc)} {_safe_str(xc)[:40]}\n"
                         try:
                             set_b.add(xc)
@@ -3045,7 +3048,7 @@ def ExternalJob(
 
     If the process creates additional files that you want to track,
     add them as dictionary in @additional_created_files.
-    The values are relative to output_path.
+    The values are relative to output_path!
     (job.files has them resolved!)
 
     The @cmd_or_cmd_func may be a callback - in that case it's called once,
@@ -3074,6 +3077,9 @@ def ExternalJob(
     """
     output_path = Path(output_path)
     assert isinstance(additional_created_files, dict)
+    for k,v in additional_created_files.items():
+        if isinstance(v, Path):
+            raise ValueError(f"additional_created_files contained Paths when it should be strs relative to output_path. {k} was {v}")
 
     def run(output_files):
         import subprocess
