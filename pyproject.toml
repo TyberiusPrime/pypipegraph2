@@ -32,6 +32,7 @@ dependencies = [
 	"filelock",
 	"pyzstd",
 	"lib_programname",
+	"textual",
 ]
 
 
@@ -72,4 +73,4 @@ addopts="--ignore=dev_utils"
 
 [project.scripts]
 ppg2-filter-constraint-violations = "pypipegraph2.cli:main_filter_constraint_violations"
-ppg2-interactive = "pypipegraph2.cli:main_interactive"
+ppg2-browse-graph = "pypipegraph2.cli:view_graph_ml"
