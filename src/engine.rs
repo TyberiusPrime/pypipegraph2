@@ -1422,11 +1422,13 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 }
                 SignalKind::JobUpstreamFailure => {
                     let j = &mut self.jobs[node_idx as usize];
+                    let mut propagate = true;
                     match j.state {
                         JobState::Always(JobStateAlways::FinishedUpstreamFailure)
                         | JobState::Output(JobStateOutput::FinishedUpstreamFailure)
                         | JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) => {
-                            //ignore
+                            //ignore - already done
+                            propagate = false;
                         }
                         JobState::Always(JobStateAlways::Undetermined) => {
                             set_node_state!(
@@ -1463,28 +1465,30 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             )))
                         }
                     }
-                    new_signals.push(NewSignal!(SignalKind::JobDone, node_idx, self.jobs));
-                    let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
-                    for downstream_idx in downstreams {
-                        //if there's a consider signal, it's not valid anymore
-                        Self::remove_consider_signals(&mut new_signals, downstream_idx);
-                        ignore_consider_signals.insert(downstream_idx);
+                    if propagate {
+                        new_signals.push(NewSignal!(SignalKind::JobDone, node_idx, self.jobs));
+                        let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
+                        for downstream_idx in downstreams {
+                            //if there's a consider signal, it's not valid anymore
+                            Self::remove_consider_signals(&mut new_signals, downstream_idx);
+                            ignore_consider_signals.insert(downstream_idx);
 
-                        new_signals.push(NewSignal!(
-                            SignalKind::JobUpstreamFailure,
-                            downstream_idx,
-                            self.jobs
-                        ));
-                        debug!("Signals after: {:?}", new_signals);
+                            new_signals.push(NewSignal!(
+                                SignalKind::JobUpstreamFailure,
+                                downstream_idx,
+                                self.jobs
+                            ));
+                            //debug!("Signals after: {:?}", new_signals);
+                        }
+                        //what about ephemeral upstreams that are now known to be unecessary?
+                        Self::reconsider_ephemeral_upstreams(
+                            &self.dag,
+                            &mut self.jobs,
+                            node_idx,
+                            &mut new_signals,
+                            &self.gen,
+                        );
                     }
-                    //what about ephemeral upstreams that are now known to be unecessary?
-                    Self::reconsider_ephemeral_upstreams(
-                        &self.dag,
-                        &mut self.jobs,
-                        node_idx,
-                        &mut new_signals,
-                        &self.gen,
-                    );
                 }
                 SignalKind::ConsiderJob => {
                     if ignore_consider_signals.contains(&node_idx) {

@@ -111,7 +111,7 @@ def no_pipegraph(request):
     if target_path.exists():  # pragma: no cover
         shutil.rmtree(target_path)
     target_path = target_path.absolute()
-    target_path.mkdir()
+    target_path.mkdir(parents=True)
     old_dir = Path(os.getcwd()).absolute()
     os.chdir(target_path)
     try:
