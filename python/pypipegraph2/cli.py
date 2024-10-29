@@ -60,7 +60,9 @@ def view_graph_ml(filename=None):
             filename = Path(sys.argv[1])
         except:
             print("usage: ppg2-browse-graph <graphml file>")
-            print("create a graphml in .ppg/../logs by calling ppg2.run with dump_graphml=True") 
+            print(
+                "create a graphml in .ppg/../logs by calling ppg2.run with dump_graphml=True"
+            )
             sys.exit(1)
     from rich.console import Console
     from rich.layout import Layout
@@ -82,7 +84,7 @@ def view_graph_ml(filename=None):
     import networkx as nx
 
     class GraphExplorerApp(App):
-        #CSS_PATH = "styles.css"  # Optional: Define custom CSS here for styling
+        # CSS_PATH = "styles.css"  # Optional: Define custom CSS here for styling
         ancestors = reactive([])
         descendants = reactive([])
 
@@ -123,7 +125,7 @@ def view_graph_ml(filename=None):
             search_text = event.value.strip().lower()
             self.filtered_nodes = [
                 node
-                    for node in self.nodes
+                for node in self.nodes
                 if not search_text or search_text in str(node).lower()
             ]
             self.update_filtered_nodes()
@@ -134,13 +136,14 @@ def view_graph_ml(filename=None):
             node_list_view = self.query_one("#node-list", ListView)
             node_list_view.clear()
             for node in self.filtered_nodes[:100]:
-                node_list_view.append(
-                    ListItem(Label(node), name=node))
+                node_list_view.append(ListItem(Label(node), name=node))
 
         def update_ancestors_descendants(self):
             if self.selected_node:
-                self.ancestors = sorted(nx.ancestors(self.graph, self.selected_node))
-                self.descendants = sorted(nx.descendants(self.graph, self.selected_node))
+                self.ancestors = sorted(self.graph.predecessors(self.selected_node))
+                self.descendants = sorted(
+                    self.graph.successors(self.selected_node)
+                )
                 ancestors_label = self.query_one("#ancestors-label", Static)
                 ancestors_label.update(f"Upstream ({len(self.ancestors)})")
                 # Populate ancestor list
@@ -183,10 +186,26 @@ def view_graph_ml(filename=None):
                     or self.query_one("#descendants").has_focus
                 ):
                     self.query_one("#node-list").focus()
-            elif event.key == 'escape':
+            elif event.key == "escape":
                 sys.exit(0)
 
         # Run the app
+
     GraphExplorerApp(graph).run()
 
+def hash_file(filename= None):
+    from pathlib import Path
+    import hashers
+    if filename is None:
+        filename = sys.argv[1]
+    filename = Path(filename)
+    h = hashers.hash_file(filename)
+    import pprint
+    pprint.pprint(h)
 
+
+
+if __name__ == "__main__":
+    import sys
+
+    view_graph_ml(filename=sys.argv[1])

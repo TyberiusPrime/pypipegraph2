@@ -74,3 +74,4 @@ addopts="--ignore=dev_utils"
 [project.scripts]
 ppg2-filter-constraint-violations = "pypipegraph2.cli:main_filter_constraint_violations"
 ppg2-browse-graph = "pypipegraph2.cli:view_graph_ml"
+ppg2-hash-file "pypipegraph2.cli:hash_file"
