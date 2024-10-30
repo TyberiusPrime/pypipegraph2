@@ -666,7 +666,7 @@ class TestPypipegraph2:
         (ie. when C is triggered, go back and (re)do TA) would be able to
         actually avoid the issue.
         """
-        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK, log_level=5)
 
         jobA = ppg.TempFileGeneratingJob(
             "TA", lambda of: counter("a") and of.write_text("A")
@@ -696,9 +696,12 @@ class TestPypipegraph2:
         assert Path("d").read_text() == "1"
 
         # now trigger TB invalidation, but not C (or D) invalidation
-        logger.info("now change FunctionInvariant:TB")
+        def is_true(): # funilly enough, 'and True' or some similar constant 
+        # will lead to the same byte code as when leaving 'and True' off,
+        # thereby not invalidating the FunctionInvariant
+            return True
         jobB = ppg.TempFileGeneratingJob(
-            "TB", lambda of: counter("b") and True and of.write_text("B")
+            "TB", lambda of: counter("b") and is_true and of.write_text("B")
         )
         ppg.run()
         assert Path("b").read_text() == "2"  # we trigger that one

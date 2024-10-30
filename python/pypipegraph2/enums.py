@@ -16,7 +16,7 @@ class RunMode(Enum):
     NONINTERACTIVE = (
         3  # such as testing, redefinitions like console, but no gui, ctrl-c works TODO
     )
-    CONSOLE_INTERACTIVE = 4 # certain redifinations: warning. interactive console, ctrl-c does not work
+    CONSOLE_INTERACTIVE = 4 # certain redefinitions: warning. interactive console, ctrl-c does not work
 
     def is_strict(self):
         return self is RunMode.CONSOLE or self is RunMode.NONINTERACTIVE

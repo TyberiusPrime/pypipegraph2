@@ -88,7 +88,7 @@ def _dedup_job(cls, job_id):
         )
     if "/../" in job_id:
         raise TypeError(f".. in job id not allowed. Was {job_id}")
-    if global_pipegraph.run_mode.is_strict() and job_id in global_pipegraph.jobs:
+    if job_id in global_pipegraph.jobs:
         j = global_pipegraph.jobs[job_id]
         if type(j) is not cls:
             if (
@@ -99,9 +99,12 @@ def _dedup_job(cls, job_id):
                 # but the other way around is not necessarily safe
                 pass  #
             else:
-                raise exceptions.JobRedefinitionError(
+                if global_pipegraph.run_mode.is_strict():
+                    raise exceptions.JobRedefinitionError(
                     f"Redefining job {job_id} with different type - prohibited by RunMode. Was {type(j)}, wants to be {cls}. If the job ids make no sense, check for symlinks"
                 )
+                else:
+                    return object.__new__(cls)
         return global_pipegraph.jobs[job_id]
     else:
         return object.__new__(cls)
@@ -661,7 +664,9 @@ class MultiFileGeneratingJob(Job):
             lookup = None
         for f in files:
             if not isinstance(f, (str, Path)):
-                raise TypeError("Files for (Multi)FileGeneratingJob must be Path/str")
+                raise TypeError(
+                    f"Files for (Multi)FileGeneratingJob must be Path/str. Was {type(f)} - {files}"
+                )
             if (
                 global_pipegraph is not None
                 and global_pipegraph.prevent_absolute_paths
@@ -1044,6 +1049,15 @@ class MultiFileGeneratingJob(Job):
     def extract_strict_hash(self, a_hash) -> bytes:
         return a_hash["hash"].encode("utf-8")
 
+    def annotate(self, file_key, markdown):
+        """Delgate to ppg2 to annotate a job's output with markdown strings, just like ppg2-watcher would do"""
+        import ppg2_interactive
+
+        if self.eval_job_kind == "Output":
+            return ppg2_interactive.annotate(self, self._lookup[file_key], markdown)
+        else:
+            raise ValueError("Can only annotate Output jobs")
+
 
 class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
     def __new__(cls, output_filename, *_args, **_kwargs):
@@ -1068,6 +1082,15 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
             always_capture_output=always_capture_output,
         )
         self._single_file = True
+
+    def annotate(self, markdown):
+        """Delgate to ppg2 to annotate a job's output with markdown strings, just like ppg2-watcher would do"""
+        import ppg2_interactive
+
+        if self.eval_job_kind == "Output":
+            return ppg2_interactive.annotate(self, self.job_id, markdown)
+        else:
+            raise ValueError("Can only annotate Output jobs")
 
 
 class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
@@ -1219,6 +1242,8 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         self, function, name=None
     ):  # must support the inverse calling with name, function, for compatibility to pypipegraph
         name, function = self._parse_args(function, name)
+
+        print(f"FunctionInvariant.__init__ - {name}, {function}")
         self.verify_arguments(name, function)
         self.function = function  # must assign after verify!
         if not hasattr(function, "ppg_source_filename"):
@@ -1838,11 +1863,13 @@ class ParameterInvariant(_InvariantMixin, Job):
         return _dedup_job(cls, "PI" + job_id)
 
     def __init__(self, job_id, parameters):
+        from . import global_pipegraph
+
         if isinstance(job_id, Path):
             job_id = str(job_id)
         job_id = "PI" + job_id
         parameters = self.freeze(parameters)
-        if hasattr(self, "parameters"):
+        if hasattr(self, "parameters") and global_pipegraph.run_mode.is_strict():
             if parameters != self.parameters:
                 raise exceptions.JobRedefinitionError(
                     f"Parameterinvariant with differing parameters {job_id}, was: {self.parameters}, now: {parameters}"
@@ -2541,7 +2568,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             return self._target_folder
         else:
             raise AttributeError(
-                "Target folder is only available after a run (and disappears on .depends_on)"
+                f"Target folder on {self.job_id} {id(self)} is only available after a run (and disappears on .depends_on)"
             )
 
     @staticmethod
@@ -2578,6 +2605,8 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             log_job_trace(
                 f"{self.output_dir_prefix} -  all files existed - just hashing"
             )
+            self._target_folder = symlink  # so the downstream knows where to look
+            log_job_trace(f"Set _target_folder on {self.job_id} {id(self)} ")
             self.files = [self._map_filename(fn) for fn in self.org_files]
             mfg_res = None
             did_build = False
@@ -2637,6 +2666,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
             # weg get here, everything is peachy
 
             self._target_folder = symlink  # so the downstream knows where to look
+            log_job_trace(f"Set _target_folder on {id(self)}")
             self.files = [self._map_filename(fn) for fn in self.org_files]
         else:
             self._raise_partial_result_exception()
