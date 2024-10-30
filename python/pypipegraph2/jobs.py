@@ -1243,7 +1243,6 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     ):  # must support the inverse calling with name, function, for compatibility to pypipegraph
         name, function = self._parse_args(function, name)
 
-        print(f"FunctionInvariant.__init__ - {name}, {function}")
         self.verify_arguments(name, function)
         self.function = function  # must assign after verify!
         if not hasattr(function, "ppg_source_filename"):
