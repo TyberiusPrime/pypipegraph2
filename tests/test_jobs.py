@@ -810,6 +810,7 @@ class TestMultiFileGeneratingJob:
             ppg.MultiFileGeneratingJob(["out/A"], lambda of: write("out/A", param))
 
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        assert len(ppg.global_pipegraph.jobs) == 0
         ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))
         ppg.MultiFileGeneratingJob(["out/A"], lambda of: write("out/A", param))
 
