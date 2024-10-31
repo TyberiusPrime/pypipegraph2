@@ -448,7 +448,7 @@ class TestModifyDag:
         )
         a2.depends_on(a1)
         b = ppg.DataLoadingJob(
-            "b", lambda *args: parts.append(1), depend_on_function=False
+            "b", lambda *args: parts.append(1) or ppg.UseInputHashesForOutput(), depend_on_function=False
         )
         a1.depends_on(b)
         a2.depends_on(b)
@@ -528,6 +528,7 @@ def test_broken_case_from_delayeddataframe(ppg2_per_test):
 
     def store(key, value):
         out[key] = value
+        return ppg.UseInputHashesForOutput()
 
     a = ppg.CachedDataLoadingJob(
         "a", lambda: "a", lambda value: counter("A") and store("a", value)

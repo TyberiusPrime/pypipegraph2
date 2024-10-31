@@ -1025,11 +1025,22 @@ class TestPypipegraph2:
         with pytest.raises(TypeError):
             ppg.ParameterInvariant("C", (NoHash(),))
 
+    def test_data_loading_job_returning_none(self):
+        self.store = []  # use attribute to avoid closure binding
+        jobA = ppg.DataLoadingJob("A", lambda: self.store.append("A"))
+        jobB = ppg.FileGeneratingJob(
+                "B", lambda of: counter("b") and of.write_text(self.store[0])
+            )
+        jobB.depends_on(jobA)
+        with pytest.raises(ppg.JobsFailed):
+            ppg.run()
+        assert ppg.global_pipegraph.last_run_result["A"].outcome is JobOutcome.Failed
+
     def test_data_loading_job(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         self.store = []  # use attribute to avoid closure binding
         try:
-            jobA = ppg.DataLoadingJob("A", lambda: self.store.append("A"))
+            jobA = ppg.DataLoadingJob("A", lambda: self.store.append("A") or 5)
             jobB = ppg.FileGeneratingJob(
                 "B", lambda of: counter("b") and of.write_text(self.store[0])
             )
@@ -1054,7 +1065,7 @@ class TestPypipegraph2:
             assert Path("b").read_text() == "2"
             assert Path("B").read_text() == "A"
             self.store.clear()
-            jobA = ppg.DataLoadingJob("A", lambda: self.store.append("B"))
+            jobA = ppg.DataLoadingJob("A", lambda: self.store.append("B") or 5)
             ppg.util.log_error("final run")
             ppg.run()
             assert len(self.store) == 1
@@ -1324,13 +1335,14 @@ class TestPypipegraph2:
             def inner2():
                 c = barrier.wait()
                 write(of, str(c))
+                return ppg.UseInputHashesForOutput()
 
             return inner2
 
         ppg.new(cores=3)
-        a = ppg.DataLoadingJob("A", inner("A"), depend_on_function=False)
-        b = ppg.DataLoadingJob("B", inner("B"), depend_on_function=False)
-        c = ppg.DataLoadingJob("C", inner("C"), depend_on_function=False)
+        a = ppg.DataLoadingJob("A", inner("A") or ppg.UseInputHashesForOutput(), depend_on_function=False)
+        b = ppg.DataLoadingJob("B", inner("B") or ppg.UseInputHashesForOutput(), depend_on_function=False)
+        c = ppg.DataLoadingJob("C", inner("C") or ppg.UseInputHashesForOutput(), depend_on_function=False)
         d = ppg.JobGeneratingJob("D", lambda: None)
         d.depends_on(a, b, c)
 

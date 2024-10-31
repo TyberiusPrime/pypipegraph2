@@ -112,6 +112,7 @@ class TestCachedDataLoadingJob:
         def a():
             o.a = "A"
             append("out/A", "A")
+            return ppg.UseInputHashesForOutput()
 
         def calc():
             append("out/B", "B")
@@ -384,6 +385,7 @@ class TestCachedAttributeJob:
         def a():
             o.a = "A"
             append("A", "A")
+            return ppg.UseInputHashesForOutput()
 
         def calc():
             append("B", "B")

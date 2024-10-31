@@ -59,6 +59,8 @@ def _history_is_different(runner, job_upstream_id, job_downstream_id, str_last, 
                             + f"'{job_upstream_id}'->'{job_downstream_id}': "
                             + f"{obj_last[ip]} {obj_now[ip]}"
                         )
+
+                        # log_warning(f"{obj_last[ip]} {obj_now[ip]}")
                         return True
         except:  # noqa: E722 yes we really want to capture and reraise *everything*
             exception_type, exception_value, tb = sys.exc_info()

@@ -140,6 +140,7 @@ class TestJobGeneratingJob:
             def load():
                 global shu
                 shu = "123"
+                return ppg.UseInputHashesForOutput()
 
             def do_write(of):
                 global shu
@@ -239,6 +240,7 @@ class TestJobGeneratingJob:
 
         def load():
             ppg.FileGeneratingJob("out/B", lambda of: write("out/B", "aa"))
+            return ppg.UseInputHashesForOutput()
 
         dl = ppg.DataLoadingJob("load_data", load)
         write_job.depends_on(dl)

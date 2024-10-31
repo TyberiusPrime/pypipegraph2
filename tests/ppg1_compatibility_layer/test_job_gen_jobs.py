@@ -200,6 +200,7 @@ class TestJobGeneratingJob:
             def load():
                 global shu
                 shu = "123"
+                return 1 # any constant, No UseInputHashesForOutput for ppg1
 
             def do_write():
                 global shu

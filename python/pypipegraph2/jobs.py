@@ -101,8 +101,8 @@ def _dedup_job(cls, job_id):
             else:
                 if global_pipegraph.run_mode.is_strict():
                     raise exceptions.JobRedefinitionError(
-                    f"Redefining job {job_id} with different type - prohibited by RunMode. Was {type(j)}, wants to be {cls}. If the job ids make no sense, check for symlinks"
-                )
+                        f"Redefining job {job_id} with different type - prohibited by RunMode. Was {type(j)}, wants to be {cls}. If the job ids make no sense, check for symlinks"
+                    )
                 else:
                     return object.__new__(cls)
         return global_pipegraph.jobs[job_id]
@@ -1225,6 +1225,59 @@ class _FileInvariantMixin:
             return hashers.hash_file(file)
 
 
+class _InputHashAwareJobMixin:
+    """Jobs that can examine the hashes of what went into them"""
+
+    def _derive_output_name(self, runner):
+        """Given the set of inputs, get as the key for by_input"""
+        input_names = runner.job_inputs[self.job_id]
+        if not input_names:
+            return "no_input"
+        updated_input = {}
+        for input_filename in input_names:
+            upstream_job_id = runner.outputs_to_job_ids[input_filename]
+            try:
+                with runner.evaluator_lock:
+                    job_output = runner.evaluator.get_job_output(upstream_job_id)
+                job_output = json.loads(job_output)
+                jj = job_output[input_filename]
+                updated_input[input_filename] = jj
+            except ValueError:  # pragma: no cover
+                raise ValueError(
+                    "deriving output name on SharedMultiFileGeneratingJob "
+                    "before all parent hashes are available is impossible."
+                    f" {upstream_job_id} was not available"
+                )
+
+        return self._hash_hashes(updated_input, runner)
+
+    def extract_strict_hash(self, a_hash) -> bytes:
+        return a_hash["hash"].encode("utf-8")
+
+    def _hash_hashes(self, hashes, runner):
+        """The problem at this point is that the hashes
+        are not strictly what-the-input-depends-on
+        but also things we use to
+        omit recalculating (expensive) hashes if possible,
+        e.g. size/mtime for FileInvariants or
+        per-python-version-bytecodes for FunctionInvariants.
+
+        We have to extract just the relevant data,
+        and for that we need to lookup the actual jobs.
+        """
+        hasher = hashlib.sha512()
+        for key, value in sorted(hashes.items()):
+            job_id = runner.job_graph.outputs_to_job_ids[key]
+            job = runner.jobs[job_id]
+            if isinstance(job, SharedMultiFileGeneratingJob) and key == str(
+                job.output_dir_prefix
+            ):
+                continue
+            hasher.update(key.encode("utf-8"))
+            hasher.update(job.extract_strict_hash(value))
+        return hasher.hexdigest()
+
+
 class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
     def __new__(cls, function, name=None):
         name, function = cls._parse_args(function, name)
@@ -1914,6 +1967,13 @@ class ValuePlusHash:
         self.hexdigest = hexdigest
 
 
+class UseInputHashesForOutput:
+    """Wrapper to signal AttributeLoadingJob/DataLoadingJob that you want to use the input hashes for the output hash"""
+
+    def __init__(self, payload=None):
+        self.payload = payload
+
+
 undefined = object()
 
 
@@ -1959,7 +2019,7 @@ def _hash_object(obj):
     return obj, my_hash
 
 
-class DataLoadingJob(Job):
+class DataLoadingJob(Job, _InputHashAwareJobMixin):
     """A job that manipulates the currently running python program.
 
     Note that these don't run if they have no dependents.
@@ -2008,16 +2068,9 @@ class DataLoadingJob(Job):
         )
         # log_trace(f"dl {self.job_id} - {escape_logging(historical_output)}")
         if load_res is None:
-            log_warning(
-                f"DataLoadingJob {self.job_id} returned None - downstreams will never be invalidated by this"
-            )
-            # try:
-            #     my_hash = historical_output.get(self.outputs[0], 0) + 1
-            # except TypeError:  # pragma: no cover
-            #     my_hash = 0  # start over. Historical can't have been 0
-            my_hash = 0
-            # so the downstream get's invalidated when ever this runs. This is a safe,
-            # but potentially wasteful
+            raise ValueError("DataLoadingJob returned None. Return either UseInputHashesForOutput() or ValuePlusHash(None, constant)")
+        elif isinstance(load_res, UseInputHashesForOutput):
+            my_hash = self._derive_output_name(runner)
         else:
             _, my_hash = _hash_object(load_res)  # could be a ValuePlusHash
         # log_trace( f"dl {self.job_id} run - new: {my_hash}")
@@ -2074,7 +2127,7 @@ def CachedDataLoadingJob(
 
 
 class AttributeLoadingJob(
-    Job
+    Job, _InputHashAwareJobMixin
 ):  # Todo: refactor with DataLoadingJob. Also figure out how to hash the result?
     eval_job_kind = "Ephemeral"
 
@@ -2132,14 +2185,14 @@ class AttributeLoadingJob(
     def run(self, _runner, historical_output):
         value = self.callback()
         if value is None:
-            log_warning(
-                f"AttributeLoadingJob {self.job_id} returned None - downstreams will be never be invalidated if this runs."
+            raise ValueError(
+                "AttributeLoadingJob returned None. Return either a ValuePlusHash(None, constant) "
+                "if that's what you actually want, or UseInputHashesForOutput(payload) "
+                "if you have an actual, but unhashable payload"
             )
-            hash = 0
-            # try:
-            #     hash = historical_output.get(self.outputs[0], 0) + 1
-            # except TypeError:  # pragma: no cover
-            #     hash = 0
+        elif isinstance(value, UseInputHashesForOutput):
+            hash = self._derive_output_name(_runner)
+            value = value.payload
         else:
             value, hash = _hash_object(value)
         setattr(self.object, self.attribute_name, value)
@@ -2439,7 +2492,7 @@ def PlotJob(  # noqa:C901
 _SharedMultiFileGeneratingJob_log_local_lock = Lock()
 
 
-class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
+class SharedMultiFileGeneratingJob(MultiFileGeneratingJob, _InputHashAwareJobMixin):
     """A shared MultiFileGeneratingJob.
 
     Sharing means that this can be produced by multiple pypipegraphs,
@@ -2846,55 +2899,6 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob):
         else:
             return [self._map_filename(f) for f in self.files]
 
-    def _derive_output_name(self, runner):
-        """Given the set of inputs, get as the key for by_input"""
-        input_names = runner.job_inputs[self.job_id]
-        if not input_names:
-            return "no_input"
-        updated_input = {}
-        for input_filename in input_names:
-            upstream_job_id = runner.outputs_to_job_ids[input_filename]
-            try:
-                with runner.evaluator_lock:
-                    job_output = runner.evaluator.get_job_output(upstream_job_id)
-                job_output = json.loads(job_output)
-                jj = job_output[input_filename]
-                updated_input[input_filename] = jj
-            except ValueError:  # pragma: no cover
-                raise ValueError(
-                    "deriving output name on SharedMultiFileGeneratingJob "
-                    "before all parent hashes are available is impossible."
-                    f" {upstream_job_id} was not available"
-                )
-
-        return self._hash_hashes(updated_input, runner)
-
-    def extract_strict_hash(self, a_hash) -> bytes:
-        return a_hash["hash"].encode("utf-8")
-
-    def _hash_hashes(self, hashes, runner):
-        """The problem at this point is that the hashes
-        are not strictly what-the-input-depends-on
-        but also things we use to
-        omit recalculating (expensive) hashes if possible,
-        e.g. size/mtime for FileInvariants or
-        per-python-version-bytecodes for FunctionInvariants.
-
-        We have to extract just the relevant data,
-        and for that we need to lookup the actual jobs.
-        """
-        hasher = hashlib.sha512()
-        for key, value in sorted(hashes.items()):
-            job_id = runner.job_graph.outputs_to_job_ids[key]
-            job = runner.jobs[job_id]
-            if isinstance(job, SharedMultiFileGeneratingJob) and key == str(
-                job.output_dir_prefix
-            ):
-                continue
-            hasher.update(key.encode("utf-8"))
-            hasher.update(job.extract_strict_hash(value))
-        return hasher.hexdigest()
-
     def _cleanup(self, runner):
         """Remove outputs / symlinks that have no longer entries in the used folder"""
         if self.remove_unused:
@@ -3106,9 +3110,11 @@ def ExternalJob(
     """
     output_path = Path(output_path)
     assert isinstance(additional_created_files, dict)
-    for k,v in additional_created_files.items():
+    for k, v in additional_created_files.items():
         if isinstance(v, Path):
-            raise ValueError(f"additional_created_files contained Paths when it should be strs relative to output_path. {k} was {v}")
+            raise ValueError(
+                f"additional_created_files contained Paths when it should be strs relative to output_path. {k} was {v}"
+            )
 
     def run(output_files):
         import subprocess

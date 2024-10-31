@@ -481,6 +481,7 @@ class TestInvariant:
             counter("a")
             os.kill(os.getpid(), signal.SIGINT)
             counter("A")
+            return ppg.UseInputHashesForOutput()
 
         job = ppg.DataLoadingJob("A", sigint)
         force_load(job)

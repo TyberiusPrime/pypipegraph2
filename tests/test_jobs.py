@@ -102,6 +102,7 @@ class TestJobs:
 
         def load_a():
             data.append("a")
+            return ppg.UseInputHashesForOutput()
 
         a = ppg.DataLoadingJob("A", load_a)
         b = lambda: ppg.FileGeneratingJob(  # noqa: E731
@@ -147,7 +148,7 @@ class TestJobs:
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
         b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
-        c = ppg.DataLoadingJob("o", lambda: counter("c") and None)
+        c = ppg.DataLoadingJob("o", lambda: counter("c") and ppg.UseInputHashesForOutput())
         b.depends_on(a)
         a.depends_on_params("x")
         a.depends_on(c)
@@ -858,6 +859,7 @@ class TestDataLoadingJob:
         # shared = "I was the the global in the mcp"
         def load():
             test_modifies_shared_global.append("shared data")
+            return ppg.UseInputHashesForOutput()
 
         of = "out/a"
 
@@ -889,6 +891,7 @@ class TestDataLoadingJob:
         def load():
             global shared_value
             shared_value = "shared data"
+            return ppg.UseInputHashesForOutput()
 
         of = "out/a"
 
@@ -922,6 +925,7 @@ class TestDataLoadingJob:
 
         def load():
             counter(of)
+            return ppg.UseInputHashesForOutput()
 
         job = ppg.DataLoadingJob("myjob", load)
         ofB = "out/sha"
@@ -944,12 +948,14 @@ class TestDataLoadingJob:
             write(
                 of, "shu"
             )  # not the fine english way, but we need a sideeffect that's checkable
+            return ppg.UseInputHashesForOutput()
 
         job = ppg.DataLoadingJob("myjob", load)
         ofB = "out/sha"
 
         def loadB():
             write(ofB, "sha")
+            return ppg.UseInputHashesForOutput()
 
         jobB = ppg.DataLoadingJob("myjobB", loadB).depends_on(job)
         ofC = "out/c"
@@ -974,6 +980,7 @@ class TestDataLoadingJob:
 
         def do_load():
             o.a = read(of)
+            return ppg.UseInputHashesForOutput()
 
         jobB = ppg.DataLoadingJob("loadme", do_load).depends_on(jobA)
         ofB = "out/b"
@@ -993,6 +1000,7 @@ class TestDataLoadingJob:
             write(
                 of, "shu"
             )  # not the fine english way, but we need a sideeffect that's checkable
+            return ppg.UseInputHashesForOutput()
 
         job = ppg.DataLoadingJob("myjob", load)
 
@@ -1055,6 +1063,7 @@ class TestDataLoadingJob:
         def a():
             o.a = "A"
             append("out/A", "A")
+            return ppg.UseInputHashesForOutput()
 
         def b(of):
             append("out/B", "B")
@@ -1062,6 +1071,7 @@ class TestDataLoadingJob:
         def c():
             o.c = "C"
             append("out/C", "C")
+            return ppg.UseInputHashesForOutput()
 
         def d(of):
             append("out/D", "D")
@@ -1151,6 +1161,7 @@ class TestDataLoadingJob:
             ppg.FileGeneratingJob(
                 "out/C", lambda of: write("out/C", "C"), depend_on_function=False
             )
+            return ppg.UseInputHashesForOutput()
 
         a = ppg.FileGeneratingJob(
             "out/A", lambda of: write("out/A", "A"), depend_on_function=False
@@ -1201,6 +1212,33 @@ class TestDataLoadingJob:
         b.depends_on(a)
         ppg.run()
         assert read("b") == "a"
+
+    def test_upstream_leads_to_invalidation_if_dl_returns_none(self):
+        store = {}
+
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK) # something non-strict
+
+        a = ppg.ParameterInvariant("A",'a')
+        # note that the default parameter is necessary, 
+        # otherwise teh 2nd invokation will have bound a content-different
+        # object 'store'.
+        def do_b(store=store):
+            store['b'] = store.get('b', 0) + 1
+            return ppg.UseInputHashesForOutput()
+        b = ppg.DataLoadingJob('B', do_b)
+
+        c = ppg.FileGeneratingJob('C', lambda of, store=store: of.write_text('c' + str(store['b'])))
+
+        c.depends_on(b)
+        b.depends_on(a)
+        ppg.run()
+        assert Path('C').read_text() == 'c1'
+        ppg.run()
+        assert Path('C').read_text() == 'c1'
+        ppg.ParameterInvariant('A', 'a1')
+        ppg.run()
+        assert Path('C').read_text() == 'c2'
+
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1453,7 +1491,7 @@ class TestAttributeJob:
             o = Dummy()
             ppg.AttributeLoadingJob("load_dummy_shu", o, "a", "shu")
 
-    def test_returning_none(self):
+    def test_returning_none_raises(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         o = Dummy()
         a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
@@ -1463,15 +1501,33 @@ class TestAttributeJob:
         a.depends_on_params("x")
         a.depends_on(c)
         b.depends_on(c)
+        with pytest.raises(ppg.JobsFailed):
+            ppg.run()
+        assert ppg.global_pipegraph.last_run_result[c.job_id].outcome is ppg.enums.JobOutcome.Failed
+
+    def test_returning_none_via_ues_input_hashes_for_output(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+        o = Dummy()
+        a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
+        b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
+        c = ppg.AttributeLoadingJob("o", o, "o", lambda: counter("c") and ppg.UseInputHashesForOutput(None))
+        b.depends_on(a)
+        a.depends_on_params("x")
+        a.depends_on(c)
+        b.depends_on(c)
         ppg.run()
         assert read("a") == "1"
         assert read("b") == "1"
         assert read("c") == "1"
-        a.depends_on_params("y")
+        c.depends_on_params("y")
         ppg.run()
         assert read("a") == "2"
         assert read("c") == "2"
-        assert read("b") == "1"  # ppg2_rust
+        assert read("b") == "2"  # ppg2_rust
+        ppg.run()
+        assert read("a") == "2"
+        assert read("c") == "2"
+        assert read("b") == "2"  # ppg2_rust
 
 
 @pytest.mark.usefixtures("create_out_dir")
