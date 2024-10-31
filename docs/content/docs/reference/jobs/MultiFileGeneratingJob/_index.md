@@ -3,7 +3,7 @@ title= "MultiFileGeneratingJob"
 Weight= 10 
 +++
 
-# pypipegraph2.MultiFileGeneratingJob
+# ppg2.MultiFileGeneratingJob
 
 A job that creates multiple files.
 

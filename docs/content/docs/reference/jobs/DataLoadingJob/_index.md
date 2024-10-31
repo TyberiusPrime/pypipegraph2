@@ -3,7 +3,7 @@ title= "DataLoadingJob"
 Weight= 14 
 +++
 
-ppg2.DataLoadingJob
+# ppg2.DataLoadingJob
 
 ```python
 ppg2.DataLoadingJob(
@@ -29,11 +29,21 @@ This job runs **in** the controlling process (see
 Prefer an [AttributeLoadingJob](../attributeloadingjob) if possible, since that
 can unload the data as well.
 
-The _load_function_ should return an object - it's pickled representation is
+The _load_function_ should return an object - it's [DeepHashed](https://zepworks.com/deepdiff/current/deephash.html) representation is
 used to calculate the [tracking hash](../concepts/tracking-hash) of the job.
 
-If you don't return a value (= return None), this job can never invalidate it's
-downstreams.
+Alternatively, you may return
+[UseInputHashesForOutput()](../UseInputHashesForOutput/), which signals the job
+to use a hash of it's input hashes as the [tracking hash](../../../concepts/tracking_hashes/), making it essentially
+'transparent'. This is useful for objects that are currently not supported by
+DeepDiff.
+
+Returning None is no longer supported. 
+
+You must return a value, or [UseInputHashesForOutput](../UseInputHashesForOutput/).
+
+Use a constant value if you really don't want this job to not invalidate downstreams ever.
+
 
 If you already have a hash handy (or your data is not pickleable), you can
 return a ppg2.ValuePlusHash(value, hash_hexdigest) object to circumvent the pickling requirement.

@@ -3,7 +3,7 @@ title= "AttributeLoadingJob"
 Weight= 15
 +++
 
-ppg2.AttributeLoadingJob
+# ppg2.AttributeLoadingJob
 
 ```python
 ppg2.AttributeLoadingJob(
@@ -16,12 +16,28 @@ ppg2.AttributeLoadingJob(
     ):
 ```
 
-A DataLoadingJob that stores it's results in obj.<attr_name>
+A DataLoadingJob that stores it's results in `obj.<attr_name>`.
 
 * obj - the oject to store data in
-* attr_name the attribute name to store the data in obj.<attr_name>
+* attr_name the attribute name to store the data at.
 
 For further parameters, see [DataLoadingJob](../dataloadingjob).
 
-All the DataLoadingJob remarks apply here as well.
+This job runs **in** the controlling process (see
+[process-structure](../concept/process-structure)).
+
+The _load_function_'s return value is stored 
+in `attr_name` of `obj`. 
+It's [DeepHashed](https://zepworks.com/deepdiff/current/deephash.html) representation is
+used to calculate the [tracking hash](../../../concepts/tracking_hashes).
+
+If you already have a hash handy, or need to work around an object type that is not supported by [DeepDiff/DeepHash](https://pypi.org/project/deepdiff/),
+you can return a [ppg2.ValuePlusHash(value, hash_hexdigest)](../valueplushash) object to circumvent the pickling requirement.
+
+
+Alternatively, you may return [UseInputHashesForOutput](../useinputhashesforoutput/), which signals the job to use a hash of it's input hashes as the tracking hash,
+making it essentially 'transparent'. This is useful for objects that are currently not supported by DeepDiff.
+
+
+
 

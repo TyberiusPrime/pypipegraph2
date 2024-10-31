@@ -63,6 +63,8 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+docs/public/
+docs/resources/
 
 # PyCharm
 .idea/

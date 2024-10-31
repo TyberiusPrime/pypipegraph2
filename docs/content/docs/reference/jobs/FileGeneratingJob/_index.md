@@ -3,7 +3,7 @@ title= "FileGeneratingJob"
 Weight= 10
 +++
 
-# pypipegraph2.FileGeneratingJob
+# ppg2.FileGeneratingJob
 
 A [Job](../concepts/jobs) that creates a single file.
 

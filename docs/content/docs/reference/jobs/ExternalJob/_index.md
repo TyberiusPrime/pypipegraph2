@@ -3,7 +3,7 @@ title= "ExternalJob"
 Weight= 10
 +++
 
-# pypipegraph2.ExternalJob
+# ppg2.ExternalJob
 
 A job that runs an external programm, logging the command, stdout, stderr, and return code.
 

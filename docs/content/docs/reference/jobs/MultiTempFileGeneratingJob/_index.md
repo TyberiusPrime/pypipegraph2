@@ -3,7 +3,7 @@ title= "MultiTempFileGeneratingJob"
 Weight= 12
 +++
 
-# pypipegraph2.MultiTempFileGeneratingJob
+# ppg2.MultiTempFileGeneratingJob
 
 A job that creates multiple files, which are deleted once all dependent jobs are done.
 

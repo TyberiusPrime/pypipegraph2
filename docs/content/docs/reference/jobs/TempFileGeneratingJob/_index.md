@@ -3,7 +3,7 @@ title= "TempFileGeneratingJob"
 Weight= 10
 +++
 
-# pypipegraph2.TempFileGeneratingJob
+# ppg2.TempFileGeneratingJob
 
 A job that creates one file, which is deleted once all dependent jobs are done.
 
