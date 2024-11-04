@@ -52,6 +52,22 @@ from . import util
 from .util import assert_uniqueness_of_object
 from .pypipegraph2 import enable_logging as enable_rust_logging
 
+try: 
+    # if you're using numba, we need a thread and fork safe threading layer
+    # we request this here,
+    # but it will fail the first time numba parallelization is used
+    # if tbb can't be found.
+    # otherwise you'll get some shiny 
+    # 'Terminating: fork() called from a process already using GNU OpenMP, this is unsafe';
+    # error messages.
+
+    import numba
+    numba.config.THREADING_LAYER = 'safe'
+except ImportError:
+    pass
+
+
+
 reuse_last_or_default = object()
 default = object()
 
