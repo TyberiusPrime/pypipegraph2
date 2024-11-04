@@ -2205,11 +2205,9 @@ class DictEntryLoadingJob(AttributeLoadingJob):
         )
 
     def store(self, value):
-        log_error(f"{self.job_id} Storing {self.attribute_name}")
         self.object[self.attribute_name] = value
 
     def cleanup(self):
-        log_error(f"{self.job_id} Removing {self.attribute_name}")
         del self.object[self.attribute_name]
 
 
