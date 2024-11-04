@@ -125,7 +125,8 @@ class Trace:
         return self._format_rich_traceback_fallback(False)
 
     def _format_rich_traceback_fallback(
-        self, include_locals=False, include_formating=True
+        self, include_locals=False, include_formating=True,
+        skip_ppg = False,
     ):
         """Pretty print a traceback.
 
@@ -185,6 +186,10 @@ class Trace:
                 out.append(f"{bold('Traceback')} (most recent call last):")
 
                 for frame in stack.frames:
+                    if skip_ppg and 'python/pypipegraph2' in frame.filename:
+                        out.append(f'{frame.filename}":{frame.lineno}, in {frame.name} (details skipped)')
+                        continue
+
                     out.append(f'{frame.filename}":{frame.lineno}, in {frame.name}')
                     # if frame.filename.startswith("<"): # pragma: no cover # - interactive, I suppose
                     # render_locals(frame)
