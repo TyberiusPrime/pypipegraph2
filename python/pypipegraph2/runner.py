@@ -412,10 +412,10 @@ class Runner:
         self.evaluation_done = False
         self.main_thread_event = threading.Event()
         self.check_for_new_jobs = threading.Event()
-        self.main_thread_callback_lock = threading.Lock()
-        # things that need to be performed in the main thread
-        # like forking:
-        self.main_thread_callbacks = []
+        # for things that need to be performed in the main thread
+        # like forking. Set the main_thread_event after filling it!
+        # (We can't select on Events, nor reliably on Ques)
+        self.main_thread_callbacks = queue.Queue()
 
         self.jobs_in_flight = []
         self.jobs_all_cores_in_flight = 0
@@ -429,14 +429,16 @@ class Runner:
 
             while True:
                 # ljt("Waiting for evaluation done")
-                if self.main_thread_event.wait(1):  # todo: timeout, sanity checks.
+                if self.main_thread_event.wait(5):  # todo: timeout, sanity checks.
                     if self.evaluation_done:
                         # ljt(f"evaluation done happend? {self.stopped}")
                         break
-                    with self.main_thread_callback_lock:
-                        while self.main_thread_callbacks:
-                            cb = self.main_thread_callbacks.pop()
+                    try:
+                        while True:
+                            cb = self.main_thread_callbacks.get(block=False)
                             cb()
+                    except queue.Empty:
+                        pass
                 else:  # periodic timeout
                     if self.aborted:
                         break

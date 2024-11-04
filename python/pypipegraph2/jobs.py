@@ -835,8 +835,7 @@ class MultiFileGeneratingJob(Job):
                     else:
                         fork_signal.set()
 
-                with runner.main_thread_callback_lock:
-                    runner.main_thread_callbacks.append(fork_callback)
+                runner.main_thread_callbacks.put(fork_callback)
                 runner.main_thread_event.set()
 
                 fork_signal.wait()
