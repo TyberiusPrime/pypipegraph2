@@ -13,7 +13,7 @@ from typing import Union, List, Dict, Optional, Tuple, Callable
 from pathlib import Path
 from io import StringIO
 from collections import namedtuple
-from threading import Lock
+from threading import Lock, Event
 from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
 
@@ -119,6 +119,10 @@ def _mark_function_wrapped(outer, inner, desc="callback"):
         raise TypeError(f"{desc} function must be callable")
     outer.wrapped_function = inner
     return outer
+
+
+def aborted(_sig, _stack):
+    raise KeyboardInterrupt()  # pragma: no cover  todo: interactive testing
 
 
 x = "hello"
@@ -697,6 +701,69 @@ class MultiFileGeneratingJob(Job):
     # def callback(self):
     # self.generating_function(*self.get_input())
 
+    def _do_inside_fork(self, input, stdout, stderr, exception_out):
+        error_exit_code = 1
+        try:
+            signal.signal(signal.SIGUSR1, aborted)
+            # log_info(f"tempfilename: {stderr.name}")
+            # stdout_ = sys.stdout
+            # stderr_ = sys.stderr
+            sys.stdout = stdout
+            sys.stderr = stderr
+            os.dup2(stdout.fileno(), 1)
+            os.dup2(stderr.fileno(), 2)
+
+            try:
+                self.generating_function(*input)
+                stdout.flush()
+                stderr.flush()
+                # else:
+                os._exit(0)  # go down hard, do not call atexit and co.
+            except TypeError as e:
+                if hasattr(self.generating_function, "__code__"):  # build ins
+                    func_info = f"{self.generating_function.__code__.co_filename}:{self.generating_function.__code__.co_firstlineno}"
+                else:
+                    func_info = "unknown"
+                if "takes 0 positional arguments but 1 was given" in str(e):
+                    raise TypeError(
+                        e.args[0]
+                        + ". You have forgotten to take the output_files as your first parameter."
+                        + f"The function was defined in {func_info}."
+                    )
+                else:
+                    raise
+        except SystemExit as e:
+            error_exit_code = e.code
+            raise
+        except (Exception, KeyboardInterrupt) as e:
+            captured_tb = None  # if the capturing fails for any reason...
+            traceback_dumped = False
+            try:
+                exception_type, exception_value, tb = sys.exc_info()
+                captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
+                pickle.dump(captured_tb, exception_out)
+                traceback_dumped = True
+                pickle.dump(e, exception_out)
+                exception_out.flush()
+            except Exception as e2:
+                # msg = f"FileGeneratingJob raised exception, but saving the exception failed: \n{type(e)} {escape_logging(e)} - \n {type(e2)} {escape_logging(e2)}\n"
+                # traceback is already dumped
+                # exception_out.seek(0,0) # might have dumped the traceback already, right?
+                # pickle.dump(captured_tb, exception_out)
+                if not traceback_dumped:
+                    pickle.dump(None, exception_out)
+                pickle.dump(exceptions.JobDied(repr(e), repr(e2)), exception_out)
+                exception_out.flush()
+                raise
+        finally:
+            stdout.flush()
+            stderr.flush()
+            # sys.stdout = stdout_
+            # sys.stderr = stderr_
+            # os.dup2(stdout_, 1)
+            # os.dup2(stderr_, 2)
+            os._exit(error_exit_code)
+
     def run(self, runner, historical_output):  # noqa:C901
         self.files = [self._map_filename(fn) for fn in self.org_files]
         # we only rebuild the file if
@@ -715,37 +782,6 @@ class MultiFileGeneratingJob(Job):
         del_counter = 0
         for fn in self.files:
             if fn.exists():
-                # todo figure out what to do with tihs...
-                # # if we were invalidated, we run-  mabye
-                # log_job_trace(
-                #     f"{fn} existed - invalidation: {runner.job_states[self.job_id].validation_state}, in history: {str(fn) in historical_output}"
-                # )
-                # if all_present:  # so far...
-                #     if (
-                #         runner.job_states[self.job_id].validation_state
-                #         is not ValidationState.Invalidated  # both Valid and Unknown are ok here
-                #     ):
-                #         if str(fn) in historical_output:
-                #             stat = fn.stat()
-                #             mtime_the_same = int(stat.st_mtime) == historical_output[
-                #                 str(fn)
-                #             ].get("mtime", -1)
-                #             size_the_same = stat.st_size == historical_output[
-                #                 str(fn)
-                #             ].get("size", -1)
-                #             if mtime_the_same and size_the_same:
-                #                 continue
-                #             if size_the_same:  # but the mtime changed->rehash
-                #                 new_hash = hashers.hash_file(fn)
-                #                 if new_hash["hash"] == historical_output[str(fn)].get(
-                #                     "hash", "No hash "
-                #                 ):  # hash the same
-                #                     continue
-                #             # raise ValueError( # this means the file and the historical output mismatch, right?
-                #             # then we should unlink and redo
-                #             # historical_output, stat.st_mtime, stat.st_size
-                #             # )
-                # # at least one file was missing
                 log_job_trace(f"unlinking {fn}")
                 fn.unlink()
                 del_counter += 1
@@ -787,160 +823,102 @@ class MultiFileGeneratingJob(Job):
                 "w+b",
             )  # note the binary!
 
-            def aborted(sig, stack):
-                raise KeyboardInterrupt()  # pragma: no cover  todo: interactive testing
-
             try:
-                error_exit_code = 1
-                self.pid = os.fork()
-                if (
-                    self.pid == 0
-                ):  # pragma: no cover - coverage doesn't see this, since the spawned job os._exits()
-                    try:
-                        signal.signal(signal.SIGUSR1, aborted)
-                        # log_info(f"tempfilename: {stderr.name}")
-                        stdout_ = sys.stdout
-                        stderr_ = sys.stderr
-                        sys.stdout = stdout
-                        sys.stderr = stderr
-                        os.dup2(stdout.fileno(), 1)
-                        os.dup2(stderr.fileno(), 2)
+                fork_signal = Event()
 
-                        try:
-                            self.generating_function(*input)
-                            stdout.flush()
-                            stderr.flush()
-                            # else:
-                            os._exit(0)  # go down hard, do not call atexit and co.
-                        except TypeError as e:
-                            if hasattr(
-                                self.generating_function, "__code__"
-                            ):  # build ins
-                                func_info = f"{self.generating_function.__code__.co_filename}:{self.generating_function.__code__.co_firstlineno}"
-                            else:
-                                func_info = "unknown"
-                            if "takes 0 positional arguments but 1 was given" in str(e):
-                                raise TypeError(
-                                    e.args[0]
-                                    + ". You have forgotten to take the output_files as your first parameter."
-                                    + f"The function was defined in {func_info}."
-                                )
-                            else:
-                                raise
-                    except SystemExit as e:
-                        error_exit_code = e.code
-                        raise
-                    except (Exception, KeyboardInterrupt) as e:
-                        captured_tb = None  # if the capturing fails for any reason...
-                        traceback_dumped = False
-                        try:
-                            exception_type, exception_value, tb = sys.exc_info()
-                            captured_tb = ppg_traceback.Trace(
-                                exception_type, exception_value, tb
-                            )
-                            pickle.dump(captured_tb, exception_out)
-                            traceback_dumped = True
-                            pickle.dump(e, exception_out)
-                            exception_out.flush()
-                        except Exception as e2:
-                            # msg = f"FileGeneratingJob raised exception, but saving the exception failed: \n{type(e)} {escape_logging(e)} - \n {type(e2)} {escape_logging(e2)}\n"
-                            # traceback is already dumped
-                            # exception_out.seek(0,0) # might have dumped the traceback already, right?
-                            # pickle.dump(captured_tb, exception_out)
-                            if not traceback_dumped:
-                                pickle.dump(None, exception_out)
-                            pickle.dump(
-                                exceptions.JobDied(repr(e), repr(e2)), exception_out
-                            )
-                            exception_out.flush()
-                            raise
-                    finally:
-                        stdout.flush()
-                        stderr.flush()
-                        # sys.stdout = stdout_
-                        # sys.stderr = stderr_
-                        # os.dup2(stdout_, 1)
-                        # os.dup2(stderr_, 2)
-                        os._exit(error_exit_code)
-                else:
-                    sleep_time = 0.01  # which is the minimum time a job can take...
-                    time.sleep(sleep_time)
-                    wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
-                    try:
-                        while wp1 == 0 and waitstatus == 0:
-                            sleep_time *= 2
-                            if sleep_time > 1:
-                                sleep_time = 1
-                            time.sleep(sleep_time)
-                            wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
-                    except (
-                        KeyboardInterrupt
-                    ):  # pragma: no cover  todo: interactive testing
-                        log_trace(
-                            f"Keyboard interrupt in {self.job_id} - sigbreak spawned process"
-                        )
-                        os.kill(self.pid, signal.SIGUSR1)
-                        time.sleep(1)
-                        log_trace(
-                            f"Keyboard interrupt in {self.job_id} - checking spawned process"
-                        )
-                        wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
-                        if wp1 == 0 and waitstatus == 0:
-                            log_trace(
-                                f"Keyboard interrupt in {self.job_id} - sigkill spawned process"
-                            )
-                            os.kill(self.pid, signal.SIGKILL)
-                        raise
-                    if os.WIFEXITED(waitstatus):
-                        # normal termination.
-                        exitcode = os.WEXITSTATUS(waitstatus)
-                        if exitcode != 0:
-                            self.stdout, self.stderr = self._read_stdout_stderr(
-                                stdout, stderr
-                            )
-                            exception_out.seek(0, 0)
-                            raw = exception_out.read()
-                            # log_info(f"Raw exception result {raw}")
-                            exception_out.seek(0, 0)
-
-                            tb = None
-                            exception = None
-                            try:
-                                tb = pickle.load(exception_out)
-                                exception = pickle.load(exception_out)
-                            except Exception as e:
-                                log_error(
-                                    f"Job died (=exitcode == {exitcode}): {self.job_id}"
-                                )
-                                log_error(f"stdout: {self.stdout} {self.stderr}")
-                                exception = exceptions.JobDied(
-                                    f"Job {self.job_id} died but did not return an exception object. Decoding exception {e}",
-                                    None,
-                                    exitcode,
-                                )
-                                exception.exit_code = exitcode
-                            finally:
-                                raise exceptions.JobError(exception, tb)
-                        elif self.always_capture_output:
-                            self.stdout, self.stderr = self._read_stdout_stderr(
-                                stdout, stderr
-                            )
+                def fork_callback():
+                    self.pid = os.fork()
+                    if (
+                        self.pid == 0
+                    ):  # pragma: no cover - coverage doesn't see this, since the spawned job os._exits()
+                        self._do_inside_fork(input, stdout, stderr, exception_out)
                     else:
-                        if os.WIFSIGNALED(waitstatus):
-                            exitcode = -1 * os.WTERMSIG(waitstatus)
-                            self.stdout, self.stderr = self._read_stdout_stderr(
-                                stdout, stderr
-                            )
-                            # don't bother to retrieve an exception, there won't be anay
-                            log_error(f"Job killed by signal: {self.job_id}")
-                            raise exceptions.JobDied(
-                                f"Job {self.job_id} was killed", None, exitcode
-                            )
+                        fork_signal.set()
 
-                        else:
-                            raise NotImplementedError(  # pragma: no cover - purely defensive
-                                "Process did not exit, did not signal, but is dead?. Figure out and extend, I suppose"
+                with runner.main_thread_callback_lock:
+                    runner.main_thread_callbacks.append(fork_callback)
+                runner.main_thread_event.set()
+
+                fork_signal.wait()
+
+                sleep_time = 0.01  # which is the minimum time a job can take...
+                # time.sleep(sleep_time)
+                wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
+                try:
+                    while wp1 == 0 and waitstatus == 0:
+                        sleep_time *= 2 
+                        # at the beginning, we want to check often, in case it's a short short job
+                        # but afterwards, who case.
+                        if sleep_time > 1:
+                            sleep_time = 1
+                        time.sleep(sleep_time)
+                        wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
+                except KeyboardInterrupt:  # pragma: no cover  todo: interactive testing
+                    log_trace(
+                        f"Keyboard interrupt in {self.job_id} - sigbreak spawned process"
+                    )
+                    os.kill(self.pid, signal.SIGUSR1)
+                    time.sleep(1)
+                    log_trace(
+                        f"Keyboard interrupt in {self.job_id} - checking spawned process"
+                    )
+                    wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
+                    if wp1 == 0 and waitstatus == 0:
+                        log_trace(
+                            f"Keyboard interrupt in {self.job_id} - sigkill spawned process"
+                        )
+                        os.kill(self.pid, signal.SIGKILL)
+                    raise
+                if os.WIFEXITED(waitstatus):
+                    # normal termination.
+                    exitcode = os.WEXITSTATUS(waitstatus)
+                    if exitcode != 0:
+                        self.stdout, self.stderr = self._read_stdout_stderr(
+                            stdout, stderr
+                        )
+                        exception_out.seek(0, 0)
+                        raw = exception_out.read()
+                        # log_info(f"Raw exception result {raw}")
+                        exception_out.seek(0, 0)
+
+                        tb = None
+                        exception = None
+                        try:
+                            tb = pickle.load(exception_out)
+                            exception = pickle.load(exception_out)
+                        except Exception as e:
+                            log_error(
+                                f"Job died (=exitcode == {exitcode}): {self.job_id}"
                             )
+                            log_error(f"stdout: {self.stdout} {self.stderr}")
+                            exception = exceptions.JobDied(
+                                f"Job {self.job_id} died but did not return an exception object. Decoding exception {e}",
+                                None,
+                                exitcode,
+                            )
+                            exception.exit_code = exitcode
+                        finally:
+                            raise exceptions.JobError(exception, tb)
+                    elif self.always_capture_output:
+                        self.stdout, self.stderr = self._read_stdout_stderr(
+                            stdout, stderr
+                        )
+                else:
+                    if os.WIFSIGNALED(waitstatus):
+                        exitcode = -1 * os.WTERMSIG(waitstatus)
+                        self.stdout, self.stderr = self._read_stdout_stderr(
+                            stdout, stderr
+                        )
+                        # don't bother to retrieve an exception, there won't be anay
+                        log_error(f"Job killed by signal: {self.job_id}")
+                        raise exceptions.JobDied(
+                            f"Job {self.job_id} was killed", None, exitcode
+                        )
+
+                    else:
+                        raise NotImplementedError(  # pragma: no cover - purely defensive
+                            "Process did not exit, did not signal, but is dead?. Figure out and extend, I suppose"
+                        )
             finally:
                 stdout.close()  # unlink these soonish.
                 os.unlink(stdout.name)
@@ -1051,10 +1029,12 @@ class MultiFileGeneratingJob(Job):
 
     def annotate(self, file_key, markdown):
         """Delgate to ppg2 to annotate a job's output with markdown strings, just like ppg2-watcher would do"""
-        import ppg2_interactive
+        import pypipegraph2_interactive
 
         if self.eval_job_kind == "Output":
-            return ppg2_interactive.annotate(self, self._lookup[file_key], markdown)
+            return pypipegraph2_interactive.annotate(
+                self, self._lookup[file_key], markdown
+            )
         else:
             raise ValueError("Can only annotate Output jobs")
 
@@ -1085,10 +1065,10 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
 
     def annotate(self, markdown):
         """Delgate to ppg2 to annotate a job's output with markdown strings, just like ppg2-watcher would do"""
-        import ppg2_interactive
+        import pypipegraph2_interactive
 
         if self.eval_job_kind == "Output":
-            return ppg2_interactive.annotate(self, self.job_id, markdown)
+            return pypipegraph2_interactive.annotate(self, self.job_id, markdown)
         else:
             raise ValueError("Can only annotate Output jobs")
 

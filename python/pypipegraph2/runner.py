@@ -253,7 +253,8 @@ class Runner:
                     f"Not a directed *acyclic* graph after modification. See {error_fn}. Cycles between {cycles}"
                 )
 
-            self.event_lock = threading.Lock()
+            # self.event_lock = threading.Lock()
+            self.console_lock = threading.Lock()
             self.jobs_to_run_que = queue.PriorityQueue()
             self.threads = []
             self.jobs_that_need_propagation = deque()
@@ -408,8 +409,13 @@ class Runner:
         self.evaluator = self.build_evaluator(history)
         self.evaluator_lock = threading.Lock()
         self.evaluator.event_startup()
-        self.evaluation_done = threading.Event()
+        self.evaluation_done = False
+        self.main_thread_event = threading.Event()
         self.check_for_new_jobs = threading.Event()
+        self.main_thread_callback_lock = threading.Lock()
+        # things that need to be performed in the main thread
+        # like forking:
+        self.main_thread_callbacks = []
 
         self.jobs_in_flight = []
         self.jobs_all_cores_in_flight = 0
@@ -423,9 +429,14 @@ class Runner:
 
             while True:
                 # ljt("Waiting for evaluation done")
-                if self.evaluation_done.wait(5):  # todo: timeout, sanity checks.
-                    # ljt(f"evaluation done happend? {self.stopped}")
-                    break
+                if self.main_thread_event.wait(1):  # todo: timeout, sanity checks.
+                    if self.evaluation_done:
+                        # ljt(f"evaluation done happend? {self.stopped}")
+                        break
+                    with self.main_thread_callback_lock:
+                        while self.main_thread_callbacks:
+                            cb = self.main_thread_callbacks.pop()
+                            cb()
                 else:  # periodic timeout
                     if self.aborted:
                         break
@@ -556,7 +567,8 @@ class Runner:
         self.abort_time = time.time()
         self.aborted = True
         self.check_for_new_jobs.set()
-        self.evaluation_done.set()
+        self.evaluation_done = True
+        self.main_thread_event.set()
         for t in self.threads:
             try:
                 async_raise(t.ident, KeyboardInterrupt)
@@ -606,7 +618,6 @@ class Runner:
             log = log_error
         else:
             log = log_debug
-        if True:  # not self._job_failed_last_time(job_id): # Todo
         with self.console_lock:  # not self._job_failed_last_time(job_id): # Todo
             try:
                 job = self.jobs[job_id]
@@ -744,7 +755,8 @@ class Runner:
                                 if self.evaluator.is_finished():
                                     # ljt("detected finished")
                                     self.stopped = True
-                                    self.evaluation_done.set()
+                                    self.evaluation_done = True
+                                    self.main_thread_event.set()
                                     break
                                 else:
                                     # ljt("not finished")
