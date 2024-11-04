@@ -2070,9 +2070,7 @@ def CachedDataLoadingJob(
     return CachedJobTuple(load_job, cache_job)
 
 
-class AttributeLoadingJob(
-    Job
-):  # Todo: refactor with DataLoadingJob. Also figure out how to hash the result?
+class AttributeLoadingJob(Job):
     eval_job_kind = "Ephemeral"
 
     def __new__(cls, job_id, *args, **kwargs):
@@ -2121,6 +2119,9 @@ class AttributeLoadingJob(
     def cleanup(self):
         delattr(self.object, self.attribute_name)
 
+    def store(self, value):
+        setattr(self.object, self.attribute_name, value)
+
     def readd(self):  # Todo: refactor
         super().readd()
         if self.depend_on_function:
@@ -2139,14 +2140,44 @@ class AttributeLoadingJob(
             #     hash = 0
         else:
             value, hash = _hash_object(value)
-        setattr(self.object, self.attribute_name, value)
+        self.store(value)
         return {self.outputs[0]: hash}
 
     def extract_strict_hash(self, a_hash) -> bytes:
         return a_hash.encode("utf-8")
 
 
-def CachedAttributeLoadingJob(
+class DictEntryLoadingJob(AttributeLoadingJob):
+    def __init__(
+        self,
+        job_id,
+        object,
+        attribute_name,
+        data_function,
+        depend_on_function=True,
+        resources: Resources = Resources.SingleCore,
+    ):
+        from collections.abc import Mapping
+
+        if not isinstance(object, Mapping):
+            raise ValueError(
+                f"Object for DictEntryLoadingJob must be a Mapping (e.g. a dict) - was {type(object)}"
+            )
+        super().__init__(
+            job_id, object, attribute_name, data_function, depend_on_function, resources
+        )
+
+    def store(self, value):
+        log_error(f"{self.job_id} Storing {self.attribute_name}")
+        self.object[self.attribute_name] = value
+
+    def cleanup(self):
+        log_error(f"{self.job_id} Removing {self.attribute_name}")
+        del self.object[self.attribute_name]
+
+
+def _CachedAttributeLoadingJob(
+    load_job_cls,
     cache_filename,
     object,
     attribute_name,
@@ -2181,7 +2212,7 @@ def CachedAttributeLoadingJob(
         depend_on_function=depend_on_function,
         resources=resources,
     )
-    load_job = AttributeLoadingJob(
+    load_job = load_job_cls(
         "load_" + cache_job.job_id,
         object,
         attribute_name,
@@ -2190,6 +2221,44 @@ def CachedAttributeLoadingJob(
     )
     load_job.depends_on(cache_job)
     return CachedJobTuple(load_job, cache_job)
+
+
+def CachedAttributeLoadingJob(
+    cache_filename,
+    object,
+    attribute_name,
+    data_function,
+    depend_on_function=True,
+    resources: Resources = Resources.SingleCore,
+):
+    return _CachedAttributeLoadingJob(
+        AttributeLoadingJob,
+        cache_filename,
+        object,
+        attribute_name,
+        data_function,
+        depend_on_function,
+        resources,
+    )
+
+
+def CachedDictEntryLoadingJob(
+    cache_filename,
+    object,
+    attribute_name,
+    data_function,
+    depend_on_function=True,
+    resources: Resources = Resources.SingleCore,
+):
+    return _CachedAttributeLoadingJob(
+        DictEntryLoadingJob,
+        cache_filename,
+        object,
+        attribute_name,
+        data_function,
+        depend_on_function,
+        resources,
+    )
 
 
 class JobGeneratingJob(Job):
