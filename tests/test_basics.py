@@ -696,10 +696,11 @@ class TestPypipegraph2:
         assert Path("d").read_text() == "1"
 
         # now trigger TB invalidation, but not C (or D) invalidation
-        def is_true(): # funilly enough, 'and True' or some similar constant 
-        # will lead to the same byte code as when leaving 'and True' off,
-        # thereby not invalidating the FunctionInvariant
+        def is_true():  # funilly enough, 'and True' or some similar constant
+            # will lead to the same byte code as when leaving 'and True' off,
+            # thereby not invalidating the FunctionInvariant
             return True
+
         jobB = ppg.TempFileGeneratingJob(
             "TB", lambda of: counter("b") and is_true and of.write_text("B")
         )
@@ -1112,6 +1113,39 @@ class TestPypipegraph2:
         assert Path("a").read_text() == "2"
         assert not hasattr(a, "a_")
 
+    def test_dict_loading_job(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+
+        class TestRecv:
+            def __init__(self):
+                self.store = {}
+                self.job = ppg.DictEntryLoadingJob(
+                    "A", self.store, "a_", lambda: counter("a") and "A"
+                )
+
+        a = TestRecv()
+        jobB = ppg.FileGeneratingJob(
+            "B", lambda of: counter("b") and of.write_text(a.store["a_"])
+        )
+        jobB.depends_on(a.job)
+        ppg.run()
+        assert not hasattr(a, "a_")
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        assert Path("a").read_text() == "1"
+        ppg.run()
+        assert not hasattr(a, "a_")
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        assert Path("a").read_text() == "1"
+
+        a.job = ppg.DictEntryLoadingJob("A", a.store, "a_", lambda: counter("a") and "B")
+        ppg.run()
+        assert Path("B").read_text() == "B"
+        assert Path("b").read_text() == "2"
+        assert Path("a").read_text() == "2"
+        assert not hasattr(a, "a_")
+
     def test_cached_attribute_loading_job(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
 
@@ -1142,6 +1176,46 @@ class TestPypipegraph2:
 
         a.job = ppg.CachedAttributeLoadingJob(
             "A", a, "a_", lambda: counter("a") and "B"
+        )
+        logger.info("Run leads to recalc of A, B")
+        ppg.run()
+        assert Path("B").read_text() == "B"
+        assert Path("b").read_text() == "2"
+        assert Path("a").read_text() == "2"
+        assert not hasattr(a, "a_")
+        assert Path("A").exists()
+
+    def test_cached_dictentry_loading_job(self):
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
+
+        class TestRecv:
+            def __init__(self):
+                self.store = {}
+                self.job = ppg.CachedDictEntryLoadingJob(
+                    "A", self.store, "a_", lambda: counter("a") and "A"
+                )
+
+        a = TestRecv()
+        jobB = ppg.FileGeneratingJob(
+            "B", lambda of: counter("b") and of.write_text(a.store["a_"])
+        )
+        jobB.depends_on(a.job[0])
+        assert not Path("A").exists()
+        ppg.run()
+        assert not hasattr(a, "a_")
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        assert Path("a").read_text() == "1"
+        assert Path("A").exists()
+        ppg.run()
+        assert not hasattr(a, "a_")
+        assert Path("B").read_text() == "A"
+        assert Path("b").read_text() == "1"
+        assert Path("a").read_text() == "1"
+        assert Path("A").exists()
+
+        a.job = ppg.CachedDictEntryLoadingJob(
+            "A", a.store, "a_", lambda: counter("a") and "B"
         )
         logger.info("Run leads to recalc of A, B")
         ppg.run()
