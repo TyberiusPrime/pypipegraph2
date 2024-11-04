@@ -34,6 +34,8 @@ from collections import deque
 import signal
 import psutil
 import ctypes
+import rich
+import rich.rule
 
 
 watcher_parent_pid = None
@@ -605,6 +607,7 @@ class Runner:
         else:
             log = log_debug
         if True:  # not self._job_failed_last_time(job_id): # Todo
+        with self.console_lock:  # not self._job_failed_last_time(job_id): # Todo
             try:
                 job = self.jobs[job_id]
                 # mock failure in case of abort/stop
@@ -629,6 +632,16 @@ class Runner:
                     stacks = error.args[1]
                 else:
                     stacks = None
+                if self.print_failures and self.job_graph.run_mode in (
+                    RunMode.CONSOLE,
+                    RunMode.CONSOLE_INTERACTIVE,
+                ):
+                    console.print("\n")
+                    console.print(
+                        rich.rule.Rule(
+                            f"Error in {job_id}", characters="=", style="white"
+                        )
+                    )
 
                 if self.job_graph.dir_config.error_dir is not None:
                     with open(error_file, "w") as ef:
@@ -683,9 +696,9 @@ class Runner:
                         RunMode.CONSOLE_INTERACTIVE,
                     ):
                         console.print(
-                            stacks._format_rich_traceback_fallback(False, True).replace(
-                                "\n", "\n\t"
-                            )
+                            stacks._format_rich_traceback_fallback(
+                                False, True, skip_ppg=True
+                            ).replace("\n", "\n\t")
                         )
                     else:
                         log_warning(
@@ -700,8 +713,6 @@ class Runner:
                 log_error(
                     f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed."
                 )
-        else:
-            raise ValueError("Did not expect this")
 
     def _executing_thread(self):
         """The inner function of the threads actually executing the jobs"""
