@@ -894,8 +894,9 @@ class PyPipeGraph:
                 self.create_event_socket()
             if hasattr(self, "_event_socket"):
                 try:
-                    self._event_socket.sendto(message, str(self._event_socket_path))
-                except (ConnectionRefusedError, TypeError) as e:
+                    p = self._event_socket_path
+                    self._event_socket.sendto(message, str(p))
+                except (ConnectionRefusedError, TypeError, FileNotFoundError) as e:
                     # log_error(f"closed graph connection {self._event_socket_path}")
                     self._event_socket.close()
                     del self._event_socket
