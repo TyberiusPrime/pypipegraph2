@@ -3182,7 +3182,7 @@ def ExternalJob(
             )
             for x in cmd
         ]
-        output_files["cmd"].write_text(" ".join([str(x) for x in cmd]))
+        output_files["cmd"].write_text(" ".join([str(x) for x in cmd]) + "\n")
         p = subprocess.Popen(
             cmd,
             stdout=open(output_files["stdout"], "wb"),
