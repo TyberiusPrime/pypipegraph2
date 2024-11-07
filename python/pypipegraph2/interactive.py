@@ -49,6 +49,8 @@ class ConsoleInteractive:
         self.runner = runner
         self.last_report_status_args = StatusReport(0, 0, 0, len(runner.jobs), 0)
         self.breaker = os.pipe()
+        self.signaler = os.pipe()
+        self.signaled_commands = None
         self.thread = threading.Thread(target=self.loop)
         # self._set_terminal_raw()
         self.stopped = False
@@ -88,6 +90,10 @@ class ConsoleInteractive:
         self._cmd = value
         self.report_status(self.last_report_status_args)
 
+    def reentrace_safe_command_from_signal(self, commands_and_args):
+        self.signaled_commands = commands_and_args
+        self.signaler[1].write(b"x")
+
     def loop(self):
         log_debug("Entering interactive loop")
         while True:
@@ -96,12 +102,12 @@ class ConsoleInteractive:
                     if self.leave_thread:
                         break
                     try:
-                        input = select.select([sys.stdin, self.breaker[0]], [], [], 10)[
-                            0
-                        ]
+                        input = select.select(
+                            [sys.stdin, self.breaker[0], self.signaler[0]], [], [], 10
+                        )[0]
                     except io.UnsupportedOperation as e:
-                        if "redirected stdin is pseudofile" in str(
-                            e
+                        if (
+                            "redirected stdin is pseudofile" in str(e)
                         ):  # running under pytest - no interactivity, but suport requesting it?
                             input = False
                         else:
@@ -109,6 +115,12 @@ class ConsoleInteractive:
                     if input:
                         if self.breaker[0] in input:
                             break
+                        elif self.signaler[0] in input:
+                            sm = self.signaled_commands
+                            self.signaled_commands = None
+                            for command, args in sm:
+                                getattr(self, "_cmd_" + command)(*args)
+
                         else:  # must have been stdin.
                             value = sys.stdin.read(1)
                             # log_info(f"received {repr(value)}")
@@ -191,7 +203,9 @@ class ConsoleInteractive:
         to_sort = []
         for job_id in self.runner.jobs_in_flight:
             try:
-                rt = t - getattr(self.runner.jobs[job_id], 'start_time', t) # if it's not set, we're at the very start of this job's existance
+                rt = t - getattr(
+                    self.runner.jobs[job_id], "start_time", t
+                )  # if it's not set, we're at the very start of this job's existance
                 status = self.runner.jobs[job_id].waiting
                 to_sort.append((not status, rt, job_id))
             except KeyError:

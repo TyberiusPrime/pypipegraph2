@@ -658,45 +658,61 @@ class PyPipeGraph:
         Also blocks CTRl-c in console, and transaltes into save shutdown otherwise.
         """
         log_trace("_install_signals")
+        install_pid = os.getpid()
 
         def hup(*args, **kwargs):  # pragma: no cover
-            log_warning("user logged off - continuing run")
+            if os.getpid() != install_pid:
+                return
+            print(
+                "user logged off - continuing run"
+            )  # do not log, we must not aquire locker in a signal!
 
         def sigint(*args, **kwargs):
-            log_info("Received SIGINT")
+            if os.getpid() != install_pid:
+                return
+            print("Received SIGINT")
             if self.run_mode in (RunMode.CONSOLE, RunMode.CONSOLE_INTERACTIVE):
                 if self._debug_allow_ctrl_c == "abort":  # pragma: no cover
-                    log_info("CTRL-C from debug - calling interactive abort")
-                    self.runner.interactive._cmd_abort(
-                        None
-                    )  # for testing the abort facility.
+                    print("CTRL-C from debug - calling interactive abort")
+                    self.runner.interactive.reentrace_safe_command_from_signal(
+                        [("abort", (None,))]
+                    )
+                # for testing the abort facility.
                 elif self._debug_allow_ctrl_c == "stop":  # pragma: no cover
-                    log_info("CTRL-C from debug - calling interactive stop")
-                    self.runner.interactive._cmd_default()
-                    self.runner.interactive._cmd_stop(
-                        None
-                    )  # for testing the abort facility.
+                    print("CTRL-C from debug - calling interactive stop")
+                    self.runner.interactive.reentrace_safe_command_from_signal(
+                        [("default", ()), ("stop", (None,))]
+                    )
+                    # for testing the abort facility.
                 elif self._debug_allow_ctrl_c == "stop&abort":  # pragma: no cover
-                    log_info("CTRL-C from debug - calling interactive stop")
-                    self.runner.interactive._cmd_stop(
-                        None
-                    )  # for testing the abort facility.
+                    print("CTRL-C from debug - calling interactive stop")
+                    self.runner.interactive.reentrace_safe_command_from_signal(
+                        [("stop", (None,))]
+                    )
+                    # for testing the abort facility.
                     self._debug_allow_ctrl_c = "abort"
 
                 else:
-                    log_info("CTRL-C has been disabled. Type 'abort<CR>' to abort")
+                    print("CTRL-C has been disabled. Type 'abort<CR>' to abort")
                 # TODO remove
             else:  # pragma: no cover - todo: interactive
-                log_info("CTRL-C received. Killing all running jobs.")
+                print("CTRL-C received. Killing all running jobs.")
                 if hasattr(self, "runner"):
-                    log_error("calling abort")
+                    print("calling abort")
                     self.runner.abort()
+
+        def usr1(*args, **kwargs):
+            if os.getpid() != install_pid:
+                return
+            print("USR1 received - aborting")
+            self.runner.abort()
 
         if self.run_mode in (RunMode.CONSOLE, RunMode.CONSOLE_INTERACTIVE):
             self._old_signal_hup = signal.signal(signal.SIGHUP, hup)
         # if self.run_mode in (RunMode.CONSOLE, RunMode.NOTEBOOK):
         # we always steal ctrl c
         self._old_signal_int = signal.signal(signal.SIGINT, sigint)
+        self._old_signal_usr1 = signal.signal(signal.SIGUSR1, usr1)
 
     def _restore_signals(self):
         """Restore signals to pre-run values"""

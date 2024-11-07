@@ -565,7 +565,8 @@ class Runner:
         """Kill all running jobs and leave runner.
         Called from the interactive interface
         """
-        log_info("runner.abort called")
+        # must be reentrant, called from signal!
+        #log_info("runner.abort called")
         self.abort_time = time.time()
         self.aborted = True
         self.check_for_new_jobs.set()
