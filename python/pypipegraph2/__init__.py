@@ -31,7 +31,11 @@ from .jobs import (
     NotebookJob,
     ExternalJob,
     ExternalOutputPath,
+    DependsOnInvariant,
+    CachedJobTuple,
+    PlotJobTuple,
 )
+
 from .exceptions import (
     PPGException,
     NotADag,
@@ -52,20 +56,20 @@ from . import util
 from .util import assert_uniqueness_of_object
 from .pypipegraph2 import enable_logging as enable_rust_logging
 
-try: 
+try:
     # if you're using numba, we need a thread and fork safe threading layer
     # we request this here,
     # but it will fail the first time numba parallelization is used
     # if tbb can't be found.
-    # otherwise you'll get some shiny 
+    # otherwise you'll get some shiny
     # 'Terminating: fork() called from a process already using GNU OpenMP, this is unsafe';
     # error messages.
 
     import numba
-    numba.config.THREADING_LAYER = 'safe'
+
+    numba.config.THREADING_LAYER = "safe"
 except ImportError:
     pass
-
 
 
 reuse_last_or_default = object()
@@ -147,16 +151,17 @@ def new(
 def _get_default_dir_config():
     # we need the script name
     import lib_programname
+
     path_to_program = lib_programname.get_path_executed_script()  # type: pathlib.Path
     if path_to_program is None:
         raise ValueError(
             "Could not determine path to executed script. Set a DirConfig when calling ppg2.new()"
         )
     pn = Path(path_to_program).name
-    if ( # fallback for before this change.
+    if (  # fallback for before this change.
         Path(".ppg/history/ppg_history.2.zstd").exists()
-        and (pn == 'run.py') and not
-        Path(".ppg/per_script/run.py/history/ppg_history.2.zstd").exists()
+        and (pn == "run.py")
+        and not Path(".ppg/per_script/run.py/history/ppg_history.2.zstd").exists()
     ):
         return DirConfig(".ppg")
     else:
