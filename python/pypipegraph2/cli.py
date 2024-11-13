@@ -5,9 +5,11 @@ import pyzstd
 import re
 import sys
 import pypipegraph2 as ppg2
+from pathlib import Path
 
 
-def main_filter_constraint_violations(filename=None, pipegraph=None):
+
+def main_filter_constraint_violations(dir_config=None, filename=None, pipegraph=None):
     """For when you really need to remove some jobs from the pipegraph's history.
     Takes a filename with job ids.
     Defaults to .ppg/errors/latest/constraint_violations.jobs
@@ -17,13 +19,17 @@ def main_filter_constraint_violations(filename=None, pipegraph=None):
     """
     if "--help" in sys.argv:
         print(
-            "ppg2-cli filter_constraint_violations [filename] - filter constraint violations from history"
+            "ppg2-cli filter_constraint_violations [dir_config] <filename> - filter constraint violations from history. Dir_config typicall is .ppg/per_script/<your_script>"
         )
     if pipegraph is None:
         pipegraph = ppg2.new()
 
-    if sys.argv[1:]:
-        filename = Path(sys.argv[1])
+    if dir_config is None and sys.argv[1:]:
+        dir_config = Path(sys.argv[1])
+    if filename is None and sys.argv[2:]:
+        filename = Path(sys.argv[2])
+    if pipegraph is None:
+        pipegraph = ppg2.new(dir_config=ppg.DirConfig(dir_config))
     if filename is None:
         filename = pipegraph.dir_config.error_dir / "latest/constraint_violations.jobs"
 
