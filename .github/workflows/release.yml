@@ -13,6 +13,10 @@ jobs:
         manylinux: auto
         command: build
         args: --release -o dist
+    - uses: PyO3/maturin-action@v1
+      with:
+        command: sdist
+        args: -o dist
     - name: Upload wheels
       uses: actions/upload-artifact@v3
       with:
