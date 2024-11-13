@@ -3122,6 +3122,7 @@ def ExternalJob(
     resources: Resources = Resources.SingleCore,
     cwd: Optional[Union(Path, str)] = None,
     start_new_session: bool = False,
+    std_prefix = ""
 ):
     """A job that calls an external program,
     logging the command, stdout & stderr to files
@@ -3130,7 +3131,11 @@ def ExternalJob(
     If the process creates additional files that you want to track,
     add them as dictionary in @additional_created_files.
     The values are relative to output_path!
-    (job.files has them resolved!)
+    (job.files has them resolved.)
+
+    If you have an external program that needs to run multiple times in the same
+    output folder, you can use std_prefix to distinguish the
+    stderr/stdout/cmd/returncode files.
 
     The @cmd_or_cmd_func may be a callback - in that case it's called once,
     when the job is actually executed, allowing you to access all dependencies.
@@ -3211,10 +3216,10 @@ def ExternalJob(
             raise KeyError(f"Can not redefine this output file: {k}")
     files.update(
         {
-            "stdout": output_path / "stdout.txt",
-            "stderr": output_path / "stderr.txt",
-            "cmd": output_path / "cmd.txt",
-            "return_code": output_path / "return_code.txt",
+            "stdout": output_path / f"{std_prefix}stdout.txt",
+            "stderr": output_path / f"{std_prefix}stderr.txt",
+            "cmd": output_path / f"{std_prefix}cmd.txt",
+            "return_code": output_path / f"{std_prefix}return_code.txt",
         }
     )
 
