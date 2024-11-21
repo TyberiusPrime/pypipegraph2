@@ -696,3 +696,30 @@ def test_tempmultifilegen_changing_output_but_had_been_validated(ppg2_per_test):
         ppg.run()
     error = ppg.global_pipegraph.last_run_result[tmfg.job_id].error
     assert "changed output" in error and "ephemeral" in error.lower()
+
+
+@pytest.mark.usefixtures("ppg2_per_test", "create_out_dir")
+class TestHashersWithPremadeSha256:
+    def test_reads_dot_sha256(self):
+        a = Path("a.txt")
+        asha256 = Path("a.txt.sha256")
+        a.write_text("hello")
+        asha256.write_text("a" * 64)
+        h = ppg.hashers.hash_file(a)
+        assert h['hash'] == 'a' * 64
+        mtime = a.stat().st_mtime
+        # now push sha256 into the past
+        os.utime(asha256, (mtime - 100, mtime - 100))
+        with pytest.raises(ppg.JobContractError):
+            ppg.hashers.hash_file(a)
+        asha256.unlink()
+        h = ppg.hashers.hash_file(a)
+        assert h['hash'] != 'abc'
+
+        # or have a non hash in there.
+        asha256.write_text("a")
+        with pytest.raises(ppg.JobContractError):
+            ppg.hashers.hash_file(a)
+        asha256.write_text("a" * 63 + 'X')
+        with pytest.raises(ppg.JobContractError):
+            ppg.hashers.hash_file(a)
