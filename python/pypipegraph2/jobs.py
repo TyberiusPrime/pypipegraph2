@@ -2223,8 +2223,15 @@ def _CachedAttributeLoadingJob(
     cache_filename = Path(cache_filename)
 
     def do_cache(output_filename):  # pragma: no cover
-        with open(output_filename, "wb") as op:
-            pickle.dump(data_function(), op, pickle.HIGHEST_PROTOCOL)
+        try:
+            with open(output_filename, "wb") as op:
+                pickle.dump(data_function(), op, pickle.HIGHEST_PROTOCOL)
+        except:
+            try:
+                os.unlink(output_filename)
+            except:
+                pass
+            raise
 
     def load(object=object, attribute_name=attribute_name):
         try:
