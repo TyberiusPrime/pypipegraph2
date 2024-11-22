@@ -895,7 +895,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         };
         self.already_started = StartStatus::Running;
 
-        self.prune_leave_ephemerals();
+        self.prune_leaf_ephemerals();
 
         // this is not particulary fast.
         self.topo = Some(petgraph::algo::toposort(&self.dag, None).unwrap());
@@ -910,9 +910,9 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         Ok(())
     }
 
-    fn prune_leave_ephemerals(&mut self) {
+    fn prune_leaf_ephemerals(&mut self) {
         //option: speed up by looking at the edges once,
-        //finding those that have no-no-ephemeral downstreams,
+        //finding those that have no non-ephemeral downstreams,
         let mut ephemerals: HashSet<NodeIndex> = self
             .dag
             .nodes()
@@ -1015,7 +1015,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             // (side-effect: if it changes in an output that's not used by any downstream,
             // this would not trigger.
             // It's an unlikely problem, and I currently don't see how to work around it.
-            // witohut turning the downstream_job_id into a magic value that means 'check all the
+            // without turning the downstream_job_id into a magic value that means 'check all the
             // outputs (we need the upstream job to know what comparison to use)
             //
             let hist_key = &j.job_id;
@@ -2120,8 +2120,23 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     } else {
                         match Self::downstream_requirement_status(dag, jobs, node_idx)? {
                             Required::Yes => {
-                                // the Requirement will have been propagated upstream,
-                                // do nothing
+                                // //20241122, FF: this historical comment appears to be a lie:
+                                // "the Requirement will have been propagated upstream,"
+                                // We need to propagate teh requirement upstream
+                                // python test case python/pypipegraph2/pypipegraph2.abi3.so
+                                debug!(
+                                    "\tdownstream required {}, setting upstream edges to 'required'",
+                                    jobs[node_idx as usize].job_id
+                                );
+                                Self::set_upstream_edges(dag, node_idx, Required::Yes);
+                                Self::reconsider_ephemeral_upstreams( // which is lazy.
+                                    dag,
+                                    jobs,
+                                    node_idx,
+                                    new_signals,
+                                    gen,
+                                );
+
                             }
                             Required::Unknown => {
                                 // let's try and update that in light of this node

@@ -39,8 +39,8 @@ class TestsFromTheField:
         """
 
         job_0 = ppg.FileGeneratingJob("J0", dummy_fg, depend_on_function=False)
-        job_2 = ppg.DataLoadingJob("J2", lambda: None, depend_on_function=False)
-        job_3 = ppg.DataLoadingJob("J3", lambda: None, depend_on_function=False)
+        job_2 = ppg.DataLoadingJob("J2", lambda: 55, depend_on_function=False)
+        job_3 = ppg.DataLoadingJob("J3", lambda: 55, depend_on_function=False)
         job_76 = ppg.FileGeneratingJob("J76", dummy_fg, depend_on_function=False)
 
         edges = []
@@ -61,8 +61,8 @@ class TestsFromTheField:
     def test_issue_20210726b(self, job_trace_log):
         job_0 = ppg.FileGeneratingJob("0", dummy_fg, depend_on_function=False)
         job_1 = ppg.FunctionInvariant("1", lambda: 55)
-        job_2 = ppg.DataLoadingJob("2", lambda: None, depend_on_function=False)
-        job_3 = ppg.DataLoadingJob("3", lambda: None, depend_on_function=False)
+        job_2 = ppg.DataLoadingJob("2", lambda: 55, depend_on_function=False)
+        job_3 = ppg.DataLoadingJob("3", lambda: 55, depend_on_function=False)
         job_4 = ppg.FileGeneratingJob("4", dummy_fg, depend_on_function=False)
         job_5 = ppg.SharedMultiFileGeneratingJob(
             "5", ["url.txt"], dummy_smfg, depend_on_function=False
@@ -191,7 +191,7 @@ class TestsFromTheField:
         job_77 = ppg.FunctionInvariant("77", lambda: 55)
         job_78 = ppg.FunctionInvariant("78", lambda: 55)
         job_79 = ppg.AttributeLoadingJob(
-            "79", DummyObject(), "attr_79", lambda: None, depend_on_function=False
+            "79", DummyObject(), "attr_79", lambda: 55, depend_on_function=False
         )
         job_80 = ppg.FileGeneratingJob("80", dummy_fg, depend_on_function=False)
         job_81 = ppg.FileGeneratingJob("81", dummy_fg, depend_on_function=False)
@@ -1564,12 +1564,12 @@ class TestsFromTheField:
             if do_fail:
                 raise ValueError()
 
-        job_3 = ppg.DataLoadingJob("3", lambda: None, depend_on_function=False)
+        job_3 = ppg.DataLoadingJob("3", lambda: 55, depend_on_function=False)
         job_48 = ppg.AttributeLoadingJob(
             "48", DummyObject(), "attr_48", fail, depend_on_function=False
         )
         job_61 = ppg.FileGeneratingJob("61", dummy_fg, depend_on_function=False)
-        job_67 = ppg.JobGeneratingJob("67", lambda: None, depend_on_function=False)
+        job_67 = ppg.JobGeneratingJob("67", lambda: 55, depend_on_function=False)
 
         edges = []
 
@@ -1632,6 +1632,18 @@ class TestsFromTheField:
             ppg.global_pipegraph.last_run_result["661"].outcome
             == ppg.enums.JobOutcome.Skipped
         )
+
+    def test_20241121_evaluation_bug(self):
+        gen_20241121()
+        ppg.run()
+        ppg.new()
+        gen_20241121(True)
+        try:
+            ppg.run()
+        except KeyboardInterrupt as e:
+            assert 'Run aborted' in str(e)
+            raise ValueError("expected failure before engine patch")
+        # if we get here, everything's fine.
 
     def test_cleanup_already_decided_to_skip_upstream_failed(self):
         # debugged job CleanUp:cache/lanes/test/input.fastq
@@ -1871,3 +1883,32 @@ def test_pandas_hashing():
     assert hf(df_a) != hf(df_f)
     assert hf(df_a) != hf(df_g)
     # assert hf(df_a) != hf(df_h)
+
+
+def gen_20241121(change_edge=False):
+    job_DlA = ppg.DataLoadingJob("DlA", lambda: 35, depend_on_function=False)
+    job_FgB = ppg.FileGeneratingJob("FgB", dummy_fg, depend_on_function=False)
+
+    job_DlC = ppg.DataLoadingJob("DlC", lambda: 35, depend_on_function=False)
+    job_DlD = ppg.DataLoadingJob("DlD", lambda: 35, depend_on_function=False)
+
+    if change_edge:
+        job_FiE = ppg.FunctionInvariant("FiE", lambda: 56)
+    else:
+        job_FiE = ppg.FunctionInvariant("FiE", lambda: 55)
+
+    cjobs_by_no = {}
+    for k, v in locals().items():
+        if k.startswith("job_"):
+            no = k[k.find("_") + 1 :]
+            cjobs_by_no[no] = v
+    edges = []
+    ea = edges.append
+    ea(("DlC", "FiE"))
+    ea(("DlD", "DlA"))
+    ea(("DlC", "DlD"))
+    ea(("FgB", "DlC"))
+    for a, b in edges:
+        if a in cjobs_by_no and b in cjobs_by_no:
+            cjobs_by_no[a].depends_on(cjobs_by_no[b])
+            #print(f"ea(('{a}', '{b}'))")
