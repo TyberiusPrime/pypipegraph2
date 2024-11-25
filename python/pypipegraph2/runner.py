@@ -429,7 +429,8 @@ class Runner:
 
             while True:
                 # ljt("Waiting for evaluation done")
-                if self.main_thread_event.wait(5):  # todo: timeout, sanity checks.
+                if event_happend := self.main_thread_event.wait(5):  # todo: timeout, sanity checks.
+                    self.main_thread_event.clear() # fine to clear even on timeout
                     if self.evaluation_done:
                         # ljt(f"evaluation done happend? {self.stopped}")
                         break
