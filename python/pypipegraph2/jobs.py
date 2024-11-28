@@ -2105,9 +2105,9 @@ def CachedDataLoadingJob(
     return CachedJobTuple(load_job, cache_job)
 
 
-class AttributeLoadingJob(
-    Job, _InputHashAwareJobMixin
-):  # Todo: refactor with DataLoadingJob. Also figure out how to hash the result?
+(??)class AttributeLoadingJob(
+(??)    Job
+(??)):  # Todo: refactor with DataLoadingJob. Also figure out how to hash the result?
     eval_job_kind = "Ephemeral"
 
     def __new__(cls, job_id, *args, **kwargs):
@@ -2184,35 +2184,7 @@ class AttributeLoadingJob(
         return a_hash.encode("utf-8")
 
 
-class DictEntryLoadingJob(AttributeLoadingJob):
-    def __init__(
-        self,
-        job_id,
-        object,
-        attribute_name,
-        data_function,
-        depend_on_function=True,
-        resources: Resources = Resources.SingleCore,
-    ):
-        from collections.abc import Mapping
-
-        if not isinstance(object, Mapping):
-            raise ValueError(
-                f"Object for DictEntryLoadingJob must be a Mapping (e.g. a dict) - was {type(object)}"
-            )
-        super().__init__(
-            job_id, object, attribute_name, data_function, depend_on_function, resources
-        )
-
-    def store(self, value):
-        self.object[self.attribute_name] = value
-
-    def cleanup(self):
-        del self.object[self.attribute_name]
-
-
-def _CachedAttributeLoadingJob(
-    load_job_cls,
+(??)def CachedAttributeLoadingJob(
     cache_filename,
     object,
     attribute_name,
@@ -2263,6 +2235,44 @@ def _CachedAttributeLoadingJob(
     )
     load_job.depends_on(cache_job)
     return CachedJobTuple(load_job, cache_job)
+
+
+def CachedAttributeLoadingJob(
+    cache_filename,
+    object,
+    attribute_name,
+    data_function,
+    depend_on_function=True,
+    resources: Resources = Resources.SingleCore,
+):
+    return _CachedAttributeLoadingJob(
+        AttributeLoadingJob,
+        cache_filename,
+        object,
+        attribute_name,
+        data_function,
+        depend_on_function,
+        resources,
+    )
+
+
+def CachedDictEntryLoadingJob(
+    cache_filename,
+    object,
+    attribute_name,
+    data_function,
+    depend_on_function=True,
+    resources: Resources = Resources.SingleCore,
+):
+    return _CachedAttributeLoadingJob(
+        DictEntryLoadingJob,
+        cache_filename,
+        object,
+        attribute_name,
+        data_function,
+        depend_on_function,
+        resources,
+    )
 
 
 def CachedAttributeLoadingJob(
