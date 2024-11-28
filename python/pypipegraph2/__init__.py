@@ -65,8 +65,21 @@ try:
     # 'Terminating: fork() called from a process already using GNU OpenMP, this is unsafe';
     # error messages.
 
-    import numba
-    numba.config.THREADING_LAYER = 'safe'
+
+    from numba import config, njit
+    config.THREADING_LAYER = 'safe'
+    import numpy as np
+    @njit(parallel=True)
+    def foo(a, b):
+        return a + b
+    x = np.arange(10.)
+    y = x.copy()
+    foo(x,y)
+except (ImportError, ValueError) :
+    pass
+
+
+
 except ImportError:
     pass
 

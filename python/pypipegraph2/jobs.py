@@ -18,7 +18,7 @@ from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
 
 from . import hashers, exceptions, ppg_traceback
-from .enums import Resources
+from .enums import Resources,RunMode
 from .util import escape_logging
 import hashlib
 import shutil
@@ -227,7 +227,7 @@ class Job:
         """It yields self so you can use jobs and list of jobs uniformly"""
         yield self
 
-    def cleanup(self):
+    def cleanup(self, _runmode):
         """Overwritten by Ephemeral jobs downstream"""
         pass
 
@@ -845,7 +845,7 @@ class MultiFileGeneratingJob(Job):
                 wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
                 try:
                     while wp1 == 0 and waitstatus == 0:
-                        sleep_time *= 2 
+                        sleep_time *= 2
                         # at the beginning, we want to check often, in case it's a short short job
                         # but afterwards, who case.
                         if sleep_time > 1:
@@ -1134,7 +1134,7 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
     def output_needed(self, runner):
         raise NotImplementedError("unreachable")  # pragma: no cover
 
-    def cleanup(self):
+    def cleanup(self, _runmode):
         for fn in self.files:
             if fn.exists():
                 log_trace(f"unlinking {fn}")
@@ -2047,7 +2047,9 @@ class DataLoadingJob(Job, _InputHashAwareJobMixin):
         )
         # log_trace(f"dl {self.job_id} - {escape_logging(historical_output)}")
         if load_res is None:
-            raise ValueError("DataLoadingJob returned None. Return either UseInputHashesForOutput() or ValuePlusHash(None, constant)")
+            raise ValueError(
+                "DataLoadingJob returned None. Return either UseInputHashesForOutput() or ValuePlusHash(None, constant)"
+            )
         elif isinstance(load_res, UseInputHashesForOutput):
             my_hash = self._derive_output_name(runner)
         else:
@@ -2153,30 +2155,50 @@ def CachedDataLoadingJob(
         self.do_cleanup = True
         super().__init__([job_id], resources=resources)
 
-    def cleanup(self):
+    def cleanup(self, _runmode):
         delattr(self.object, self.attribute_name)
+
+    def get_value(self):
+        return getattr(self.object, self.attribute_name)
 
     def store(self, value):
         setattr(self.object, self.attribute_name, value)
+
+    def get_hash(self):
+        return getattr(self.object, "_" + self.attribute_name + "_hash", None)
+
+    def store_hash(self, value):
+        setattr(self.object, "_" + self.attribute_name + "_hash", value)
 
     def readd(self):  # Todo: refactor
         super().readd()
         if self.depend_on_function:
             self._handle_function_dependency(self.callback)
 
-    def run(self, _runner, historical_output):
-        value = self.callback()
-        if value is None:
-            raise ValueError(
-                "AttributeLoadingJob returned None. Return either a ValuePlusHash(None, constant) "
-                "if that's what you actually want, or UseInputHashesForOutput(payload) "
-                "if you have an actual, but unhashable payload"
-            )
-        elif isinstance(value, UseInputHashesForOutput):
-            hash = self._derive_output_name(_runner)
-            value = value.payload
+    def run(self, runner, historical_output):
+        current_hash = self._derive_output_name(runner)
+        last_hash = self.get_hash()
+        log_warning(f"{self.job_id} loaded hash hash {last_hash} -current: {current_hash}")
+
+        if current_hash != last_hash:
+            value = self.callback()
+            if value is None:
+                raise ValueError(
+                    "AttributeLoadingJob returned None. Return either a ValuePlusHash(None, constant) "
+                    "if that's what you actually want, or UseInputHashesForOutput(payload) "
+                    "if you have an actual, but unhashable payload"
+                )
+            elif isinstance(value, UseInputHashesForOutput):
+                hash = current_hash
+                value = value.payload
+                self.store_hash(hash)
+                log_warning(f"{self.job_id} stored hash {hash}")
+            else:
+                value, hash = _hash_object(value)
         else:
-            value, hash = _hash_object(value)
+            log_warning(f"Reused cached value for {self.job_id}")
+            value = self.get_value()
+            hash = current_hash  # valid, since this only happens for UseInputHashesForOutput
         self.store(value)
         return {self.outputs[0]: hash}
 
@@ -2184,7 +2206,45 @@ def CachedDataLoadingJob(
         return a_hash.encode("utf-8")
 
 
-(??)def CachedAttributeLoadingJob(
+class DictEntryLoadingJob(AttributeLoadingJob):
+    def __init__(
+        self,
+        job_id,
+        object,
+        attribute_name,
+        data_function,
+        depend_on_function=True,
+        resources: Resources = Resources.SingleCore,
+    ):
+        from collections.abc import Mapping
+
+        if not isinstance(object, Mapping):
+            raise ValueError(
+                f"Object for DictEntryLoadingJob must be a Mapping (e.g. a dict) - was {type(object)}"
+            )
+        super().__init__(
+            job_id, object, attribute_name, data_function, depend_on_function, resources
+        )
+
+    def get_value(self):
+        return self.object[self.attribute_name]
+
+    def store(self, value):
+        self.object[self.attribute_name] = value
+
+    def get_hash(self):
+        return self.object.get("_" + self.attribute_name + "_hash", None)
+
+    def store_hash(self, value):
+        self.object["_" + self.attribute_name + "_hash"] = value
+
+    def cleanup(self, runmode):
+        if runmode != RunMode.CONSOLE_INTERACTIVE:
+            del self.object[self.attribute_name]
+
+
+def _CachedAttributeLoadingJob(
+    load_job_cls,
     cache_filename,
     object,
     attribute_name,
