@@ -133,7 +133,9 @@ class TestCachedAttributeJob:
             return ", ".join(str(x) for x in range(0, 200))
 
         job = ppg.CachedAttributeLoadingJob("out/mycalc", o, "a", calc2)
+        print("before ignore code changes", ppg.util.global_pipegraph.job_inputs)
         job.ignore_code_changes()
+        print("after ignore code changes", ppg.util.global_pipegraph.job_inputs)
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run_pipegraph()
         assert read(of) == ", ".join(str(x) for x in range(0, 200))  # ppg2 change

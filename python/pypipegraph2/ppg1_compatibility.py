@@ -308,17 +308,21 @@ def _ignore_code_changes(job):
     if hasattr(job, "func_invariant"):
         log_job_trace(f"ignoring changes for {job.job_id}")
         util.global_pipegraph.job_dag.remove_edge(job.func_invariant.job_id, job.job_id)
+        for k in job.func_invariant.outputs:
+            print(f"removing from {job.job_id} input: {k}, id: {util.global_pipegraph.job_inputs[job.job_id]}")
+            util.global_pipegraph.job_inputs[job.job_id].remove(k)
 
         if hasattr(job.func_invariant, "usage_counter"):
             job.func_invariant.usage_counter -= 1
         if (
             not hasattr(job.func_invariant, "usage_counter")
-            or job.func_invariant.usage_counter == 0
+            or job.func_invariant.usage_counter <= 0
         ):
             util.global_pipegraph.job_dag.remove_node(job.func_invariant.job_id)
-            for k in job.func_invariant.outputs:
-                util.global_pipegraph.job_inputs[job.job_id].remove(k)
             del util.global_pipegraph.jobs[job.func_invariant.job_id]
+            for k in job.func_invariant.outputs:
+                del util.global_pipegraph.outputs_to_job_ids[k]
+
 
         del job.func_invariant
     if hasattr(job, "lfg"):

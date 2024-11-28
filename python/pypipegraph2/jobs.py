@@ -18,7 +18,7 @@ from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
 
 from . import hashers, exceptions, ppg_traceback
-from .enums import Resources,RunMode
+from .enums import Resources, RunMode
 from .util import escape_logging
 import hashlib
 import shutil
@@ -2107,9 +2107,9 @@ def CachedDataLoadingJob(
     return CachedJobTuple(load_job, cache_job)
 
 
-(??)class AttributeLoadingJob(
-(??)    Job
-(??)):  # Todo: refactor with DataLoadingJob. Also figure out how to hash the result?
+class AttributeLoadingJob(
+    Job, _InputHashAwareJobMixin
+):  # Todo: refactor with DataLoadingJob. Also figure out how to hash the result?
     eval_job_kind = "Ephemeral"
 
     def __new__(cls, job_id, *args, **kwargs):
@@ -2178,7 +2178,9 @@ def CachedDataLoadingJob(
     def run(self, runner, historical_output):
         current_hash = self._derive_output_name(runner)
         last_hash = self.get_hash()
-        log_warning(f"{self.job_id} loaded hash hash {last_hash} -current: {current_hash}")
+        log_warning(
+            f"{self.job_id} loaded hash hash {last_hash} -current: {current_hash}"
+        )
 
         if current_hash != last_hash:
             value = self.callback()
@@ -3199,7 +3201,7 @@ def ExternalJob(
     resources: Resources = Resources.SingleCore,
     cwd: Optional[Union(Path, str)] = None,
     start_new_session: bool = False,
-    std_prefix = ""
+    std_prefix="",
 ):
     """A job that calls an external program,
     logging the command, stdout & stderr to files
