@@ -747,7 +747,7 @@ class Runner:
                             for cleanup_job_id in cleanups:
                                 try:
                                     log_debug(f"Job cleanup: {cleanup_job_id}")
-                                    self.jobs[cleanup_job_id].cleanup()
+                                    self.jobs[cleanup_job_id].cleanup(self.job_graph.run_mode)
                                 except Exception as e:
                                     log_error(f"Cleanup had an exception {repr(e)}")
                                 self.evaluator.event_job_cleanup_done(cleanup_job_id)
