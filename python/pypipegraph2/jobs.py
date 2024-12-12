@@ -2939,18 +2939,32 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob, _InputHashAwareJobMix
             / SharedMultiFileGeneratingJob.log_filename
         ).with_suffix(".lock")
         lock = filelock.FileLock(lock_file, timeout=random.randint(8, 20))
-        try:
-            with lock:
-                self._log_local_usage(by_input_key)
-        except filelock.Timeout:
-            # guess we have as stale lock. This really shouldn't take this much time.
-            try:
-                lock_file.unlink()
-            except:  # noqa: E722
-                pass
-            with lock:
-                self._log_local_usage(by_input_key)
+        # try:
+        #     with lock:
+        #         self._log_local_usage(by_input_key)
+        # except filelock.Timeout:
+        #     # guess we have as stale lock. This really shouldn't take this much time.
+        #     try:
+        #         lock_file.unlink()
+        #     except:  # noqa: E722
+        #         pass
+        #     with lock:
+        #         self._log_local_usage(by_input_key)
 
+        retries = 10 # bound it, forever means you'd never see any bug in here
+        while retries > 0:
+            retries -= 1
+            try:
+                with lock:
+                    self._log_local_usage(by_input_key)
+                    break
+            except filelock.Timeout:
+                # guess we have as stale lock? This really shouldn't take this much time.
+                print(f"Could not aquire lock {lock_file} within timout, retrying.")
+                try:
+                    lock_file.unlink()
+                except:  # noqa: E722
+                    pass
         return res
 
     def _log_local_usage(self, key):
