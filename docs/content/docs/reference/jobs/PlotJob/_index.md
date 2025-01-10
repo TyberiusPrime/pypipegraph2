@@ -27,14 +27,14 @@ such as matplotlib plots or plotnine ggplots.
 The calc_function is called with no arguments, and is expected to return a pandas.DataFrame
 or  a dict of such.
 
-Calculatinons might be cached ( in `cache/<output_filename>`),
+Calculations might be cached ( in `cache/<output_filename>`),
 to speed up iteration when tuning the plot.
 
 Optionaly, a `<output_filename + '.tsv'>` file is created with the data used for the plot.
 (If calc returns a dictionary, they are concated into one file, with \# comments between the 
 elements).
 
+The return value of this function is a named tuple (plot, cache, table) containing the three jobs created
+(If cache_calc is False, cache will be None, if create_table is False, table will be None; cache is a (CachedDataLoadingJob)[../cacheddataloadingjob], so use cache.calc to add dependencies to our calc function).
 
-The return value of this function is a named tuple (plot, cache, table) containing the three jobs created.
-(If cache_calc is False, cache will be None, if create_table is False, table will be None).
 
