@@ -235,10 +235,11 @@ class Runner:
                 )
 
             log_job_trace(
+                lambda: 
                 "dag "
                 + escape_logging(
                     json.dumps(
-                        networkx.readwrite.json_graph.node_link_data(self.dag), indent=2
+                        networkx.readwrite.json_graph.node_link_data(self.dag ,edges="links"), indent=2
                     )
                 ),
             )

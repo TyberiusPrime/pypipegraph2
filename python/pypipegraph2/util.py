@@ -149,6 +149,8 @@ def log_debug(msg):
 
 def log_job_trace(msg):
     if do_jobtrace_log:
+        if callable(msg):
+            msg = msg()
         logger.opt(depth=1).log("JT", msg)
 
 

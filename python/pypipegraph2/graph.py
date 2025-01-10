@@ -203,7 +203,7 @@ class PyPipeGraph:
         ts = ts[ts.rfind(".") :]
         self.time_str = datetime.datetime.now().strftime(time_format) + ts
         if not networkx.algorithms.is_directed_acyclic_graph(self.job_dag):
-            print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
+            print(networkx.readwrite.json_graph.node_link_data(self.job_dag ,edges="links"))
             raise exceptions.NotADag()
         else:
             # print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
