@@ -35,6 +35,6 @@ Optionaly, a `<output_filename + '.tsv'>` file is created with the data used for
 elements).
 
 The return value of this function is a named tuple (plot, cache, table) containing the three jobs created
-(If cache_calc is False, cache will be None, if create_table is False, table will be None; cache is a (CachedDataLoadingJob)[../cacheddataloadingjob], so use cache.calc to add dependencies to our calc function).
+(If cache_calc is False, cache will be None, if create_table is False, table will be None; cache is a [CachedDataLoadingJob](../cacheddataloadingjob), so use cache.calc to add dependencies to our calc function).
 
 
