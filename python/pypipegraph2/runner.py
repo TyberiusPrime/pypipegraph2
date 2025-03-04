@@ -234,15 +234,28 @@ class Runner:
                     f"Mismatch between len(self.jobs) {len(self.jobs)} - prune_counter {len(self.pruned)} and len(self.dag) {len(self.dag)}"
                 )
 
-            log_job_trace(
-                lambda: 
-                "dag "
-                + escape_logging(
-                    json.dumps(
-                        networkx.readwrite.json_graph.node_link_data(self.dag ,edges="links"), indent=2
+            def dump_dag():
+                try:
+                    return "dag " + escape_logging(
+                        json.dumps(
+                            networkx.readwrite.json_graph.node_link_data(
+                                self.dag, edges="links"
+                            ),
+                            indent=2,
+                        )
                     )
-                ),
-            )
+                except TypeError as e:
+                    if "keyword argument 'edges'" in str(e):
+                        return "dag " + escape_logging(
+                            json.dumps(
+                                networkx.readwrite.json_graph.node_link_data(self.dag),
+                                indent=2,
+                            )
+                        )
+                    else:
+                        raise
+
+            log_job_trace(dump_dag)
 
             if not networkx.algorithms.is_directed_acyclic_graph(
                 self.dag
@@ -569,7 +582,7 @@ class Runner:
         Called from the interactive interface
         """
         # must be reentrant, called from signal!
-        #log_info("runner.abort called")
+        # log_info("runner.abort called")
         self.abort_time = time.time()
         self.aborted = True
         self.check_for_new_jobs.set()
@@ -751,7 +764,9 @@ class Runner:
                             for cleanup_job_id in cleanups:
                                 try:
                                     log_debug(f"Job cleanup: {cleanup_job_id}")
-                                    self.jobs[cleanup_job_id].cleanup(self.job_graph.run_mode)
+                                    self.jobs[cleanup_job_id].cleanup(
+                                        self.job_graph.run_mode
+                                    )
                                 except Exception as e:
                                     log_error(f"Cleanup had an exception {repr(e)}")
                                 self.evaluator.event_job_cleanup_done(cleanup_job_id)
