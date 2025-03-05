@@ -38,3 +38,7 @@ The return value of this function is a named tuple (plot, cache, table) containi
 (If cache_calc is False, cache will be None, if create_table is False, table will be None; cache is a [CachedDataLoadingJob](../cacheddataloadingjob), so use cache.calc to add dependencies to our calc function).
 
 
+You can add another job creating a plot from the same dataframe using 
+```
+    result.plot.add_plot(output_filename, plot_function, render_args=None, depend_on_function=False)
+```.
