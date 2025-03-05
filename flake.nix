@@ -91,6 +91,7 @@
            psutil
            networkx
            cython
+           setuptools
            filelock
            pyzstd
            watchfiles
