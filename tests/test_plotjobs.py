@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 import os
-from .shared import read, write, append
+from .shared import read, write, append, counter
 import pickle
 
 try:
@@ -41,15 +41,19 @@ if has_pyggplot:  # noqa C901
                 return dp(df).p9().add_point("X", "Y")
 
             def plot2(df):
+                counter("plot2")
                 p = dp(df).p9().add_point("Y", "X")
                 p.width = 5
                 p.height = 2
                 return p
 
-            of = "out/test.png"
-            p, c, t = ppg.PlotJob(of, calc, plot)
-            # p.add_fiddle(lambda p: dp(p).scale_x_continuous(trans="log10").pd)
-            p.add_another_plot("out/test2.png", plot2)
+            def get(plot2=plot2):
+                of = "out/test.png"
+                p, c, t = ppg.PlotJob(of, calc, plot)
+                # p.add_fiddle(lambda p: dp(p).scale_x_continuous(trans="log10").pd)
+                p.add_another_plot("out/test2.png", plot2)
+                return p, c,t, of
+            p,c,t,of = get()
             ppg.run()
             assert magic(of).find(b"PNG image") != -1
             assert os.path.exists(of + ".tsv")
@@ -57,6 +61,24 @@ if has_pyggplot:  # noqa C901
             assert os.path.exists("out/test2.png")
             assert not os.path.exists("cache/out/test2.png")
             assert not os.path.exists("cache/out/test2.png.tsv")
+            assert Path("plot2").read_text() == "1"
+
+            def plot3(df):
+                counter("plot2")
+                p = dp(df).p9().add_point("Y", "X")
+                p.width = 6
+                p.height = 2
+                return p
+            ppg.new()
+            p, c, t, of = get(plot2)
+            ppg.run()
+            assert Path("plot2").read_text() == "1"
+            ppg.new()
+            p, c, t, of = get(plot3)
+            ppg.run()
+            assert Path("plot2").read_text() == "2"
+
+
 
         def test_basic_skip_table(self):
             def calc():

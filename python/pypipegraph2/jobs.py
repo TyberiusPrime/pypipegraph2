@@ -2604,6 +2604,8 @@ def PlotJob(  # noqa:C901
             plot = plot_function(plot_job.data_)
             _save_plot(plot, output_filename, render_args)
 
+        _mark_function_wrapped(do_plot_another_plot, plot_function, "plot")
+
         j = FileGeneratingJob(
             output_filename, do_plot_another_plot, depend_on_function=depend_on_function
         )
