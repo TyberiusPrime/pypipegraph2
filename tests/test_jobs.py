@@ -12,9 +12,9 @@ class TestJobs:
     def test_assert_singletonicity_of_jobs(self):
         ppg.new()
         of = "out/a"
-        data_to_write = "hello"
 
         def do_write(of):
+            data_to_write = "hello"
             write(of, data_to_write)
 
         job = ppg.FileGeneratingJob(of, do_write)
@@ -33,9 +33,9 @@ class TestJobs:
     def test_redefining_a_jobid_with_different_class_raises(self):
         ppg.new()
         of = "out/a"
-        data_to_write = "hello"
 
         def do_write(of):
+            data_to_write = "hello"
             write(of, data_to_write)
 
         ppg.FileGeneratingJob(of, do_write)
@@ -109,7 +109,8 @@ class TestJobs:
             "B", lambda of: of.write_text("b")
         )
         c = ppg.FileGeneratingJob(
-            "C", lambda of: of.write_text(Path("B").read_text() + data[0])
+            "C",
+            lambda of, data=data: of.write_text(Path("B").read_text() + data[0]),
         )
         c.depends_on(b, a)
         ppg.run()
@@ -148,7 +149,9 @@ class TestJobs:
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
         b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
-        c = ppg.DataLoadingJob("o", lambda: counter("c") and ppg.UseInputHashesForOutput())
+        c = ppg.DataLoadingJob(
+            "o", lambda: counter("c") and ppg.UseInputHashesForOutput()
+        )
         b.depends_on(a)
         a.depends_on_params("x")
         a.depends_on(c)
@@ -184,7 +187,7 @@ class TestFileGeneratingJob:
         of = "out/a"
         data_to_write = "hello"
 
-        def do_write(ofof):
+        def do_write(of, data_to_write=data_to_write):
             print("do_write was called")
             write(of, data_to_write)
 
@@ -199,7 +202,7 @@ class TestFileGeneratingJob:
         of = "out/a"
         data_to_write = "hello"
 
-        def do_write(ofof):
+        def do_write(of, data_to_write=data_to_write):
             print("do_write was called")
             write(of, data_to_write)
 
@@ -278,7 +281,7 @@ class TestFileGeneratingJob:
     def test_basic_with_parameter(self):
         data_to_write = "hello"
 
-        def do_write(filename):
+        def do_write(filename, data_to_write=data_to_write):
             print("do_write was called")
             write(filename, data_to_write)
 
@@ -294,7 +297,7 @@ class TestFileGeneratingJob:
         of = "out/a"
         data_to_write = "hello"
 
-        def do_write(ofof):
+        def do_write(of, data_to_write=data_to_write):
             print("do_write was called")
             write(of, data_to_write)
 
@@ -343,7 +346,7 @@ class TestFileGeneratingJob:
         of = "out/a"
         data_to_write = "hello"
 
-        def do_write(of):
+        def do_write(of, data_to_write=data_to_write):
             write(of, data_to_write)
             raise ValueError("shu")
 
@@ -395,7 +398,7 @@ class TestFileGeneratingJob:
         of = "out/a"
         data_to_write = "hello"
 
-        def do_write(of):
+        def do_write(of, data_to_write=data_to_write):
             op = open(of, "w")
             op.write(data_to_write)
             op.close()
@@ -437,7 +440,7 @@ class TestFileGeneratingJob:
         of = "out/a"
         data_to_write = "hello"
 
-        def do_write(of):
+        def do_write(of, data_to_write=data_to_write):
             write(of, data_to_write)
             print("stdout is cool")
             sys.stderr.write("I am stderr")
@@ -472,7 +475,7 @@ class TestFileGeneratingJob:
         of = "out/a"
         data_to_write = "hello"
 
-        def do_write(of):
+        def do_write(of, data_to_write=data_to_write):
             op = open(of, "w")
             op.write(data_to_write)
             op.close()
@@ -497,7 +500,7 @@ class TestFileGeneratingJob:
         of = "out/a"
         data_to_write = "hello"
 
-        def do_write(of):
+        def do_write(of, data_to_write=data_to_write):
             write(of, data_to_write)
             global global_test
             global_test = 2
@@ -510,12 +513,12 @@ class TestFileGeneratingJob:
         ofA = "out/a"
 
         def writeA(of):
-            write(ofA, "Hello")
+            write(of, "Hello")
 
         jobA = ppg.FileGeneratingJob(ofA, writeA)
         ofB = "out/b"
 
-        def writeB(of):
+        def writeB(of, ofA=ofA, ofB=ofB):
             op = open(ofB, "w")
             ip = open(ofA, "r")
             op.write(ip.read()[::-1])
@@ -534,12 +537,12 @@ class TestFileGeneratingJob:
         ofA = "out/a"
 
         def writeA(of):
-            write(ofA, "%i" % os.getpid())
+            write(of, "%i" % os.getpid())
 
         ofB = "out/b"
 
         def writeB(of):
-            write(ofB, "%i" % os.getpid())
+            write(of, "%i" % os.getpid())
 
         ppg.FileGeneratingJob(ofA, writeA)
         ppg.FileGeneratingJob(ofB, writeB)
@@ -591,7 +594,7 @@ class TestFileGeneratingJob:
         of = "out/a"
         sentinel = "out/b"
 
-        def do_write(of):
+        def do_write(of, sentinel=sentinel):
             if Path(sentinel).exists():
                 raise ValueError("second run")
             write(of, "shu")
@@ -745,7 +748,7 @@ class TestMultiFileGeneratingJob:
         of = ["out/a", "out/b"]
         sentinel = "out/sentinel"  # hack so this one does something different the second time around...
 
-        def do_write(of):
+        def do_write(of, sentinel=sentinel):
             if Path(sentinel).exists():
                 raise ValueError("explode")
             write(sentinel, "shu")
@@ -805,26 +808,34 @@ class TestMultiFileGeneratingJob:
 
     def test_duplicate_prevention(self):
         param = "A"
-        ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))
+        ppg.FileGeneratingJob("out/A", lambda of, param=param: write("out/A", param))
 
         with pytest.raises(ValueError):
-            ppg.MultiFileGeneratingJob(["out/A"], lambda of: write("out/A", param))
+            ppg.MultiFileGeneratingJob(
+                ["out/A"], lambda of, param=param: write("out/A", param)
+            )
 
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         assert len(ppg.global_pipegraph.jobs) == 0
-        ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))
-        ppg.MultiFileGeneratingJob(["out/A"], lambda of: write("out/A", param))
+        ppg.FileGeneratingJob("out/A", lambda of, param=param: write("out/A", param))
+        ppg.MultiFileGeneratingJob(
+            ["out/A"], lambda of, param=param: write("out/A", param)
+        )
 
     def test_non_str(self):
         param = "A"
 
         with pytest.raises(TypeError):
-            ppg.MultiFileGeneratingJob([25], lambda of: write("out/A", param))
+            ppg.MultiFileGeneratingJob(
+                [25], lambda of, param=param: write("out/A", param)
+            )
 
     def test_non_iterable(self):
         param = "A"
         try:
-            ppg.MultiFileGeneratingJob(25, lambda of: write("out/A", param))
+            ppg.MultiFileGeneratingJob(
+                25, lambda of, param=param: write("out/A", param)
+            )
             assert not ("Exception not raised")
         except TypeError as e:
             print(e)
@@ -834,7 +845,9 @@ class TestMultiFileGeneratingJob:
         param = "A"
 
         with pytest.raises(TypeError):
-            ppg.MultiFileGeneratingJob("A", lambda of: write("out/A", param))
+            ppg.MultiFileGeneratingJob(
+                "A", lambda of, param=param: write("out/A", param)
+            )
 
     def test_order_of_files_is_kept_for_callback(self):
         def do_b(ofs):
@@ -869,12 +882,15 @@ class TestDataLoadingJob:
             )  # this might actually be a problem when defining this?
 
         dlJo = ppg.DataLoadingJob("myjob", load)
-        writejob = ppg.FileGeneratingJob(of, do_write)
+        writejob = ppg.FileGeneratingJob(
+            of, do_write, allowed_globals=["test_modifies_shared_global"]
+        )
         writejob.depends_on(dlJo)
 
         writejob2 = ppg.FileGeneratingJob(
             "out/b",
             lambda of: write("out/b", "b" + "\n".join(test_modifies_shared_global)),
+            allowed_globals=["test_modifies_shared_global"],
         )
         writejob2.depends_on(dlJo)
         ppg.run()
@@ -899,7 +915,7 @@ class TestDataLoadingJob:
             write(of, shared_value)
 
         dlJo = ppg.DataLoadingJob("myjob", load)
-        writejob = ppg.FileGeneratingJob(of, do_write)
+        writejob = ppg.FileGeneratingJob(of, do_write, allowed_globals=["shared_value"])
         writejob.depends_on(dlJo)
         ppg.run()
         assert read(of) == "shared data"
@@ -961,7 +977,7 @@ class TestDataLoadingJob:
         ofC = "out/c"
 
         def do_write(of):
-            write(ofC, ofC)
+            write(of, str(of))
 
         ppg.FileGeneratingJob(ofC, do_write).depends_on(jobB)
         ppg.run()
@@ -985,7 +1001,7 @@ class TestDataLoadingJob:
         jobB = ppg.DataLoadingJob("loadme", do_load).depends_on(jobA)
         ofB = "out/b"
 
-        def write2(of):
+        def write2(of, o=o, ofB=ofB):
             write(ofB, o.a)
 
         ppg.FileGeneratingJob(ofB, write2).depends_on(jobB)
@@ -1141,9 +1157,7 @@ class TestDataLoadingJob:
 
     def test_creating_jobs_in_file_generating_are_ignored(self):
         def load(of):
-            ppg.global_pipegraph.new_jobs = (
-                {}
-            )  # just to see if we can reach the check in the resource coordinator!
+            ppg.global_pipegraph.new_jobs = {}  # just to see if we can reach the check in the resource coordinator!
             c = ppg.FileGeneratingJob("out/C", lambda of: write("out/C", "C"))
             write("out/A", "A")
             return [c]
@@ -1216,29 +1230,32 @@ class TestDataLoadingJob:
     def test_upstream_leads_to_invalidation_if_dl_returns_none(self):
         store = {}
 
-        ppg.new(run_mode=ppg.RunMode.NOTEBOOK) # something non-strict
+        ppg.new(run_mode=ppg.RunMode.NOTEBOOK)  # something non-strict
 
-        a = ppg.ParameterInvariant("A",'a')
-        # note that the default parameter is necessary, 
+        a = ppg.ParameterInvariant("A", "a")
+
+        # note that the default parameter is necessary,
         # otherwise teh 2nd invokation will have bound a content-different
         # object 'store'.
         def do_b(store=store):
-            store['b'] = store.get('b', 0) + 1
+            store["b"] = store.get("b", 0) + 1
             return ppg.UseInputHashesForOutput()
-        b = ppg.DataLoadingJob('B', do_b)
 
-        c = ppg.FileGeneratingJob('C', lambda of, store=store: of.write_text('c' + str(store['b'])))
+        b = ppg.DataLoadingJob("B", do_b)
+
+        c = ppg.FileGeneratingJob(
+            "C", lambda of, store=store: of.write_text("c" + str(store["b"]))
+        )
 
         c.depends_on(b)
         b.depends_on(a)
         ppg.run()
-        assert Path('C').read_text() == 'c1'
+        assert Path("C").read_text() == "c1"
         ppg.run()
-        assert Path('C').read_text() == 'c1'
-        ppg.ParameterInvariant('A', 'a1')
+        assert Path("C").read_text() == "c1"
+        ppg.ParameterInvariant("A", "a1")
         ppg.run()
-        assert Path('C').read_text() == 'c2'
-
+        assert Path("C").read_text() == "c2"
 
 
 @pytest.mark.usefixtures("create_out_dir")
@@ -1503,14 +1520,19 @@ class TestAttributeJob:
         b.depends_on(c)
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
-        assert ppg.global_pipegraph.last_run_result[c.job_id].outcome is ppg.enums.JobOutcome.Failed
+        assert (
+            ppg.global_pipegraph.last_run_result[c.job_id].outcome
+            is ppg.enums.JobOutcome.Failed
+        )
 
     def test_returning_none_via_ues_input_hashes_for_output(self):
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         o = Dummy()
         a = ppg.FileGeneratingJob("out/a", lambda of: counter("a") and write(of, "A"))
         b = ppg.FileGeneratingJob("out/b", lambda of: counter("b") and write(of, "B"))
-        c = ppg.AttributeLoadingJob("o", o, "o", lambda: counter("c") and ppg.UseInputHashesForOutput(None))
+        c = ppg.AttributeLoadingJob(
+            "o", o, "o", lambda: counter("c") and ppg.UseInputHashesForOutput(None)
+        )
         b.depends_on(a)
         a.depends_on_params("x")
         a.depends_on(c)
@@ -2058,7 +2080,7 @@ class TestMultiTempFileGeneratingJob:
 
     def test_duplicate_prevention(self):
         param = "A"
-        ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))
+        ppg.FileGeneratingJob("out/A", lambda of, param=param: write("out/A", param))
 
         with pytest.raises(ppg.JobRedefinitionError):
             ppg.MultiTempFileGeneratingJob(["out/A"], lambda of: write("out/A", param))
@@ -2067,12 +2089,16 @@ class TestMultiTempFileGeneratingJob:
         param = "A"
 
         with pytest.raises(TypeError):
-            ppg.MultiTempFileGeneratingJob([25], lambda of: write("out/A", param))
+            ppg.MultiTempFileGeneratingJob(
+                [25], lambda of, param=param: write("out/A", param)
+            )
 
     def test_non_iterable(self):
         param = "A"
         with pytest.raises(TypeError):
-            ppg.MultiTempFileGeneratingJob(25, lambda of: write("out/A", param))
+            ppg.MultiTempFileGeneratingJob(
+                25, lambda of, param=param: write("out/A", param)
+            )
 
     def test_order_of_files_is_kept_for_callback(self):
         def do_b(ofs):

@@ -16,6 +16,7 @@ from collections import namedtuple
 from threading import Lock, Event
 from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
+import localscope
 
 from . import hashers, exceptions, ppg_traceback
 from .enums import Resources, RunMode
@@ -605,8 +606,19 @@ class MultiFileGeneratingJob(Job):
         depend_on_function: bool = True,
         empty_ok=True,
         always_capture_output=True,
+        allowed_globals: List[str] = None,
     ):
-        self.generating_function = self._validate_func_argument(generating_function)
+        try:
+            self.generating_function = self._validate_func_argument(
+                generating_function, allowed_globals
+            )
+
+        except localscope.LocalscopeException as e:
+            raise ValueError(
+                f"Function for job {':::'.join(files)} uses undeclared outer-scope variables. Either add them as default parameters, or set allow_globals=['...'] when defining the job.\n"
+                + str(e)
+            )
+
         self.depend_on_function = depend_on_function
         self.files, self._lookup = self._validate_files_argument(files)
         if len(self.files) != len(set(self.files)):
@@ -640,12 +652,24 @@ class MultiFileGeneratingJob(Job):
         return self._map_filename(query)
 
     @staticmethod
-    def _validate_func_argument(func):
+    def _validate_func_argument(func, allowed_globals):
         sig = inspect.signature(func)
         if len(sig.parameters) == 0:
             raise TypeError(
                 "A *FileGeneratingJobs callback function must take at least one parameter: The file(s) to create"
             )
+
+        def allowed(obj):
+            if inspect.ismodule(obj) or inspect.isfunction(obj):
+                return True
+            elif inspect.isclass(obj):
+                cls_name = obj.__name__
+                module_name = obj.__module__
+                if (module_name == "pathlib") and (cls_name == "Path"):
+                    return True
+            return False
+
+        localscope.localscope(func, predicate=allowed, allowed=allowed_globals)
         return func
 
     @staticmethod
@@ -1050,6 +1074,7 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
         depend_on_function: bool = True,
         empty_ok=False,
         always_capture_output=True,
+        allowed_globals: List[str] = None,
     ):
         MultiFileGeneratingJob.__init__(
             self,
@@ -1059,6 +1084,7 @@ class FileGeneratingJob(MultiFileGeneratingJob):  # might as well be a function?
             depend_on_function,
             empty_ok=empty_ok,
             always_capture_output=always_capture_output,
+            allowed_globals=allowed_globals,
         )
         self._single_file = True
 
@@ -1088,9 +1114,15 @@ class MultiTempFileGeneratingJob(MultiFileGeneratingJob):
         generating_function: Callable[List[Path]],
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
+        allowed_globals: List[str] = None,
     ):
         MultiFileGeneratingJob.__init__(
-            self, files, generating_function, resources, depend_on_function
+            self,
+            files,
+            generating_function,
+            resources,
+            depend_on_function,
+            allowed_globals=allowed_globals,
         )
         self._single_file = False
 
@@ -1155,9 +1187,15 @@ class TempFileGeneratingJob(
         generating_function: Callable[Path],
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
+        allowed_globals: List[str] = None,
     ):
         MultiTempFileGeneratingJob.__init__(
-            self, [output_filename], generating_function, resources, depend_on_function
+            self,
+            [output_filename],
+            generating_function,
+            resources,
+            depend_on_function,
+            allowed_globals=allowed_globals,
         )
         self._single_file = True
 

@@ -22,17 +22,18 @@ urls = {"homepage"= "https://github.com/TyberiusPrime/pypipegraph2"}
 
 requires-python = ">=3.8"
 dependencies = [
-	"loguru",
-	"rich",
-	"xxhash",
-	"wrapt",
 	"deepdiff",
-	"psutil",
-	"networkx",
 	"filelock",
-	"pyzstd",
 	"lib_programname",
+	"loguru",
+	"localscope",
+	"networkx",
+	"psutil",
+	"pyzstd",
+	"rich",
 	"textual",
+	"wrapt",
+	"xxhash",
 ]
 
 
