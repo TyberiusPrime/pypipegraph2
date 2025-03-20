@@ -52,3 +52,5 @@ class Resources(Enum):
             return 0  # which the core lock does not like!
         else:
             raise ValueError("Not a Resource with a given number of cores")
+
+PPG1Compatibility_AllowAllVariables = object()

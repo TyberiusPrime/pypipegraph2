@@ -17,13 +17,15 @@ class TestCachedDataLoadingJob:
         def store(value):
             o.a = value
 
-        job, cache_job = ppg.CachedDataLoadingJob("out/mycalc", calc, store)
+        job, cache_job = ppg.CachedDataLoadingJob(
+            "out/mycalc", calc, store, allowed_globals_load=["o"]
+        )
         of = "out/A"
 
         def do_write(of):
             write(of, o.a)
 
-        ppg.FileGeneratingJob(of, do_write).depends_on(job)
+        ppg.FileGeneratingJob(of, do_write, allowed_globals=["o"]).depends_on(job)
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 
@@ -36,7 +38,7 @@ class TestCachedDataLoadingJob:
         def store(value):
             o.a = value
 
-        ppg.CachedDataLoadingJob("out/mycalc", calc, store)
+        ppg.CachedDataLoadingJob("out/mycalc", calc, store, allowed_globals_load=["o"])
         # job.ignore_code_changes() #or it would run anyway... hm.
         assert not (Path("out/mycalc").exists())
         ppg.run()
@@ -68,8 +70,10 @@ class TestCachedDataLoadingJob:
             write("out/A", str(o.a))
 
         def gen():
-            load_job, cache_job = ppg.CachedDataLoadingJob("out/B", calc, store)
-            dump_job = ppg.FileGeneratingJob("out/A", dump)
+            load_job, cache_job = ppg.CachedDataLoadingJob(
+                "out/B", calc, store, allowed_globals_load=["o"]
+            )
+            dump_job = ppg.FileGeneratingJob("out/A", dump, allowed_globals=["o"])
             dump_job.depends_on(load_job)
 
         ppg.JobGeneratingJob("out/C", gen)
@@ -91,11 +95,13 @@ class TestCachedDataLoadingJob:
 
         def gen():
             write("out/c", "c")
-            calc_job, cache_job = ppg.CachedDataLoadingJob("out/B", calc, store)
+            calc_job, cache_job = ppg.CachedDataLoadingJob(
+                "out/B", calc, store, allowed_globals_load=["o"]
+            )
 
             def gen2():
                 write("out/d", "d")
-                dump_job = ppg.FileGeneratingJob("out/A", dump)
+                dump_job = ppg.FileGeneratingJob("out/A", dump, allowed_globals=["o"])
                 dump_job.depends_on(calc_job)
 
             ppg.JobGeneratingJob("out/D", gen2)
@@ -125,9 +131,11 @@ class TestCachedDataLoadingJob:
         def output(of):
             write(of, o.c)
 
-        dl = ppg.DataLoadingJob("out/A", a)
-        ca, cca = ppg.CachedDataLoadingJob("out/C", calc, load)
-        fg = ppg.FileGeneratingJob("out/D", output)
+        dl = ppg.DataLoadingJob("out/A", a, allowed_globals=["o"])
+        ca, cca = ppg.CachedDataLoadingJob(
+            "out/C", calc, load, allowed_globals_calc=["o"], allowed_globals_load=["o"]
+        )
+        fg = ppg.FileGeneratingJob("out/D", output, allowed_globals=["o"])
         fg.depends_on(ca)
         cca.depends_on(dl)
         ppg.run()
@@ -139,9 +147,11 @@ class TestCachedDataLoadingJob:
             "out/D"
         ).unlink()  # so the filegen and the loadjob of cached should rerun...
         ppg.new()
-        dl = ppg.DataLoadingJob("out/A", a)
-        ca, cca = ppg.CachedDataLoadingJob("out/C", calc, load)
-        fg = ppg.FileGeneratingJob("out/D", output)
+        dl = ppg.DataLoadingJob("out/A", a, allowed_globals=["o"])
+        ca, cca = ppg.CachedDataLoadingJob(
+            "out/C", calc, load, allowed_globals_calc=["o"], allowed_globals_load=["o"]
+        )
+        fg = ppg.FileGeneratingJob("out/D", output, allowed_globals=["o"])
         fg.depends_on(ca)
         cca.depends_on(dl)
         ppg.run()
@@ -166,16 +176,19 @@ class TestCachedDataLoadingJob:
         def calc():
             return ", ".join(str(x) for x in range(0, 100))
 
-        def store(value):
+        def store(value, o=o):
             o.a = value
 
         job, cache_job = ppg.CachedDataLoadingJob(
-            "out/mycalc", calc, store, depend_on_function=False
+            "out/mycalc",
+            calc,
+            store,
+            depend_on_function=False,
         )
         write("out/mycalc", "no unpickling this")
         of = "out/A"
 
-        def do_write(of):
+        def do_write(of, o=o):
             write(of, o.a)
 
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
@@ -214,7 +227,7 @@ class TestCachedAttributeJob:
         def do_write(output_filename):
             write(output_filename, o.a)
 
-        ppg.FileGeneratingJob(of, do_write).depends_on(job)
+        ppg.FileGeneratingJob(of, do_write, allowed_globals=["o"]).depends_on(job)
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 
@@ -238,7 +251,7 @@ class TestCachedAttributeJob:
         job, cache_job = ppg.CachedAttributeLoadingJob("mycalc", o, "a", calc)
         of = "A"
 
-        def do_write(of):
+        def do_write(of, o=o):
             write(of, o.a)
 
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
@@ -269,7 +282,7 @@ class TestCachedAttributeJob:
         job, cache_job = ppg.CachedAttributeLoadingJob("mycalc", o, "a", calc)
         of = "A"
 
-        def do_write(of):
+        def do_write(of, o=o):
             write(of, o.a)
 
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
@@ -297,14 +310,14 @@ class TestCachedAttributeJob:
         job, cache_job = ppg.CachedAttributeLoadingJob("mycalc", o, "a", calc2)
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
         ppg.run()
-        assert read(of) == ", ".join(
-            str(x) for x in range(0, 200)
+        assert (
+            read(of) == ", ".join(str(x) for x in range(0, 200))
         )  # The new stuff - you either have an explicit ignore_code_changes in our codebase, or we enforce consistency between code and result
         assert read("2") == "2"  # rerun, we regained the func dependency
 
         ppg.run()
-        assert read(of) == ", ".join(
-            str(x) for x in range(0, 200)
+        assert (
+            read(of) == ", ".join(str(x) for x in range(0, 200))
         )  # The new stuff - you either have an explicit ignore_code_changes in our codebase, or we enforce consistency between code and result
         assert read("2") == "2"  # no rerun
 
@@ -320,10 +333,10 @@ class TestCachedAttributeJob:
         o = Dummy()
         load_attr = ppg.AttributeLoadingJob("load_attr", o, "o", lambda: 55)
 
-        def calc():
+        def calc(o=o):
             return o.o
 
-        def out(output_filename):
+        def out(output_filename, o=o):
             write(output_filename, str(o.o2))
 
         lj, cj = ppg.CachedAttributeLoadingJob("cached_job", o, "o2", calc)
@@ -382,17 +395,17 @@ class TestCachedAttributeJob:
     def test_cached_attribute_job_does_not_load_its_preqs_on_cached(self):
         o = Dummy()
 
-        def a():
+        def a(o=o):
             o.a = "A"
             append("A", "A")
             return ppg.UseInputHashesForOutput()
 
-        def calc():
+        def calc(o=o):
             append("B", "B")
             return o.a * 2
 
-        def output(output_filename):
-            write("D", o.c)
+        def output(output_filename, o=o):
+            write(output_filename, o.c)
 
         dl = ppg.DataLoadingJob("A", a)
         ca, cache_job = ppg.CachedAttributeLoadingJob("C", o, "c", calc)

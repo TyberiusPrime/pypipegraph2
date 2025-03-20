@@ -13,13 +13,13 @@ from typing import Union, List, Dict, Optional, Tuple, Callable
 from pathlib import Path
 from io import StringIO
 from collections import namedtuple
-from threading import Lock, Event
+from threading import Lock, Event, local
 from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
 import localscope
 
 from . import hashers, exceptions, ppg_traceback
-from .enums import Resources, RunMode
+from .enums import Resources, RunMode, PPG1Compatibility_AllowAllVariables
 from .util import escape_logging
 import hashlib
 import shutil
@@ -148,6 +148,50 @@ class JobList(list):
     def depends_on(self, *args, **kwargs):  # pragma: no cover
         for job in self:
             job.depends_on(*args, **kwargs)
+
+
+def _verify_function_outside_variables(func, allowed_globals, job_id="Unknown job"):
+    if isinstance(allowed_globals, str):
+        raise ValueError("allowed_globals must be a List[str]")
+    if (
+        not allowed_globals
+        or not PPG1Compatibility_AllowAllVariables in allowed_globals
+    ):
+        try:
+
+            def allowed(obj):
+                if inspect.ismodule(obj) or inspect.isfunction(obj):
+                    return True
+                elif inspect.isclass(obj):
+                    cls_name = obj.__name__
+                    module_name = obj.__module__
+                    if (module_name == "pathlib") and (cls_name == "Path"):
+                        return True
+                if (
+                    type(obj).__module__ == "dppd.base"
+                    and type(obj).__name__ == "ReplacableProxy"
+                ):
+                    return True
+                print(type(obj).__module__, type(obj).__name__)
+                return False
+
+            localscope.localscope(func, predicate=allowed, allowed=allowed_globals)
+            if hasattr(func, "wrapped_function"):
+                localscope.localscope(
+                    func.wrapped_function, predicate=allowed, allowed=allowed_globals
+                )
+        except localscope.LocalscopeException as e:
+            raise ValueError(
+                f"Function for job {job_id} uses undeclared outer-scope variables. Either add them as default parameters, or set allow_globals=['...'] when defining the job.\n"
+                + str(e)
+            )
+
+
+def _allow_non_locals_plus(allowed_globals: Optional[List[str]], plus: List[str]):
+    res = plus.copy()
+    if allowed_globals:
+        res.extend(allowed_globals)
+    return res
 
 
 @total_ordering
@@ -608,19 +652,13 @@ class MultiFileGeneratingJob(Job):
         always_capture_output=True,
         allowed_globals: List[str] = None,
     ):
-        try:
-            self.generating_function = self._validate_func_argument(
-                generating_function, allowed_globals
-            )
-
-        except localscope.LocalscopeException as e:
-            raise ValueError(
-                f"Function for job {':::'.join(files)} uses undeclared outer-scope variables. Either add them as default parameters, or set allow_globals=['...'] when defining the job.\n"
-                + str(e)
-            )
-
         self.depend_on_function = depend_on_function
         self.files, self._lookup = self._validate_files_argument(files)
+        self.generating_function = self._validate_func_argument(
+            generating_function,
+            allowed_globals,
+            ":::".join((str(x) for x in self.files)),
+        )
         if len(self.files) != len(set(self.files)):
             raise ValueError(
                 "Paths were present multiple times in files argument. Fix your input"
@@ -652,24 +690,14 @@ class MultiFileGeneratingJob(Job):
         return self._map_filename(query)
 
     @staticmethod
-    def _validate_func_argument(func, allowed_globals):
+    def _validate_func_argument(func, allowed_globals, job_id):
         sig = inspect.signature(func)
         if len(sig.parameters) == 0:
             raise TypeError(
                 "A *FileGeneratingJobs callback function must take at least one parameter: The file(s) to create"
             )
 
-        def allowed(obj):
-            if inspect.ismodule(obj) or inspect.isfunction(obj):
-                return True
-            elif inspect.isclass(obj):
-                cls_name = obj.__name__
-                module_name = obj.__module__
-                if (module_name == "pathlib") and (cls_name == "Path"):
-                    return True
-            return False
-
-        localscope.localscope(func, predicate=allowed, allowed=allowed_globals)
+        _verify_function_outside_variables(func, allowed_globals, job_id)
         return func
 
     @staticmethod
@@ -2065,10 +2093,12 @@ class DataLoadingJob(Job, _InputHashAwareJobMixin):
         load_function,
         resources: Resources = Resources.SingleCore,
         depend_on_function=True,
+        allowed_globals: List[str] = None,
     ):
         if isinstance(job_id, Path):
             job_id = str(_normalize_path(job_id))
         self.depend_on_function = depend_on_function
+        _verify_function_outside_variables(load_function, allowed_globals, job_id)
         self.load_function = load_function
         super().__init__([job_id], resources=resources)
 
@@ -2105,6 +2135,8 @@ def CachedDataLoadingJob(
     load_function,
     depend_on_function=True,
     resources: Resources = Resources.SingleCore,
+    allowed_globals_calc: List[str] = None,
+    allowed_globals_load: List[str] = None,
 ):
     cache_filename = Path(cache_filename)
     # early func definition & checking so we don't create a calc job if the load job will fail
@@ -2133,12 +2165,18 @@ def CachedDataLoadingJob(
         do_cache,
         depend_on_function=depend_on_function,
         resources=resources,
+        allowed_globals=_allow_non_locals_plus(
+            allowed_globals_calc, ["cache_filename"]
+        ),
     )
 
     load_job = DataLoadingJob(
         "load_" + cache_job.job_id,
         load,
         depend_on_function=depend_on_function,
+        allowed_globals=_allow_non_locals_plus(
+            allowed_globals_load, ["cache_filename"]
+        ),
     )
     load_job.depends_on(cache_job)
     # do this after you have sucessfully created both jobs
@@ -2291,10 +2329,11 @@ def _CachedAttributeLoadingJob(
     data_function,
     depend_on_function=True,
     resources: Resources = Resources.SingleCore,
+    allowed_globals: List[str] = None,
 ):
     cache_filename = Path(cache_filename)
 
-    def do_cache(output_filename):  # pragma: no cover
+    def do_cache(output_filename, data_function=data_function):  # pragma: no cover
         try:
             with open(output_filename, "wb") as op:
                 pickle.dump(data_function(), op, pickle.HIGHEST_PROTOCOL)
@@ -2325,6 +2364,7 @@ def _CachedAttributeLoadingJob(
         do_cache,
         depend_on_function=depend_on_function,
         resources=resources,
+        allowed_globals=allowed_globals,
     )
     load_job = load_job_cls(
         "load_" + cache_job.job_id,
@@ -2344,6 +2384,7 @@ def CachedAttributeLoadingJob(
     data_function,
     depend_on_function=True,
     resources: Resources = Resources.SingleCore,
+    allowed_globals: List[str] = None,
 ):
     return _CachedAttributeLoadingJob(
         AttributeLoadingJob,
@@ -2353,6 +2394,7 @@ def CachedAttributeLoadingJob(
         data_function,
         depend_on_function,
         resources,
+        allowed_globals,
     )
 
 
@@ -2363,6 +2405,7 @@ def CachedDictEntryLoadingJob(
     data_function,
     depend_on_function=True,
     resources: Resources = Resources.SingleCore,
+    allowed_globals: List[str] = None,
 ):
     return _CachedAttributeLoadingJob(
         DictEntryLoadingJob,
@@ -2372,6 +2415,7 @@ def CachedDictEntryLoadingJob(
         data_function,
         depend_on_function,
         resources,
+        allowed_globals,
     )
 
 
@@ -2382,6 +2426,7 @@ def CachedAttributeLoadingJob(
     data_function,
     depend_on_function=True,
     resources: Resources = Resources.SingleCore,
+    allowed_globals: List[str] = None,
 ):
     return _CachedAttributeLoadingJob(
         AttributeLoadingJob,
@@ -2391,25 +2436,7 @@ def CachedAttributeLoadingJob(
         data_function,
         depend_on_function,
         resources,
-    )
-
-
-def CachedDictEntryLoadingJob(
-    cache_filename,
-    object,
-    attribute_name,
-    data_function,
-    depend_on_function=True,
-    resources: Resources = Resources.SingleCore,
-):
-    return _CachedAttributeLoadingJob(
-        DictEntryLoadingJob,
-        cache_filename,
-        object,
-        attribute_name,
-        data_function,
-        depend_on_function,
-        resources,
+        allowed_globals,
     )
 
 
@@ -2504,6 +2531,8 @@ def PlotJob(  # noqa:C901
     depend_on_function=True,
     cache_calc=True,
     create_table=True,
+    allowed_globals_plot: List[str] = None,
+    allowed_globals_cache: List[str] = None,
 ):  # noqa:C901
     """Return a tuple of 3 jobs, the last two entries might be none.
 
@@ -2529,7 +2558,9 @@ def PlotJob(  # noqa:C901
             f"Don't know how to create a {output_filename.suffix} file, must end on one of {allowed_suffixes}."
         )
 
-    def do_plot(output_filename):  # pragma: no cover - runs in spawned job
+    def do_plot(
+        output_filename, render_args=render_args
+    ):  # pragma: no cover - runs in spawned job
         if not hasattr(plot_job, "data_"):
             plot_job.data_ = calc_function()
         plot = plot_function(plot_job.data_)
@@ -2538,7 +2569,10 @@ def PlotJob(  # noqa:C901
     _mark_function_wrapped(do_plot, plot_function, "plot")
 
     plot_job = FileGeneratingJob(
-        output_filename, do_plot, depend_on_function=depend_on_function
+        output_filename,
+        do_plot,
+        depend_on_function=depend_on_function,
+        allowed_globals=_allow_non_locals_plus(allowed_globals_plot, ["plot_job"]),
     )
     output_filename = plot_job.files[0]  # that's resolved!
     plot_job.depends_on_params(render_args, "_render")
@@ -2553,11 +2587,13 @@ def PlotJob(  # noqa:C901
     cache_filename = Path(cache_dir) / output_filename
     if cache_calc:
 
-        def do_cache():  # pragma: no cover - runs in spawned job
+        def do_cache(
+            cache_filename=cache_filename,
+        ):  # pragma: no cover - runs in spawned job
             if pd is None:
                 raise ValueError("no pandas available")
 
-            Path(output_filename.parent).mkdir(exist_ok=True, parents=True)
+            # Path(output_filename.parent).mkdir(exist_ok=True, parents=True)
             df = calc_function()
             if not isinstance(df, pd.DataFrame):
                 do_raise = True
@@ -2570,7 +2606,7 @@ def PlotJob(  # noqa:C901
                 if do_raise:
                     raise exceptions.JobContractError(
                         "%s.calc_function did not return a DataFrame (or dict of such), was %s "
-                        % (output_filename, str(df.__class__))
+                        % (cache_filename, str(df.__class__))
                     )
             return df
 
@@ -2583,6 +2619,7 @@ def PlotJob(  # noqa:C901
             "data_",
             do_cache,
             depend_on_function=depend_on_function,
+            allowed_globals=allowed_globals_cache,
         )
         Job.depends_on(
             plot_job, cache_job.load
@@ -2600,7 +2637,9 @@ def PlotJob(  # noqa:C901
     table_filename = output_filename.with_suffix(output_filename.suffix + ".tsv")
     if create_table:
 
-        def dump_table(output_filename):  # pragma: no cover - runs in spawned job
+        def dump_table(
+            output_filename, plot_job=plot_job
+        ):  # pragma: no cover - runs in spawned job
             if pd is None:
                 raise ValueError("no pandas available")
 
@@ -2616,7 +2655,9 @@ def PlotJob(  # noqa:C901
                         dataframe.to_csv(op, sep="\t")
 
         table_job = FileGeneratingJob(
-            table_filename, dump_table, depend_on_function=depend_on_function
+            table_filename,
+            dump_table,
+            depend_on_function=depend_on_function,
         )
         if cache_calc:
             table_job.depends_on(cache_job.load)
@@ -2631,12 +2672,18 @@ def PlotJob(  # noqa:C901
             )
 
     def add_another_plot(
-        output_filename, plot_function, render_args=None, depend_on_function=True
+        output_filename,
+        plot_function,
+        render_args=None,
+        depend_on_function=True,
+        allowed_globals: List[str] = None,
     ):
         if render_args is None:
             render_args = {}
 
-        def do_plot_another_plot(output_filename):  # pragma: no cover
+        def do_plot_another_plot(
+            output_filename, render_args=render_args
+        ):  # pragma: no cover
             if not hasattr(plot_job, "data_"):
                 plot_job.data_ = calc_function()
             plot = plot_function(plot_job.data_)
@@ -2645,7 +2692,10 @@ def PlotJob(  # noqa:C901
         _mark_function_wrapped(do_plot_another_plot, plot_function, "plot")
 
         j = FileGeneratingJob(
-            output_filename, do_plot_another_plot, depend_on_function=depend_on_function
+            output_filename,
+            do_plot_another_plot,
+            depend_on_function=depend_on_function,
+            allowed_globals=_allow_non_locals_plus(allowed_globals, ["plot_job"]),
         )
         if cache_calc:
             j.depends_on(cache_job.load)
@@ -2711,6 +2761,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob, _InputHashAwareJobMix
         always_capture_output: bool = True,
         remove_build_dir_on_error: bool = True,
         remove_unused: bool = True,
+        allowed_globals: List[str] = None,
     ):
         self.output_dir_prefix = Path(output_dir_prefix)
 
@@ -2723,7 +2774,9 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob, _InputHashAwareJobMix
         self.input_dir.mkdir(exist_ok=True)
         self.usage_dir.mkdir(exist_ok=True)
 
-        self.generating_function = self._validate_func_argument(generating_function)
+        self.generating_function = self._validate_func_argument(
+            generating_function, allowed_globals
+        )
         self.depend_on_function = depend_on_function
 
         self.files, self._lookup = self._validate_files_argument(

@@ -41,7 +41,7 @@ class TestCachedAttributeJob:
         job = ppg.CachedAttributeLoadingJob("out/mycalc", o, "a", calc)
         of = "out/A"
 
-        def do_write():
+        def do_write(of):
             write(of, o.a)
 
         ppg.FileGeneratingJob(of, do_write).depends_on(job)

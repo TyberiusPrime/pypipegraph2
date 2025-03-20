@@ -309,7 +309,9 @@ def _ignore_code_changes(job):
         log_job_trace(f"ignoring changes for {job.job_id}")
         util.global_pipegraph.job_dag.remove_edge(job.func_invariant.job_id, job.job_id)
         for k in job.func_invariant.outputs:
-            print(f"removing from {job.job_id} input: {k}, id: {util.global_pipegraph.job_inputs[job.job_id]}")
+            print(
+                f"removing from {job.job_id} input: {k}, id: {util.global_pipegraph.job_inputs[job.job_id]}"
+            )
             util.global_pipegraph.job_inputs[job.job_id].remove(k)
 
         if hasattr(job.func_invariant, "usage_counter"):
@@ -322,7 +324,6 @@ def _ignore_code_changes(job):
             del util.global_pipegraph.jobs[job.func_invariant.job_id]
             for k in job.func_invariant.outputs:
                 del util.global_pipegraph.outputs_to_job_ids[k]
-
 
         del job.func_invariant
     if hasattr(job, "lfg"):
@@ -456,7 +457,12 @@ class FileGeneratingJob(PPG1AdaptorBase, ppg2.FileGeneratingJob):
 
     def __init__(self, output_filename, function, rename_broken=False, empty_ok=False):
         func = _wrap_func_if_no_output_file_params(function)
-        super().__init__(output_filename, func, empty_ok=empty_ok)
+        super().__init__(
+            output_filename,
+            func,
+            empty_ok=empty_ok,
+            allowed_globals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
+        )
 
 
 class MultiFileGeneratingJob(PPG1AdaptorBase, ppg2.MultiFileGeneratingJob):
@@ -495,7 +501,8 @@ def CachedAttributeLoadingJob(
 ):
     try:
         job = ppg2.CachedAttributeLoadingJob(
-            cache_filename, target_object, target_attribute, calculating_function
+            cache_filename, target_object, target_attribute, calculating_function,
+            allowed_globals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
         )
     except ppg2.JobRedefinitionError as e:
         raise ppg1.JobContractError(str(e))
@@ -505,7 +512,8 @@ def CachedAttributeLoadingJob(
 
 def CachedDataLoadingJob(cache_filename, calculating_function, loading_function):
     job = ppg2.CachedDataLoadingJob(
-        cache_filename, calculating_function, loading_function
+        cache_filename, calculating_function, loading_function,
+        allowed_globals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
     )
     return wrap_old_style_lfg_cached_job(job)
 
