@@ -788,14 +788,14 @@ class TestPypipegraph2:
         # the graph would never return.
         o = []
 
-        def load(x):
+        def load(x, o=o):
             o.append(x)
 
         load_job, cache_job = ppg.CachedDataLoadingJob(
             "b", lambda: "52", load, depend_on_function=False
         )
         a = ppg.FileGeneratingJob(
-            "A", lambda of: of.write_text("a" + o[0]), allowed_globals=["o"]
+            "A", lambda of, o=o: of.write_text("a" + o[0]), allowed_globals=["o"]
         )
         a.depends_on(load_job)
         Path("b").write_text("b")
@@ -1039,7 +1039,7 @@ class TestPypipegraph2:
 
     def test_data_loading_job_returning_none(self):
         self.store = []  # use attribute to avoid closure binding
-        jobA = ppg.DataLoadingJob("A", lambda: self.store.append("A"))
+        jobA = ppg.DataLoadingJob("A", lambda self=self: self.store.append("A"))
         jobB = ppg.FileGeneratingJob(
             "B",
             lambda of: counter("b") and of.write_text(self.store[0]),
@@ -1054,11 +1054,12 @@ class TestPypipegraph2:
         ppg.new(run_mode=ppg.RunMode.NOTEBOOK)
         self.store = []  # use attribute to avoid closure binding
         try:
-            jobA = ppg.DataLoadingJob("A", lambda: self.store.append("A") or 5)
+            jobA = ppg.DataLoadingJob(
+                "A", lambda self=self: self.store.append("A") or 5
+            )
             jobB = ppg.FileGeneratingJob(
                 "B",
-                lambda of: counter("b") and of.write_text(self.store[0]),
-                allowed_globals=["self"],
+                lambda of, self=self: counter("b") and of.write_text(self.store[0]),
             )
             jobB.depends_on(jobA)
             assert len(self.store) == 0
@@ -1081,7 +1082,9 @@ class TestPypipegraph2:
             assert Path("b").read_text() == "2"
             assert Path("B").read_text() == "A"
             self.store.clear()
-            jobA = ppg.DataLoadingJob("A", lambda: self.store.append("B") or 5)
+            jobA = ppg.DataLoadingJob(
+                "A", lambda: self.store.append("B") or 5, allowed_globals=["self"]
+            )
             ppg.util.log_error("final run")
             ppg.run()
             assert len(self.store) == 1
@@ -1140,7 +1143,9 @@ class TestPypipegraph2:
 
         a = TestRecv()
         jobB = ppg.FileGeneratingJob(
-            "B", lambda of: counter("b") and of.write_text(a.store["a_"]), allowed_globals = ['a']
+            "B",
+            lambda of: counter("b") and of.write_text(a.store["a_"]),
+            allowed_globals=["a"],
         )
         jobB.depends_on(a.job)
         ppg.run()
@@ -1174,8 +1179,7 @@ class TestPypipegraph2:
 
         a = TestRecv()
         jobB = ppg.FileGeneratingJob(
-            "B", lambda of: counter("b") and of.write_text(a.a_),
-            allowed_globals = ['a']
+            "B", lambda of: counter("b") and of.write_text(a.a_), allowed_globals=["a"]
         )
         jobB.depends_on(a.job[0])
         assert not Path("A").exists()
@@ -1215,7 +1219,9 @@ class TestPypipegraph2:
 
         a = TestRecv()
         jobB = ppg.FileGeneratingJob(
-            "B", lambda of: counter("b") and of.write_text(a.store["a_"]), allowed_globals = ['a']
+            "B",
+            lambda of: counter("b") and of.write_text(a.store["a_"]),
+            allowed_globals=["a"],
         )
         jobB.depends_on(a.job[0])
         assert not Path("A").exists()
@@ -1424,7 +1430,7 @@ class TestPypipegraph2:
         barrier = Barrier(3, timeout=1)
 
         def inner(of):
-            def inner2():
+            def inner2(of=of, barrier=barrier):
                 c = barrier.wait()
                 write(of, str(c))
                 return ppg.UseInputHashesForOutput()
@@ -1541,7 +1547,7 @@ class TestPypipegraph2:
     def test_massive_exception(self):
         should_len = 1024 * 1024
 
-        def inner(_, should_len = should_len):
+        def inner(_, should_len=should_len):
             raise ValueError("x " * (should_len // 2))
 
         ppg.FileGeneratingJob("A", inner)
@@ -1603,7 +1609,9 @@ class TestPypipegraph2:
             files["b"].write_text("A")
 
         a = ppg.MultiFileGeneratingJob({"a": "A", "b": "B"}, ab)
-        b = ppg.FileGeneratingJob("c", lambda of, a=a: of.write_text(a["a"].read_text()))
+        b = ppg.FileGeneratingJob(
+            "c", lambda of, a=a: of.write_text(a["a"].read_text())
+        )
         b.depends_on(a["a"])
         ppg.run()
         with pytest.raises(ValueError):
@@ -2024,7 +2032,7 @@ class TestPypipegraph2:
             )
             d.depends_on(a)
 
-        c = ppg.JobGeneratingJob("c", c)
+        c = ppg.JobGeneratingJob("c", c, allowed_globals=['a'])
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
         assert read("a") == "1"
@@ -2102,3 +2110,13 @@ class TestPypipegraph2:
     def test_job_name_must_not_contain_three_colons(self):
         with pytest.raises(ValueError):
             ppg.FileGeneratingJob("A:::b", lambda of: of.write_text("A"))
+
+    def test_allowed_globals_must_be_list(self):
+        a = 5
+
+        def shu():
+            return a
+
+        with pytest.raises(ValueError) as raised:
+            ppg.jobs._verify_function_outside_variables(shu, "a")
+        assert 'must be a List' in str(raised.value)

@@ -147,10 +147,10 @@ class TestJobGeneratingJob:
                 write(of, shu)
 
             dl = ppg.DataLoadingJob("dl", load)
-            jobB = ppg.FileGeneratingJob("out/A", do_write)
+            jobB = ppg.FileGeneratingJob("out/A", do_write, allowed_globals=['shu'])
             jobB.depends_on(dl)
 
-        ppg.JobGeneratingJob("gen", gen)
+        ppg.JobGeneratingJob("gen", gen, allowed_globals=["shu"])
         ppg.run()
         assert read("out/A") == "123"
 

@@ -151,6 +151,8 @@ class JobList(list):
 
 
 def _verify_function_outside_variables(func, allowed_globals, job_id="Unknown job"):
+    if not callable(func):
+        raise TypeError("Function was not callable")
     if isinstance(allowed_globals, str):
         raise ValueError("allowed_globals must be a List[str]")
     if (
@@ -162,11 +164,10 @@ def _verify_function_outside_variables(func, allowed_globals, job_id="Unknown jo
             def allowed(obj):
                 if inspect.ismodule(obj) or inspect.isfunction(obj):
                     return True
+                elif isinstance(obj, Job):
+                    return True
                 elif inspect.isclass(obj):
-                    cls_name = obj.__name__
-                    module_name = obj.__module__
-                    if (module_name == "pathlib") and (cls_name == "Path"):
-                        return True
+                    return True
                 if (
                     type(obj).__module__ == "dppd.base"
                     and type(obj).__name__ == "ReplacableProxy"
@@ -184,6 +185,7 @@ def _verify_function_outside_variables(func, allowed_globals, job_id="Unknown jo
             raise ValueError(
                 f"Function for job {job_id} uses undeclared outer-scope variables. Either add them as default parameters, or set allow_globals=['...'] when defining the job.\n"
                 + str(e)
+                + f"\nAllowed variables was: {allowed_globals!r}"
             )
 
 
@@ -2199,6 +2201,7 @@ class AttributeLoadingJob(
         data_function,
         depend_on_function=True,
         resources: Resources = Resources.SingleCore,
+        allowed_globals: List[str] = None,
     ):
         from . import global_pipegraph
 
@@ -2459,8 +2462,15 @@ class JobGeneratingJob(Job):
     def __new__(cls, job_id, *args, **kwargs):
         return _dedup_job(cls, job_id)
 
-    def __init__(self, job_id, callback, depend_on_function=True):
+    def __init__(
+        self,
+        job_id,
+        callback,
+        depend_on_function=True,
+        allowed_globals: List[str] = None,
+    ):
         self.depend_on_function = depend_on_function
+        _verify_function_outside_variables(callback, allowed_globals, job_id)
         self.callback = callback
         self.last_run_id = None
         super().__init__([job_id])

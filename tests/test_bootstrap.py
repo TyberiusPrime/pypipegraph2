@@ -159,7 +159,7 @@ class TestBootstrap:
     def test_data_loading_without_func_invariant(self):
         out = []
         a = ppg.DataLoadingJob(
-            "a", lambda: counter("A") and out.append("a") or ppg.UseInputHashesForOutput(), depend_on_function=False
+            "a", lambda out=out: counter("A") and out.append("a") or ppg.UseInputHashesForOutput(), depend_on_function=False
         )
         b = ppg.FileGeneratingJob(
             "b",
@@ -185,7 +185,7 @@ class TestBootstrap:
     def test_data_loading(self):
         out = []
         a = ppg.DataLoadingJob(
-            "a", lambda: counter("A") and out.append("a") or ppg.UseInputHashesForOutput(), depend_on_function=False
+            "a", lambda out=out: counter("A") and out.append("a") or ppg.UseInputHashesForOutput(), depend_on_function=False
         )
         b = ppg.FileGeneratingJob(
             "b",
@@ -211,16 +211,16 @@ class TestBootstrap:
     def test_two_data_loading_chain(self):
         out = []
         a = ppg.DataLoadingJob(
-            "a", lambda: counter("A") and out.append("a") or ppg.UseInputHashesForOutput(), depend_on_function=False
+            "a", lambda out=out: counter("A") and out.append("a") or ppg.UseInputHashesForOutput(), depend_on_function=False
         )
         b = ppg.DataLoadingJob(
             "b",
-            lambda: counter("B") and out.append(out[0] + "b") or ppg.UseInputHashesForOutput(),
+            lambda out=out: counter("B") and out.append(out[0] + "b") or ppg.UseInputHashesForOutput(),
             depend_on_function=False,
         )
         c = ppg.FileGeneratingJob(
             "c",
-            lambda of: counter("C") and of.write_text(out[1] + "c"),
+            lambda of, out=out: counter("C") and of.write_text(out[1] + "c"),
             depend_on_function=False,
         )
         c.depends_on(b)

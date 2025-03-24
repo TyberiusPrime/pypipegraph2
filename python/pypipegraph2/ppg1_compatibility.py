@@ -150,7 +150,12 @@ def unreplace_ppg1():
 
 def wrap_job(cls):
     """Adapt for ppg1 api idiosyncracies"""
-    return lambda *args, **kwargs: PPG1Adaptor(cls(*args, **kwargs))
+
+    def inner(*args, **kwargs):
+        kwargs["allowed_globals"] = [ppg2.enums.PPG1Compatibility_AllowAllVariables]
+        return PPG1Adaptor(cls(*args, **kwargs))
+
+    return inner
 
 
 class ResourceCoordinators:
@@ -468,7 +473,12 @@ class FileGeneratingJob(PPG1AdaptorBase, ppg2.FileGeneratingJob):
 class MultiFileGeneratingJob(PPG1AdaptorBase, ppg2.MultiFileGeneratingJob):
     def __init__(self, output_filenames, function, rename_broken=False, empty_ok=False):
         func = _wrap_func_if_no_output_file_params(function, accept_all_defaults=True)
-        res = super().__init__(output_filenames, func, empty_ok=empty_ok)
+        res = super().__init__(
+            output_filenames,
+            func,
+            empty_ok=empty_ok,
+            allowed_globals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
+        )
 
 
 class TempFileGeneratingJob(PPG1AdaptorBase, ppg2.TempFileGeneratingJob):
@@ -501,7 +511,10 @@ def CachedAttributeLoadingJob(
 ):
     try:
         job = ppg2.CachedAttributeLoadingJob(
-            cache_filename, target_object, target_attribute, calculating_function,
+            cache_filename,
+            target_object,
+            target_attribute,
+            calculating_function,
             allowed_globals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
         )
     except ppg2.JobRedefinitionError as e:
@@ -512,8 +525,11 @@ def CachedAttributeLoadingJob(
 
 def CachedDataLoadingJob(cache_filename, calculating_function, loading_function):
     job = ppg2.CachedDataLoadingJob(
-        cache_filename, calculating_function, loading_function,
-        allowed_globals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
+        cache_filename,
+        calculating_function,
+        loading_function,
+        allowed_globals_calc=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
+        allowed_globals_load=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
     )
     return wrap_old_style_lfg_cached_job(job)
 

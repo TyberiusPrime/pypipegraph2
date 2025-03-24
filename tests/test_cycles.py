@@ -29,7 +29,7 @@ class TestCycles:
         # this raises
         jobs = []
         for x in range(0, max_depth - 1):
-            j = ppg.FileGeneratingJob(str(x), lambda of: write(str(x), str(x)))
+            j = ppg.FileGeneratingJob(str(x), lambda _, x=x: write(str(x), str(x)))
             if jobs:
                 j.depends_on(jobs[-1])
             jobs.append(j)
@@ -41,7 +41,7 @@ class TestCycles:
         ppg.new()
         jobs = []
         for x in range(0, max_depth + 100):
-            j = ppg.FileGeneratingJob(str(x), lambda of: write(str(x), str(x)))
+            j = ppg.FileGeneratingJob(str(x), lambda _, x=x: write(str(x), str(x)))
             if jobs:
                 j.depends_on(jobs[-1])
             jobs.append(j)

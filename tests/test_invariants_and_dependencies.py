@@ -41,7 +41,7 @@ class TestInvariant:
     def test_filegen_jobs_detect_code_change(self):
         of = "out/a"
 
-        def do_write(of):
+        def do_write(of, self=self):
             append(of, "shu" * self.sentinel_count())
 
         ppg.FileGeneratingJob(of, do_write)
@@ -63,7 +63,7 @@ class TestInvariant:
     def test_filegen_jobs_ignores_code_change(self):
         of = "out/a"
 
-        def do_write(of):
+        def do_write(of, self=self):
             counter("A")
             append(of, "shu" * self.sentinel_count())
 
@@ -98,7 +98,7 @@ class TestInvariant:
     def test_parameter_dependency(self):
         of = "out/a"
 
-        def do_write(of):
+        def do_write(of, self=self):
             append(of, "shu" * self.sentinel_count())
 
         job = ppg.FileGeneratingJob(of, do_write)
@@ -121,28 +121,30 @@ class TestInvariant:
 
     def test_parameter_invariant_adds_hidden_job_id_prefix(self):
         param = "A"
-        jobA = ppg.FileGeneratingJob("out/A", lambda of: write("out/A", param))
+        jobA = ppg.FileGeneratingJob(
+            "out/A", lambda _: write("out/A", param), allowed_globals=["param"]
+        )
         jobB = ppg.ParameterInvariant("out/A", param)
         jobA.depends_on(jobB)
         ppg.run()
         assert read("out/A") == param
 
     def test_depends_on_func(self):
-        a = ppg.FileGeneratingJob("out/A", lambda of: write("a"))
+        a = ppg.FileGeneratingJob("out/A", lambda _: write("a"))
         b, a_again = a.depends_on_func("a123", lambda: 123)
         assert b.job_id.startswith("FI" + a.job_id + "_")
         assert ppg.global_pipegraph.has_edge(b, a)
         assert a_again is a
 
     def test_depends_on_file(self):
-        a = ppg.FileGeneratingJob("out/A", lambda of: write("a"))
+        a = ppg.FileGeneratingJob("out/A", lambda _: write("a"))
         write("shu", "hello")
         b = a.depends_on_file("shu")
         assert b.self is a
         assert ppg.global_pipegraph.has_edge(b.invariant, a)
 
     def test_depends_on_params(self):
-        a = ppg.FileGeneratingJob("out/A", lambda of: write("a"))
+        a = ppg.FileGeneratingJob("out/A", lambda _: write("a"))
         b = a.depends_on_params(23)
         assert b.invariant.job_id == "PIout/A"
         # assert b.invariant.parameters == 23
@@ -157,7 +159,7 @@ class TestInvariant:
     def test_filetime_dependency(self):
         of = "out/a"
 
-        def do_write(of):
+        def do_write(of, self=self):
             append(of, "shu" * self.sentinel_count())
 
         ftfn = "out/ftdep"
@@ -207,7 +209,7 @@ class TestInvariant:
     def test_filechecksum_dependency(self):
         of = "out/a"
 
-        def do_write(of):
+        def do_write(of, self=self):
             append(of, "shu" * self.sentinel_count())
 
         ftfn = "out/ftdep"
@@ -257,7 +259,7 @@ class TestInvariant:
     def test_input_file_was_renamed(self):
         of = "out/B"
 
-        def do_write(of):
+        def do_write(of, self=self):
             append(of, "shu" * self.sentinel_count())
 
         ftfn = "out/ftdep"
@@ -296,7 +298,7 @@ class TestInvariant:
     def test_file_invariant_with_md5sum(self):
         of = "out/a"
 
-        def do_write(of):
+        def do_write(of, self=self):
             append(of, "shu" * self.sentinel_count())
 
         ftfn = "out/ftdep"
@@ -557,7 +559,7 @@ class TestInvariant:
 
         def out(of):
             counter("counter")
-            of.write_text(Path("a").read_text() + Path("b").read_text()),
+            (of.write_text(Path("a").read_text() + Path("b").read_text()),)
 
         job = ppg.FileGeneratingJob("c", out, depend_on_function=False)
         job.depends_on_file("a")
@@ -1037,13 +1039,13 @@ class TestDependency:
         jobA = ppg.AttributeLoadingJob("a", o, "myattr", load_a)
         ofB = "out/B"
 
-        def do_write_b(ofB):
+        def do_write_b(ofB, o=o):
             write(ofB, o.myattr)
 
         jobB = ppg.FileGeneratingJob(ofB, do_write_b).depends_on(jobA)
         ofC = "out/C"
 
-        def do_write_C(ofC):
+        def do_write_C(ofC, o=o):
             write(ofC, o.myattr)
 
         ppg.FileGeneratingJob(ofC, do_write_C).depends_on(jobA)
@@ -1053,7 +1055,9 @@ class TestDependency:
         def do_write_d(ofD):
             write(ofD, read(ofC) + read(ofB))
 
-        ppg.FileGeneratingJob(ofD, do_write_d).depends_on([jobA, jobB])
+        ppg.FileGeneratingJob(
+            ofD, do_write_d, allowed_globals=["ofC", "ofB"]
+        ).depends_on([jobA, jobB])
 
     def test_failed_job_kills_those_after(self):
         ofA = "out/A"
@@ -1065,7 +1069,7 @@ class TestDependency:
 
         ofB = "out/B"
 
-        def write_b(ofB):
+        def write_b(_):
             raise ValueError("shu")
 
         jobB = ppg.FileGeneratingJob(ofB, write_b)
@@ -1138,7 +1142,8 @@ class TestDependency:
         def get_job(name):
             fn = "out/" + name
 
-            def do_write(of):
+            def do_write(of, name=name):
+                fn = str(of)
                 if os.path.exists(fn + ".sentinel"):
                     d = read(fn + ".sentinel")
                 else:
