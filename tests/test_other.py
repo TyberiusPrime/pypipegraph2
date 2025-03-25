@@ -219,7 +219,7 @@ class TestPathLib:
 
         dd = Dummy()
 
-        def mf(ofs):
+        def mf(ofs, dd=dd):
             ofs[0].write_text("cc" + read("g"))
             ofs[1].write_text("dd" + read("h") + dd.attr)
             ofs[2].write_text("ee" + read("i") + read("j") + read("k"))
@@ -439,16 +439,20 @@ class TestModifyDag:
 
         parts = []
         a1 = ppg.FileGeneratingJob(
-            "a1", lambda of: of.write_text(str(parts)), depend_on_function=False
+            "a1",
+            lambda of, parts=parts: of.write_text(str(parts)),
+            depend_on_function=False,
         )
         a2 = ppg.FileGeneratingJob(
             "a2",
-            lambda of: of.write_text(Path("a1").read_text() + str(parts)),
+            lambda of, parts=parts: of.write_text(Path("a1").read_text() + str(parts)),
             depend_on_function=False,
         )
         a2.depends_on(a1)
         b = ppg.DataLoadingJob(
-            "b", lambda *args: parts.append(1) or ppg.UseInputHashesForOutput(), depend_on_function=False
+            "b",
+            lambda *args, parts=parts: parts.append(1) or ppg.UseInputHashesForOutput(),
+            depend_on_function=False,
         )
         a1.depends_on(b)
         a2.depends_on(b)
@@ -466,12 +470,15 @@ class TestModifyDag:
         )
         a2 = ppg.FileGeneratingJob(
             "a2",
-            lambda of: of.write_text(Path("a2").read_text() + str(parts)),
+            lambda of, parts=parts: of.write_text(Path("a2").read_text() + str(parts)),
             depend_on_function=False,
         )
         a2.depends_on(a1)
         b = ppg.DataLoadingJob(
-            "b", lambda: _no_such_thing, depend_on_function=False  # noqa: F821
+            "b",
+            lambda: _no_such_thing,
+            depend_on_function=False,  # noqa: F821
+            allowed_globals=["_no_such_thing"],
         )
         a1.depends_on(b)
         a2.depends_on(b)
@@ -549,10 +556,10 @@ def test_broken_case_from_delayeddataframe(ppg2_per_test):
         lambda value: store("anno_sequence", value),
     )
     event_seq = ppg.DataLoadingJob(
-        "event_seq", lambda: store("event_seq", out["event"] + out["anno_sequence"])
+        "event_seq", lambda out=out: store("event_seq", out["event"] + out["anno_sequence"])
     )
     event2_seq = ppg.DataLoadingJob(
-        "event2_seq", lambda: store("event2_seq", out["event2"] + out["event_seq"])
+        "event2_seq", lambda out=out: store("event2_seq", out["event2"] + out["event_seq"])
     )
     force_load = ppg.JobGeneratingJob("force_load", lambda: None)
 
@@ -706,7 +713,7 @@ class TestHashersWithPremadeSha256:
         a.write_text("hello")
         asha256.write_text("a" * 64)
         h = ppg.hashers.hash_file(a)
-        assert h['hash'] == 'a' * 64
+        assert h["hash"] == "a" * 64
         mtime = a.stat().st_mtime
         # now push sha256 into the past
         os.utime(asha256, (mtime - 100, mtime - 100))
@@ -714,12 +721,12 @@ class TestHashersWithPremadeSha256:
             ppg.hashers.hash_file(a)
         asha256.unlink()
         h = ppg.hashers.hash_file(a)
-        assert h['hash'] != 'abc'
+        assert h["hash"] != "abc"
 
         # or have a non hash in there.
         asha256.write_text("a")
         with pytest.raises(ppg.JobContractError):
             ppg.hashers.hash_file(a)
-        asha256.write_text("a" * 63 + 'X')
+        asha256.write_text("a" * 63 + "X")
         with pytest.raises(ppg.JobContractError):
             ppg.hashers.hash_file(a)

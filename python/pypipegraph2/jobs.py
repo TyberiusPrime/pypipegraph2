@@ -173,7 +173,6 @@ def _verify_function_outside_variables(func, allowed_globals, job_id="Unknown jo
                     and type(obj).__name__ == "ReplacableProxy"
                 ):
                     return True
-                print(type(obj).__module__, type(obj).__name__)
                 return False
 
             localscope.localscope(func, predicate=allowed, allowed=allowed_globals)
@@ -182,7 +181,7 @@ def _verify_function_outside_variables(func, allowed_globals, job_id="Unknown jo
                     func.wrapped_function, predicate=allowed, allowed=allowed_globals
                 )
         except localscope.LocalscopeException as e:
-            raise ValueError(
+            raise exceptions.FunctionUsesUndeclaredGlobalsError(
                 f"Function for job {job_id} uses undeclared outer-scope variables. Either add them as default parameters, or set allow_globals=['...'] when defining the job.\n"
                 + str(e)
                 + f"\nAllowed variables was: {allowed_globals!r}"
@@ -705,8 +704,6 @@ class MultiFileGeneratingJob(Job):
     @staticmethod
     def _validate_files_argument(files, allow_absolute=False):
         from . import global_pipegraph
-
-        # print(files)
 
         if not hasattr(files, "__iter__"):
             raise TypeError("files was not iterable")
@@ -2785,7 +2782,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob, _InputHashAwareJobMix
         self.usage_dir.mkdir(exist_ok=True)
 
         self.generating_function = self._validate_func_argument(
-            generating_function, allowed_globals
+            generating_function, allowed_globals, ":::".join([str(x) for x in files])
         )
         self.depend_on_function = depend_on_function
 

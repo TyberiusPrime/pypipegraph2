@@ -27,6 +27,9 @@ class JobContractError(PPGException):
 
     pass
 
+class FunctionUsesUndeclaredGlobalsError(PPGException):
+    pass
+
 
 class JobDied(PPGException):
     pass

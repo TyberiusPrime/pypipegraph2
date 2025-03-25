@@ -100,7 +100,7 @@ class TestJobs:
     def test_dependency_callback_plus_job(self):
         data = []
 
-        def load_a():
+        def load_a(data=data):
             data.append("a")
             return ppg.UseInputHashesForOutput()
 
@@ -881,7 +881,7 @@ class TestDataLoadingJob:
                 of, "\n".join(test_modifies_shared_global)
             )  # this might actually be a problem when defining this?
 
-        dlJo = ppg.DataLoadingJob("myjob", load)
+        dlJo = ppg.DataLoadingJob("myjob", load, allowed_globals=["test_modifies_shared_global"])
         writejob = ppg.FileGeneratingJob(
             of, do_write, allowed_globals=["test_modifies_shared_global"]
         )
@@ -923,7 +923,7 @@ class TestDataLoadingJob:
     def test_does_not_get_run_without_dep_job(self):
         of = "out/shu"
 
-        def load():
+        def load(of=of):
             counter(of)
 
         ppg.DataLoadingJob("myjob", load)
@@ -939,14 +939,14 @@ class TestDataLoadingJob:
     def test_does_not_get_run_in_chain_without_final_dep(self):
         of = "out/shu"
 
-        def load():
+        def load(of=of):
             counter(of)
             return ppg.UseInputHashesForOutput()
 
         job = ppg.DataLoadingJob("myjob", load)
         ofB = "out/sha"
 
-        def loadB():
+        def loadB(ofB=ofB):
             counter(ofB)
 
         ppg.DataLoadingJob("myjobB", loadB).depends_on(job)
@@ -960,7 +960,7 @@ class TestDataLoadingJob:
     def test_does_get_run_in_chain_all(self):
         of = "out/shu"
 
-        def load():
+        def load(of=of):
             write(
                 of, "shu"
             )  # not the fine english way, but we need a sideeffect that's checkable
@@ -969,7 +969,7 @@ class TestDataLoadingJob:
         job = ppg.DataLoadingJob("myjob", load)
         ofB = "out/sha"
 
-        def loadB():
+        def loadB(ofB=ofB):
             write(ofB, "sha")
             return ppg.UseInputHashesForOutput()
 
@@ -994,7 +994,7 @@ class TestDataLoadingJob:
         jobA = ppg.FileGeneratingJob(of, do_write)
         o = Dummy()
 
-        def do_load():
+        def do_load(o=o, of=of):
             o.a = read(of)
             return ppg.UseInputHashesForOutput()
 
@@ -1012,7 +1012,7 @@ class TestDataLoadingJob:
     def test_does_get_run_depending_on_jobgenjob(self):
         of = "out/shu"
 
-        def load():
+        def load(of=of):
             write(
                 of, "shu"
             )  # not the fine english way, but we need a sideeffect that's checkable
@@ -1023,7 +1023,7 @@ class TestDataLoadingJob:
         def gen():
             ofB = "out/b"
 
-            def do_write(of):
+            def do_write(of, ofB=ofB):
                 write(ofB, "hello")
 
             ppg.FileGeneratingJob(ofB, do_write)
@@ -1052,8 +1052,8 @@ class TestDataLoadingJob:
             o.a = "shu"
             raise ValueError()
 
-        job_fg = ppg.FileGeneratingJob(of, write)
-        job_dl = ppg.DataLoadingJob("doload", load)
+        job_fg = ppg.FileGeneratingJob(of, write, allowed_globals=["o"])
+        job_dl = ppg.DataLoadingJob("doload", load, allowed_globals=["o"])
         job_fg.depends_on(job_dl)
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
@@ -1076,7 +1076,7 @@ class TestDataLoadingJob:
         # it should not be loaded again
         o = Dummy()
 
-        def a():
+        def a(o=o):
             o.a = "A"
             append("out/A", "A")
             return ppg.UseInputHashesForOutput()
@@ -1084,7 +1084,7 @@ class TestDataLoadingJob:
         def b(of):
             append("out/B", "B")
 
-        def c():
+        def c(o=o):
             o.c = "C"
             append("out/C", "C")
             return ppg.UseInputHashesForOutput()
@@ -1217,12 +1217,14 @@ class TestDataLoadingJob:
     def test_dict_return(self):
         collector = []
 
-        def gen():
+        def gen(collector=collector):
             collector.append("a")
             return {"hello": 123, "world": "world"}
 
         a = ppg.DataLoadingJob("gen", gen)
-        b = ppg.FileGeneratingJob("b", lambda of: of.write_text(collector[0]))
+        b = ppg.FileGeneratingJob(
+            "b", lambda of, collector=collector: of.write_text(collector[0])
+        )
         b.depends_on(a)
         ppg.run()
         assert read("b") == "a"
@@ -1270,7 +1272,7 @@ class TestAttributeJob:
         job = ppg.AttributeLoadingJob("load_dummy_shu", o, "a", load)
         of = "out/a"
 
-        def do_write(of):
+        def do_write(of, o=o):
             write(of, o.a)
 
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
@@ -1290,7 +1292,7 @@ class TestAttributeJob:
         job2 = ppg.AttributeLoadingJob("load_dummy_shu2", o, "b", load2)
         of = "out/a"
 
-        def do_write(of):
+        def do_write(of, o=o):
             write(of, o.b)
 
         ppg.FileGeneratingJob(of, do_write).depends_on(job2)
@@ -1307,7 +1309,7 @@ class TestAttributeJob:
         job = ppg.AttributeLoadingJob("load_dummy_shu", o, "a", load)
         of = "out/a"
 
-        def do_write(of):
+        def do_write(of, o=o):
             write(of, o.a)
 
         ppg.FileGeneratingJob(of, do_write).depends_on(job)
@@ -1354,7 +1356,9 @@ class TestAttributeJob:
         def do_write(of):
             write(of, o.a)
 
-        fgjob = ppg.FileGeneratingJob(of, do_write).depends_on(job)
+        fgjob = ppg.FileGeneratingJob(of, do_write, allowed_globals=["o"]).depends_on(
+            job
+        )
         of2 = "out/B"
 
         def later_write(of2):
@@ -1484,7 +1488,9 @@ class TestAttributeJob:
 
         o = Dummy()
         jobA = ppg.AttributeLoadingJob("out/A", o, "a", a, depend_on_function=False)
-        jobB = ppg.FileGeneratingJob("out/B", lambda of: write("out/B", o.a))
+        jobB = ppg.FileGeneratingJob(
+            "out/B", lambda of: write("out/B", o.a), allowed_globals=["o"]
+        )
         jobB.depends_on(jobA)
         ppg.run()
         assert read("out/Aa") == "A"
@@ -1496,7 +1502,9 @@ class TestAttributeJob:
             return "5"
 
         jobA = ppg.AttributeLoadingJob("out/A", o, "a", b, depend_on_function=False)
-        jobB = ppg.FileGeneratingJob("out/B", lambda of: write("out/B", o.a))
+        jobB = ppg.FileGeneratingJob(
+            "out/B", lambda of: write("out/B", o.a), allowed_globals=["o"]
+        )
         jobB.depends_on(jobA)
         ppg.run()
         # not rerun
@@ -1558,14 +1566,14 @@ class TestTempFileGeneratingJob:
     def test_basic(self):
         temp_file = "out/temp"
 
-        def write_temp(of):
+        def write_temp(of, temp_file=temp_file):
             write(temp_file, "hello")
 
         temp_job = ppg.TempFileGeneratingJob(temp_file, write_temp)
         ofA = "out/A"
 
-        def write_A(of):
-            write(ofA, read(temp_file))
+        def write_A(of, temp_file=temp_file):
+            write(of, read(temp_file))
 
         fgjob = ppg.FileGeneratingJob(ofA, write_A)
         fgjob.depends_on(temp_job)
@@ -1579,7 +1587,12 @@ class TestTempFileGeneratingJob:
         count_file = "out/count"
         normal_count_file = "out/countA"
 
-        def write_count(of):
+        def write_count(
+            of,
+            normal_count_file=normal_count_file,
+            out_file=out_file,
+            temp_file=temp_file,
+        ):
             try:
                 count = read(out_file)
                 count = count[: count.find(":")]
@@ -1589,7 +1602,7 @@ class TestTempFileGeneratingJob:
             write(out_file, str(count) + ":" + read(temp_file))
             append(normal_count_file, "A")
 
-        def write_temp(of):
+        def write_temp(of, count_file=count_file, temp_file=temp_file):
             write(temp_file, "temp")
             append(count_file, "X")
 
@@ -1619,7 +1632,8 @@ class TestTempFileGeneratingJob:
         count_file = "out/count"
         normal_count_file = "out/countA"
 
-        def write_count(out_file):
+        def write_count(out_file, normal_count_file=normal_count_file, 
+                        temp_file=temp_file):
             try:
                 count = read(out_file)
                 count = count[: count.find(":")]
@@ -1629,7 +1643,7 @@ class TestTempFileGeneratingJob:
             write(out_file, str(count) + ":" + read(temp_file))
             append(normal_count_file, "A")
 
-        def write_temp(of):
+        def write_temp(of, count_file=count_file, temp_file=temp_file):
             write(temp_file, "temp")
             append(count_file, "X")
 
@@ -1676,7 +1690,7 @@ class TestTempFileGeneratingJob:
 
         ppg.new()
 
-        def write_A_ok(ofA):
+        def write_A_ok(ofA, temp_file=temp_file):
             write(ofA, read(temp_file))
 
         temp_job = ppg.TempFileGeneratingJob(temp_file, write_temp)
@@ -1690,15 +1704,15 @@ class TestTempFileGeneratingJob:
     def test_removes_tempfile_on_exception(self):
         temp_file = "out/temp"
 
-        def write_temp(of):
+        def write_temp(of, temp_file=temp_file):
             write(temp_file, "hello")
             raise ValueError("should")
 
         temp_job = ppg.TempFileGeneratingJob(temp_file, write_temp)
         ofA = "out/A"
 
-        def write_A(of):
-            write(ofA, read(temp_file))
+        def write_A(of, temp_file=temp_file):
+            write(of, read(temp_file))
 
         fgjob = ppg.FileGeneratingJob(ofA, write_A)
         fgjob.depends_on(temp_job)
@@ -1854,7 +1868,7 @@ class TestTempFileGeneratingJob:
         temp_file = "out/temp"
 
         def write_temp(of):
-            write(temp_file, "hello")
+            write(of, "hello")
 
         def write_a(of):
             write("A", "hello")
@@ -2027,15 +2041,15 @@ class TestMultiTempFileGeneratingJob:
     def test_basic(self):
         temp_files = ["out/temp", "out/temp2"]
 
-        def write_temp(of):
-            for temp_file in temp_files:
+        def write_temp(ofs):
+            for temp_file in ofs:
                 write(temp_file, "hello")
 
         temp_job = ppg.MultiTempFileGeneratingJob(temp_files, write_temp)
         ofA = "out/A"
 
-        def write_A(of):
-            write(ofA, read(temp_files[0]) + read(temp_files[1]))
+        def write_A(of, temp_files=temp_files):
+            write(of, read(temp_files[0]) + read(temp_files[1]))
 
         fgjob = ppg.FileGeneratingJob(ofA, write_A)
         fgjob.depends_on(temp_job)
@@ -2047,9 +2061,9 @@ class TestMultiTempFileGeneratingJob:
     def test_basic_dependes_were_done(self):
         temp_files = ["out/temp", "out/temp2"]
 
-        def write_temp(of):
+        def write_temp(ofs):
             write("temp_sentinel", "one")
-            for temp_file in temp_files:
+            for temp_file in ofs:
                 write(temp_file, "hello")
 
         temp_job = ppg.MultiTempFileGeneratingJob(
@@ -2057,8 +2071,8 @@ class TestMultiTempFileGeneratingJob:
         )
         ofA = "out/A"
 
-        def write_A(of):
-            write(ofA, read(temp_files[0]) + read(temp_files[1]))
+        def write_A(of, temp_files=temp_files):
+            write(of, read(temp_files[0]) + read(temp_files[1]))
 
         fgjob = ppg.FileGeneratingJob(ofA, write_A, depend_on_function=False)
         fgjob.depends_on(temp_job)

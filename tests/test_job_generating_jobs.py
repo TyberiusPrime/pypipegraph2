@@ -168,10 +168,10 @@ class TestJobGeneratingJob:
         o = Dummy()
         existing_dl = ppg.AttributeLoadingJob("a", o, "a", lambda: "Ashu")
 
-        def gen():
+        def gen(o=o):
             new_dl = ppg.AttributeLoadingJob("b", o, "b", lambda: "Bshu")
-            fg_a = ppg.FileGeneratingJob("out/C", lambda of: write("out/C", o.a))
-            fg_b = ppg.FileGeneratingJob("out/D", lambda of: write("out/D", o.b))
+            fg_a = ppg.FileGeneratingJob("out/C", lambda of: write("out/C", o.a), allowed_globals=['o'])
+            fg_b = ppg.FileGeneratingJob("out/D", lambda of, o=o: write("out/D", o.b))
             fg_a.depends_on(existing_dl)
             fg_b.depends_on(new_dl)
 

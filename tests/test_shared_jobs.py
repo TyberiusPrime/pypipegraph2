@@ -464,7 +464,7 @@ class TestSharedJob:
 
         symlink = []
 
-        def doit(output_files, prefix):
+        def doit(output_files, prefix, symlink=symlink):
             r = counter("doit")
             output_files[0].write_text(str(time.time()))
             time.sleep(0.1)
