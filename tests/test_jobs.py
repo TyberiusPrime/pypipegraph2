@@ -1361,7 +1361,7 @@ class TestAttributeJob:
         )
         of2 = "out/B"
 
-        def later_write(of2):
+        def later_write(of2, o=o):
             raise ValueError()
             write(of2, o.a)
 
