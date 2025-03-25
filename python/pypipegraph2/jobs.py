@@ -16,7 +16,7 @@ from collections import namedtuple
 from threading import Lock, Event, local
 from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
-import localscope
+from . import localscope
 
 from . import hashers, exceptions, ppg_traceback
 from .enums import Resources, RunMode, PPG1Compatibility_AllowAllVariables

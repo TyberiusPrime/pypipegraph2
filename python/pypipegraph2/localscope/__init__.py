@@ -6,7 +6,7 @@ import logging
 import sys
 import textwrap
 import types
-from typing import Any, Callable, Dict, Iterable, Optional, Set, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Set, Union, List
 
 
 LOGGER = logging.getLogger(__name__)
@@ -41,15 +41,20 @@ def localscope(
 
         >>> from localscope import localscope
         >>>
-        >>> a = 'hello world'
+        >>> a = 'hello'
+        >>> b = 'world'
         >>>
         >>> @localscope
         ... def print_a():
         ...     print(a)
+        ...     print(b)
         Traceback (most recent call last):
         ...
         localscope.LocalscopeException: `a` is not a permitted global (file "...",
             line 1, in print_a)
+        ... traceback ...
+        `b' is not a permitted global (file "...", line 2, in print_a)
+        ... traceback ...
 
         The scope of a function can be extended by providing an iterable of allowed
         variable names or a string of space-separated allowed variable names.
@@ -88,6 +93,10 @@ def localscope(
         >>>
         >>> create_instance()
         <MyClass object at 0x...>
+
+
+        The exception raised by localscope contains the names of the variables that
+        were non-local and not-allowed in `.vars`
 
     Notes:
 
@@ -128,58 +137,67 @@ def localscope(
     )
 
 
+_LocalscopeExceptionEntry = tuple[
+    str, str, types.CodeType, dis.Instruction, Optional[int]
+]
+
+
 class LocalscopeException(RuntimeError):
     """
-    Raised when a callable tries to access a non-local variable.
+    Raised when a callable tries to access non-local variables.
     """
 
     def __init__(
         self,
-        message: str,
-        code: types.CodeType,
-        instruction: dis.Instruction,
-        lineno: Optional[int] = None,
+        entries: List[_LocalscopeExceptionEntry],
     ) -> None:
-        source = None
-        # TODO: Conditional coverage.
-        if PY_LT_3_13:  # pragma: no cover
-            lineno = (
-                instruction.starts_line  # type: ignore[attr-defined]
-                if lineno is None
-                else lineno
-            )
-        else:  # pragma: no cover
-            lineno = (
-                instruction.line_number  # type: ignore[attr-defined]
-                if lineno is None
-                else lineno
-            )
-
-        if lineno is not None:
-            # Add the source code if we can find it.
-            try:
-                # Get the source, dedent, re-indent, and add a marker where the
-                # error occurred.
-                lines, start = inspect.getsourcelines(code)
-                lines = textwrap.dedent("".join(lines)).split("\n")
-                text = "\n".join(
-                    f"{no:3}: {line}" for no, line in enumerate(lines, start=start)
+        messages = []
+        non_local_non_declared_vars = []
+        for message, variable_name, code, instruction, lineno in entries:
+            source = None
+            non_local_non_declared_vars.append(variable_name)
+            # TODO: Conditional coverage.
+            if PY_LT_3_13:  # pragma: no cover
+                lineno = (
+                    instruction.starts_line  # type: ignore[attr-defined]
+                    if lineno is None
+                    else lineno
                 )
-                lines = textwrap.indent(text, "    ").split("\n")
-                offset = lineno - start
-                lines[offset] = "--> " + lines[offset][4:]
+            else:  # pragma: no cover
+                lineno = (
+                    instruction.line_number  # type: ignore[attr-defined]
+                    if lineno is None
+                    else lineno
+                )
 
-                # Don't show all lines of the source.
-                lines = lines[max(0, offset - 2) : offset + 3]
-                source = "\n".join(lines)
-            except OSError:  # pragma: no cover
-                pass
-        message = (
-            f'{message} (file "{code.co_filename}", line {lineno}, in {code.co_name})'
-        )
-        if source:
-            message = f"{message}\n{source}"
-        super().__init__(message)
+            if lineno is not None:
+                # Add the source code if we can find it.
+                try:
+                    # Get the source, dedent, re-indent, and add a marker where the
+                    # error occurred.
+                    lines, start = inspect.getsourcelines(code)
+                    lines = textwrap.dedent("".join(lines)).split("\n")
+                    text = "\n".join(
+                        f"{no:3}: {line}" for no, line in enumerate(lines, start=start)
+                    )
+                    lines = textwrap.indent(text, "    ").split("\n")
+                    offset = lineno - start
+                    lines[offset] = "--> " + lines[offset][4:]
+
+                    # Don't show all lines of the source.
+                    lines = lines[max(0, offset - 2) : offset + 3]
+                    source = "\n".join(lines)
+                except OSError:  # pragma: no cover
+                    pass
+            message = (
+                f'{message} (file "{code.co_filename}", '
+                f"line {lineno}, in {code.co_name})"
+            )
+            if source:
+                message = f"{message}\n{source}"
+            messages.append(message)
+        super().__init__("\n\n".join(messages))
+        self.vars = non_local_non_declared_vars
 
 
 def _localscope(
@@ -189,6 +207,7 @@ def _localscope(
     allowed: Set[str],
     allow_closure: bool,
     _globals: Dict[str, Any],
+    _errors: Optional[List[_LocalscopeExceptionEntry]] = None,
 ):
     """
     Args:
@@ -201,7 +220,7 @@ def _localscope(
     # (https://docs.python.org/3/library/types.html#types.FunctionType) or keep the
     # explicitly provided globals for code objects
     # (https://docs.python.org/3/library/types.html#types.CodeType).
-    if isinstance(func, types.FunctionType):
+    if isinstance(func, (types.FunctionType, types.MethodType)):
         code = func.__code__
         _globals = {**func.__globals__, **_safely_get_closure_vars(func).nonlocals}
     else:
@@ -210,6 +229,7 @@ def _localscope(
     # Add function arguments to the list of allowed exceptions. We only take
     # `code.co_argcount + code.co_kwonlyargcount` variables because `code.co_varnames`
     # contains all local variables.
+    print(type(func))
     has_varargs = 1 if code.co_flags & inspect.CO_VARARGS else 0
     allowed.update(
         code.co_varnames[: code.co_argcount + code.co_kwonlyargcount + has_varargs]
@@ -222,7 +242,12 @@ def _localscope(
         forbidden_opnames.add("LOAD_DEREF")
 
     LOGGER.info("analysing instructions for %s...", func)
-    lineno = None
+    lineno: Any = None
+    if _errors is None:
+        _errors = []
+        top_level = True
+    else:
+        top_level = False
     for instruction in dis.get_instructions(code):
         LOGGER.info(instruction)
         # TODO: Conditional coverage.
@@ -239,15 +264,23 @@ def _localscope(
                 continue
             # Complain if the variable is not available.
             if name not in _globals:
-                raise LocalscopeException(
-                    f"`{name}` is not in globals", code, instruction, lineno
+                _errors.append(
+                    (f"`{name}` is not in globals", name, code, instruction, lineno)
                 )
+                continue
             # Check if variable is allowed by value.
             value = _globals[name]
             if not predicate(value):
-                raise LocalscopeException(
-                    f"`{name}` is not a permitted global", code, instruction, lineno
+                _errors.append(
+                    (
+                        f"`{name}` is not a permitted global",
+                        name,
+                        code,
+                        instruction,
+                        lineno,
+                    )
                 )
+                continue
         elif instruction.opname == "STORE_DEREF":
             # Store a new allowed variable which has been created in the scope of the
             # function.
@@ -263,18 +296,29 @@ def _localscope(
                 allow_closure=True,
                 predicate=predicate,
                 allowed=allowed,
+                _errors=_errors,
             )
+
+    if top_level and _errors:
+        raise LocalscopeException(_errors)
 
     return func
 
 
+class EmptyCell:
+    """
+    `None`-like singleton indicating an empty cell in a function `__closure__`.
+    """
+
+
 @ft.wraps(inspect.getclosurevars)
 def _safely_get_closure_vars(func):  # pragma: no cover
-    # This function has the same functionality as `inspect.getclosurevars`` but silently
-    # discards empty cells. We need this implementation because the use of `super`
-    # implicitly creates a closure for which cells are not available at the time of
-    # declaration of the function.
-    print(func)
+    # This function has the same functionality as `inspect.getclosurevars` but uses the
+    # special value `EmptyCell` instead of raising an error when cell contents are not
+    # available yet. This situation arises when using `super` because it implicitly
+    # creates a cell for `__class__` which is not filled. The same situation arises when
+    # localscope finds a global variable that has not yet been declared (cf.
+    # https://github.com/tillahoffmann/localscope/pull/21).
 
     if inspect.ismethod(func):
         func = func.__func__
@@ -297,8 +341,12 @@ def _safely_get_closure_vars(func):  # pragma: no cover
             try:
                 nonlocal_vars[var] = cell.cell_contents
             except ValueError as ex:
-                if not (str(ex) == "Cell is empty"):
-                    raise
+                if str(ex) == "Cell is empty":
+                    nonlocal_vars[var] = EmptyCell
+                else:
+                    raise LocalscopeException(
+                        f"Failed to retrieve `{var}` from closure."
+                    ) from ex
 
     # Global and builtin references are named in co_names and resolved
     # by looking them up in __globals__ or __builtins__

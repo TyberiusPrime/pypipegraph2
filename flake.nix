@@ -96,7 +96,6 @@
            pyzstd
            watchfiles
            lib_programname
-           localscope
 
         '';
         format = "pyproject";
@@ -255,23 +254,21 @@
         };
         doCheck = false;
       };
- localscope = let
-      p = pkgs.python311Packages;
-    in
-      p.buildPythonPackage rec {
-        pname = "localscope";
-        version = "0.2.5";
-        buildInputs = [p.setuptools];
-        propagatedBuildInputs = [];
-        format = "pyproject";
-        src = p.fetchPypi {
-          inherit pname version;
-          sha256 = "sha256-rmjx77cegkvXjM02e7Mly8hGR8LOUfKejEoKFXNmYzo=";
-        };
-        doCheck = false;
-      };
-
-
+    # localscope = let
+    #      p = pkgs.python311Packages;
+    #    in
+    #      p.buildPythonPackage rec {
+    #        pname = "localscope";
+    #        version = "0.2.5";
+    #        buildInputs = [p.setuptools];
+    #        propagatedBuildInputs = [];
+    #        format = "pyproject";
+    #        src = p.fetchPypi {
+    #          inherit pname version;
+    #          sha256 = "sha256-rmjx77cegkvXjM02e7Mly8hGR8LOUfKejEoKFXNmYzo=";
+    #        };
+    #        doCheck = false;
+    #      };
 
     mypython = pkgs.python311.withPackages (p: [
       #todo: figure out how to derive this from pyproject.toml
@@ -295,7 +292,7 @@
       p.filelock
       pyzstd
       lib_programname
-       localscope
+      #localscope
     ]);
   in {
     # pass in nixpkgs, mach-nix and what you want it to report back as a version
