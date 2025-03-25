@@ -398,7 +398,12 @@ class FileInvariant(PPG1AdaptorBase, ppg2.FileInvariant):
 
 
 class FunctionInvariant(PPG1AdaptorBase, ppg2._FunctionInvariant):
-    pass
+    def __init__(self, name, function):
+        super().__init__(
+            name,
+            function,
+            check_non_locals=False
+        )
 
 
 class ParameterInvariant(PPG1AdaptorBase, ppg2.ParameterInvariant):

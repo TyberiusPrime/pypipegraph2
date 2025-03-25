@@ -216,6 +216,10 @@ def _localscope(
             dependent code blocks for analysis.
     """
 
+    if isinstance(func, types.BuiltinFunctionType):
+        # no op - these never bind non-locals
+        return func
+
     # Extract global variables from a function
     # (https://docs.python.org/3/library/types.html#types.FunctionType) or keep the
     # explicitly provided globals for code objects
@@ -229,7 +233,6 @@ def _localscope(
     # Add function arguments to the list of allowed exceptions. We only take
     # `code.co_argcount + code.co_kwonlyargcount` variables because `code.co_varnames`
     # contains all local variables.
-    print(type(func))
     has_varargs = 1 if code.co_flags & inspect.CO_VARARGS else 0
     allowed.update(
         code.co_varnames[: code.co_argcount + code.co_kwonlyargcount + has_varargs]

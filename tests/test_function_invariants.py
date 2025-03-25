@@ -142,3 +142,27 @@ def d():
         should = """            def c():
                 return 55"""
         assert actual == should
+
+class FakeRunner:
+    def __init__(self):
+        self.stat_cache = {}
+
+
+
+# class TestWhatGetsCaptured:
+
+#     def test_bound_variables(self):
+#         runner = {}
+#         a = 5
+#         def one():
+#             return a + 5
+#         af = ppg.FunctionInvariant("one", one).run(runner, {})
+#         a = 10
+#         af1 = ppg.FunctionInvariant("one", one).run(runner, {})
+#         def two():
+#             return a + 5
+#         bf1 = ppg.FunctionInvariant("two", two).run(runner, {})
+
+
+
+

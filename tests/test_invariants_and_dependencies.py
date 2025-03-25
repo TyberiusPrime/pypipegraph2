@@ -611,19 +611,19 @@ class TestFunctionInvariant:
 
     def test_generator_expressions(self):
         def get_func(r):
-            def shu():
+            def shu(r=r):
                 return sum(i + 0 for i in r)
 
             return shu
 
         def get_func2(r):
-            def shu():
+            def shu(r=r):
                 return sum(i + 0 for i in r)
 
             return shu
 
         def get_func3(r):
-            def shu():
+            def shu(r=r):
                 return sum(i + 1 for i in r)
 
             return shu

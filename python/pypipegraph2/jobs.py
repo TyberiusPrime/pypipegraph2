@@ -302,14 +302,20 @@ class Job:
             # we try to share FunctionInvariants if no closure is involved
             # that saves us many Jobs in some cases
             if hasattr(func, "__closure__") and func.__closure__ is None:
-                func_invariant = FunctionInvariant(func)  # , self.job_id)
+                func_invariant = FunctionInvariant(
+                    func, check_non_locals=False
+                )  # , self.job_id)
                 func_invariant.usage_counter = (
                     getattr(func_invariant, "usage_counter", 0) + 1
                 )
             else:
-                func_invariant = FunctionInvariant(func, self.job_id)
+                func_invariant = FunctionInvariant(
+                    func, self.job_id, check_non_locals=False
+                )
         except TypeError:
-            func_invariant = FunctionInvariant(func, self.job_id)
+            func_invariant = FunctionInvariant(
+                func, self.job_id, check_non_locals=False
+            )
         self.func_invariant = func_invariant  # we only store it so ppg1.compatibility ignore_code_changes can prune it
         self.depends_on(func_invariant)
 
@@ -1323,7 +1329,13 @@ class _InputHashAwareJobMixin:
 
 
 class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
-    def __new__(cls, function, name=None):
+    def __new__(
+        cls,
+        function,
+        name=None,
+        check_non_locals=True,
+        allowed_non_locals: Optional[List[str]] = None,
+    ):
         name, function = cls._parse_args(function, name)
         return super().__new__(cls, [name])
 
@@ -1336,11 +1348,24 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
         return name, function
 
     def __init__(
-        self, function, name=None
+        self,
+        function,
+        name=None,
+        check_non_locals=True,
+        allowed_non_locals: Optional[List[str]] = None,
     ):  # must support the inverse calling with name, function, for compatibility to pypipegraph
         name, function = self._parse_args(function, name)
 
         self.verify_arguments(name, function)
+        if (
+            check_non_locals
+            and function is not None
+            and self.is_python_function(function)
+        ):
+            _verify_function_outside_variables(
+                function, allowed_non_locals, "FI" + name
+            )
+
         self.function = function  # must assign after verify!
         if not hasattr(function, "ppg_source_filename"):
             try:  # can't set this on *all* function kinds
@@ -1877,15 +1902,25 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             )
 
 
-def FunctionInvariant(function, name=None):
+def FunctionInvariant(
+    function,
+    name=None,
+    check_non_locals=True,
+    allowed_non_locals: Optional[List[str]] = None,
+):
     if isinstance(function, (str, Path)):
         name, function = function, name
     if hasattr(function, "wrapped_function"):
-        f1 = _FunctionInvariant(function, name)
-        f2 = _FunctionInvariant(function.wrapped_function, name + "_inner")
+        f1 = _FunctionInvariant(function, name, check_non_locals, allowed_non_locals)
+        f2 = _FunctionInvariant(
+            function.wrapped_function,
+            name + "_inner",
+            check_non_locals,
+            allowed_non_locals,
+        )
         return [f1, f2]
     else:
-        return _FunctionInvariant(function, name)
+        return _FunctionInvariant(function, name, check_non_locals, allowed_non_locals)
 
 
 FunctionInvariant.compare_hashes = _FunctionInvariant.compare_hashes
