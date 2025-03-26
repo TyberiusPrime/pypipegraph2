@@ -152,7 +152,7 @@ def wrap_job(cls):
     """Adapt for ppg1 api idiosyncracies"""
 
     def inner(*args, **kwargs):
-        kwargs["allowed_globals"] = [ppg2.enums.PPG1Compatibility_AllowAllVariables]
+        kwargs["allowed_non_locals"] = [ppg2.enums.PPG1Compatibility_AllowAllVariables]
         return PPG1Adaptor(cls(*args, **kwargs))
 
     return inner
@@ -471,7 +471,7 @@ class FileGeneratingJob(PPG1AdaptorBase, ppg2.FileGeneratingJob):
             output_filename,
             func,
             empty_ok=empty_ok,
-            allowed_globals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
+            allowed_non_locals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
         )
 
 
@@ -482,7 +482,7 @@ class MultiFileGeneratingJob(PPG1AdaptorBase, ppg2.MultiFileGeneratingJob):
             output_filenames,
             func,
             empty_ok=empty_ok,
-            allowed_globals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
+            allowed_non_locals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
         )
 
 
@@ -520,7 +520,7 @@ def CachedAttributeLoadingJob(
             target_object,
             target_attribute,
             calculating_function,
-            allowed_globals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
+            allowed_non_locals=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
         )
     except ppg2.JobRedefinitionError as e:
         raise ppg1.JobContractError(str(e))
@@ -533,8 +533,8 @@ def CachedDataLoadingJob(cache_filename, calculating_function, loading_function)
         cache_filename,
         calculating_function,
         loading_function,
-        allowed_globals_calc=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
-        allowed_globals_load=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
+        allowed_non_locals_calc=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
+        allowed_non_locals_load=[ppg2.enums.PPG1Compatibility_AllowAllVariables],
     )
     return wrap_old_style_lfg_cached_job(job)
 

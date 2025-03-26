@@ -147,10 +147,10 @@ class TestJobGeneratingJob:
                 write(of, shu)
 
             dl = ppg.DataLoadingJob("dl", load)
-            jobB = ppg.FileGeneratingJob("out/A", do_write, allowed_globals=['shu'])
+            jobB = ppg.FileGeneratingJob("out/A", do_write, allowed_non_locals=['shu'])
             jobB.depends_on(dl)
 
-        ppg.JobGeneratingJob("gen", gen, allowed_globals=["shu"])
+        ppg.JobGeneratingJob("gen", gen, allowed_non_locals=["shu"])
         ppg.run()
         assert read("out/A") == "123"
 
@@ -170,7 +170,7 @@ class TestJobGeneratingJob:
 
         def gen(o=o):
             new_dl = ppg.AttributeLoadingJob("b", o, "b", lambda: "Bshu")
-            fg_a = ppg.FileGeneratingJob("out/C", lambda of: write("out/C", o.a), allowed_globals=['o'])
+            fg_a = ppg.FileGeneratingJob("out/C", lambda of: write("out/C", o.a), allowed_non_locals=['o'])
             fg_b = ppg.FileGeneratingJob("out/D", lambda of, o=o: write("out/D", o.b))
             fg_a.depends_on(existing_dl)
             fg_b.depends_on(new_dl)

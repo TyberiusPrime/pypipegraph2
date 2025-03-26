@@ -881,16 +881,16 @@ class TestDataLoadingJob:
                 of, "\n".join(test_modifies_shared_global)
             )  # this might actually be a problem when defining this?
 
-        dlJo = ppg.DataLoadingJob("myjob", load, allowed_globals=["test_modifies_shared_global"])
+        dlJo = ppg.DataLoadingJob("myjob", load, allowed_non_locals=["test_modifies_shared_global"])
         writejob = ppg.FileGeneratingJob(
-            of, do_write, allowed_globals=["test_modifies_shared_global"]
+            of, do_write, allowed_non_locals=["test_modifies_shared_global"]
         )
         writejob.depends_on(dlJo)
 
         writejob2 = ppg.FileGeneratingJob(
             "out/b",
             lambda of: write("out/b", "b" + "\n".join(test_modifies_shared_global)),
-            allowed_globals=["test_modifies_shared_global"],
+            allowed_non_locals=["test_modifies_shared_global"],
         )
         writejob2.depends_on(dlJo)
         ppg.run()
@@ -915,7 +915,7 @@ class TestDataLoadingJob:
             write(of, shared_value)
 
         dlJo = ppg.DataLoadingJob("myjob", load)
-        writejob = ppg.FileGeneratingJob(of, do_write, allowed_globals=["shared_value"])
+        writejob = ppg.FileGeneratingJob(of, do_write, allowed_non_locals=["shared_value"])
         writejob.depends_on(dlJo)
         ppg.run()
         assert read(of) == "shared data"
@@ -1052,8 +1052,8 @@ class TestDataLoadingJob:
             o.a = "shu"
             raise ValueError()
 
-        job_fg = ppg.FileGeneratingJob(of, write, allowed_globals=["o"])
-        job_dl = ppg.DataLoadingJob("doload", load, allowed_globals=["o"])
+        job_fg = ppg.FileGeneratingJob(of, write, allowed_non_locals=["o"])
+        job_dl = ppg.DataLoadingJob("doload", load, allowed_non_locals=["o"])
         job_fg.depends_on(job_dl)
         with pytest.raises(ppg.JobsFailed):
             ppg.run()
@@ -1356,7 +1356,7 @@ class TestAttributeJob:
         def do_write(of):
             write(of, o.a)
 
-        fgjob = ppg.FileGeneratingJob(of, do_write, allowed_globals=["o"]).depends_on(
+        fgjob = ppg.FileGeneratingJob(of, do_write, allowed_non_locals=["o"]).depends_on(
             job
         )
         of2 = "out/B"
@@ -1489,7 +1489,7 @@ class TestAttributeJob:
         o = Dummy()
         jobA = ppg.AttributeLoadingJob("out/A", o, "a", a, depend_on_function=False)
         jobB = ppg.FileGeneratingJob(
-            "out/B", lambda of: write("out/B", o.a), allowed_globals=["o"]
+            "out/B", lambda of: write("out/B", o.a), allowed_non_locals=["o"]
         )
         jobB.depends_on(jobA)
         ppg.run()
@@ -1503,7 +1503,7 @@ class TestAttributeJob:
 
         jobA = ppg.AttributeLoadingJob("out/A", o, "a", b, depend_on_function=False)
         jobB = ppg.FileGeneratingJob(
-            "out/B", lambda of: write("out/B", o.a), allowed_globals=["o"]
+            "out/B", lambda of: write("out/B", o.a), allowed_non_locals=["o"]
         )
         jobB.depends_on(jobA)
         ppg.run()

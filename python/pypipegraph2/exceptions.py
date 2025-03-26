@@ -27,7 +27,7 @@ class JobContractError(PPGException):
 
     pass
 
-class FunctionUsesUndeclaredGlobalsError(PPGException):
+class FunctionUsesUndeclaredNonLocalsError(PPGException):
     pass
 
 

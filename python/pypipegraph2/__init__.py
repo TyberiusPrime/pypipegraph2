@@ -50,6 +50,7 @@ from .exceptions import (
     JobError,
     HistoryLoadingFailed,
     JobEvaluationFailed,
+    FunctionUsesUndeclaredNonLocalsError,
 )
 from .enums import Resources, RunMode
 from . import util
@@ -297,6 +298,7 @@ __all__ = [
     "JobError",
     "HistoryLoadingFailed",
     "JobEvaluationFailed",
+    "FunctionUsesUndeclaredNonLocalsError",
     "Resources",
     "RunMode",
     "replace_ppg1",

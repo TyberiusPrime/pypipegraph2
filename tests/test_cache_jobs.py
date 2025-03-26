@@ -18,14 +18,14 @@ class TestCachedDataLoadingJob:
             o.a = value
 
         job, cache_job = ppg.CachedDataLoadingJob(
-            "out/mycalc", calc, store, allowed_globals_load=["o"]
+            "out/mycalc", calc, store, allowed_non_locals_load=["o"]
         )
         of = "out/A"
 
         def do_write(of):
             write(of, o.a)
 
-        ppg.FileGeneratingJob(of, do_write, allowed_globals=["o"]).depends_on(job)
+        ppg.FileGeneratingJob(of, do_write, allowed_non_locals=["o"]).depends_on(job)
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 
@@ -38,7 +38,7 @@ class TestCachedDataLoadingJob:
         def store(value):
             o.a = value
 
-        ppg.CachedDataLoadingJob("out/mycalc", calc, store, allowed_globals_load=["o"])
+        ppg.CachedDataLoadingJob("out/mycalc", calc, store, allowed_non_locals_load=["o"])
         # job.ignore_code_changes() #or it would run anyway... hm.
         assert not (Path("out/mycalc").exists())
         ppg.run()
@@ -71,9 +71,9 @@ class TestCachedDataLoadingJob:
 
         def gen():
             load_job, cache_job = ppg.CachedDataLoadingJob(
-                "out/B", calc, store, allowed_globals_load=["o"]
+                "out/B", calc, store, allowed_non_locals_load=["o"]
             )
-            dump_job = ppg.FileGeneratingJob("out/A", dump, allowed_globals=["o"])
+            dump_job = ppg.FileGeneratingJob("out/A", dump, allowed_non_locals=["o"])
             dump_job.depends_on(load_job)
 
         ppg.JobGeneratingJob("out/C", gen)
@@ -96,12 +96,12 @@ class TestCachedDataLoadingJob:
         def gen():
             write("out/c", "c")
             calc_job, cache_job = ppg.CachedDataLoadingJob(
-                "out/B", calc, store, allowed_globals_load=["o"]
+                "out/B", calc, store, allowed_non_locals_load=["o"]
             )
 
             def gen2():
                 write("out/d", "d")
-                dump_job = ppg.FileGeneratingJob("out/A", dump, allowed_globals=["o"])
+                dump_job = ppg.FileGeneratingJob("out/A", dump, allowed_non_locals=["o"])
                 dump_job.depends_on(calc_job)
 
             ppg.JobGeneratingJob("out/D", gen2)
@@ -131,11 +131,11 @@ class TestCachedDataLoadingJob:
         def output(of):
             write(of, o.c)
 
-        dl = ppg.DataLoadingJob("out/A", a, allowed_globals=["o"])
+        dl = ppg.DataLoadingJob("out/A", a, allowed_non_locals=["o"])
         ca, cca = ppg.CachedDataLoadingJob(
-            "out/C", calc, load, allowed_globals_calc=["o"], allowed_globals_load=["o"]
+            "out/C", calc, load, allowed_non_locals_calc=["o"], allowed_non_locals_load=["o"]
         )
-        fg = ppg.FileGeneratingJob("out/D", output, allowed_globals=["o"])
+        fg = ppg.FileGeneratingJob("out/D", output, allowed_non_locals=["o"])
         fg.depends_on(ca)
         cca.depends_on(dl)
         ppg.run()
@@ -147,11 +147,11 @@ class TestCachedDataLoadingJob:
             "out/D"
         ).unlink()  # so the filegen and the loadjob of cached should rerun...
         ppg.new()
-        dl = ppg.DataLoadingJob("out/A", a, allowed_globals=["o"])
+        dl = ppg.DataLoadingJob("out/A", a, allowed_non_locals=["o"])
         ca, cca = ppg.CachedDataLoadingJob(
-            "out/C", calc, load, allowed_globals_calc=["o"], allowed_globals_load=["o"]
+            "out/C", calc, load, allowed_non_locals_calc=["o"], allowed_non_locals_load=["o"]
         )
-        fg = ppg.FileGeneratingJob("out/D", output, allowed_globals=["o"])
+        fg = ppg.FileGeneratingJob("out/D", output, allowed_non_locals=["o"])
         fg.depends_on(ca)
         cca.depends_on(dl)
         ppg.run()
@@ -227,7 +227,7 @@ class TestCachedAttributeJob:
         def do_write(output_filename):
             write(output_filename, o.a)
 
-        ppg.FileGeneratingJob(of, do_write, allowed_globals=["o"]).depends_on(job)
+        ppg.FileGeneratingJob(of, do_write, allowed_non_locals=["o"]).depends_on(job)
         ppg.run()
         assert read(of) == ", ".join(str(x) for x in range(0, 100))
 

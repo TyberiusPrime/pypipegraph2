@@ -122,7 +122,7 @@ class TestInvariant:
     def test_parameter_invariant_adds_hidden_job_id_prefix(self):
         param = "A"
         jobA = ppg.FileGeneratingJob(
-            "out/A", lambda _: write("out/A", param), allowed_globals=["param"]
+            "out/A", lambda _: write("out/A", param), allowed_non_locals=["param"]
         )
         jobB = ppg.ParameterInvariant("out/A", param)
         jobA.depends_on(jobB)
@@ -777,12 +777,12 @@ class TestFunctionInvariant:
 
             return inner
 
-        a = ppg.FunctionInvariant("a", get_func(100))
+        a = ppg.FunctionInvariant("a", get_func(100), allowed_non_locals=["x"])
         b = ppg.FunctionInvariant(
-            "b", get_func(100)
+            "b", get_func(100), allowed_non_locals=["x"]
         )  # that invariant should be the same
         c = ppg.FunctionInvariant(
-            "c", get_func(2000)
+            "c", get_func(2000), allowed_non_locals=["x"]
         )  # and this invariant should be different
         av = a.run(None, None)
         bv = b.run(None, None)
@@ -893,12 +893,12 @@ class TestFunctionInvariant:
 
             return f
 
-        a = ppg.FunctionInvariant("a", func([1, 2, 3]))
+        a = ppg.FunctionInvariant("a", func([1, 2, 3]), allowed_non_locals=["da_list"])
         b = ppg.FunctionInvariant(
-            "b", func([1, 2, 3])
+            "b", func([1, 2, 3]), allowed_non_locals=["da_list"]
         )  # that invariant should be the same
         c = ppg.FunctionInvariant(
-            "c", func([1, 2, 3, 4])
+            "c", func([1, 2, 3, 4]), allowed_non_locals=["da_list"]
         )  # and this invariant should be different
         av = a.run(None, None)
         bv = b.run(None, None)
@@ -921,12 +921,14 @@ class TestFunctionInvariant:
 
             return f
 
-        a = ppg.FunctionInvariant("a", func({"1": "a", "3": "b", "2": "c"}))
+        a = ppg.FunctionInvariant(
+            "a", func({"1": "a", "3": "b", "2": "c"}), allowed_non_locals=["da_list"]
+        )
         b = ppg.FunctionInvariant(
-            "b", func({"1": "a", "3": "b", "2": "c"})
+            "b", func({"1": "a", "3": "b", "2": "c"}), allowed_non_locals=["da_list"]
         )  # that invariant should be the same
         c = ppg.FunctionInvariant(
-            "c", func({"1": "a", "3": "b", "2": "d"})
+            "c", func({"1": "a", "3": "b", "2": "d"}), allowed_non_locals=["da_list"]
         )  # and this invariant should be different
         av = a.run(None, None)
         bv = b.run(None, None)
@@ -949,13 +951,15 @@ class TestFunctionInvariant:
         import random
 
         x = set(["1", "2", "3", "4", "5", "6", "7", "8"])
-        a = ppg.FunctionInvariant("a", func(x))
+        a = ppg.FunctionInvariant("a", func(x), allowed_non_locals=["da_list"])
         x2 = list(x)
         random.shuffle(x2)
         x2 = set(x2)
-        b = ppg.FunctionInvariant("b", func(x2))  # that invariant should be the same
+        b = ppg.FunctionInvariant(
+            "b", func(x2), allowed_non_locals=["da_list"]
+        )  # that invariant should be the same
         c = ppg.FunctionInvariant(
-            "c", func({"3", "2"})
+            "c", func({"3", "2"}), allowed_non_locals=["da_list"]
         )  # and this invariant should be different
         av = a.run(None, None)
         bv = b.run(None, None)
@@ -978,13 +982,15 @@ class TestFunctionInvariant:
         import random
 
         x = frozenset(["1", "2", "3", "4", "5", "6", "7", "8"])
-        a = ppg.FunctionInvariant("a", func(x))
+        a = ppg.FunctionInvariant("a", func(x), allowed_non_locals=["da_list"])
         x2 = list(x)
         random.shuffle(x2)
         x2 = frozenset(x2)
-        b = ppg.FunctionInvariant("b", func(x2))  # that invariant should be the same
+        b = ppg.FunctionInvariant(
+            "b", func(x2), allowed_non_locals=["da_list"]
+        )  # that invariant should be the same
         c = ppg.FunctionInvariant(
-            "c", func(frozenset({"3", "2"}))
+            "c", func(frozenset({"3", "2"})), allowed_non_locals=["da_list"]
         )  # and this invariant should be different
         av = a.run(None, None)
         bv = b.run(None, None)
@@ -1056,7 +1062,7 @@ class TestDependency:
             write(ofD, read(ofC) + read(ofB))
 
         ppg.FileGeneratingJob(
-            ofD, do_write_d, allowed_globals=["ofC", "ofB"]
+            ofD, do_write_d, allowed_non_locals=["ofC", "ofB"]
         ).depends_on([jobA, jobB])
 
     def test_failed_job_kills_those_after(self):

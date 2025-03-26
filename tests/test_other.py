@@ -478,7 +478,7 @@ class TestModifyDag:
             "b",
             lambda: _no_such_thing,
             depend_on_function=False,  # noqa: F821
-            allowed_globals=["_no_such_thing"],
+            allowed_non_locals=["_no_such_thing"],
         )
         a1.depends_on(b)
         a2.depends_on(b)
