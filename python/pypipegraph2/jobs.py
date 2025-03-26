@@ -10,7 +10,6 @@ import sys
 import inspect
 import types
 from typing import Union, List, Dict, Optional, Tuple, Callable
-from types import NoneType
 from pathlib import Path
 from io import StringIO
 from collections import namedtuple
@@ -154,7 +153,7 @@ class JobList(list):
 def _verify_function_outside_variables(func, allowed_non_locals, job_id="Unknown job"):
     if not callable(func):
         raise TypeError("Function was not callable")
-    if not isinstance(allowed_non_locals, (list, NoneType)):
+    if not isinstance(allowed_non_locals, (list, type(None))):
         raise TypeError("allowed_non_locals must be a List[str]")
     if (
         allowed_non_locals is None
