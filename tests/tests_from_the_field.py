@@ -1634,15 +1634,31 @@ class TestsFromTheField:
         )
 
     def test_20241121_evaluation_bug(self):
+        global fi_counter
+        fi_counter = {}
         gen_20241121()
         ppg.run()
+        assert len(fi_counter) == 3
+        assert all([x == 1 for x in fi_counter.values()])
         ppg.new()
         gen_20241121(True)
         try:
             ppg.run()
         except KeyboardInterrupt as e:
-            assert 'Run aborted' in str(e)
+            assert "Run aborted" in str(e)
             raise ValueError("expected failure before engine patch")
+        assert all([x == 2 for x in fi_counter.values()]) # we reran after all
+
+        ppg.new()
+        gen_20241121(True)
+        ppg.run()
+        assert all([x == 2 for x in fi_counter.values()]) # we reran after all
+        assert all([x == 2 for x in fi_counter.values()]) # we reran after all
+        Path('FgB').unlink()
+        ppg.run()
+        assert all([x == 3 for x in fi_counter.values()]) # we reran after all
+
+
         # if we get here, everything's fine.
 
     def test_cleanup_already_decided_to_skip_upstream_failed(self):
@@ -1886,11 +1902,22 @@ def test_pandas_hashing():
 
 
 def gen_20241121(change_edge=False):
-    job_DlA = ppg.DataLoadingJob("DlA", lambda: 35, depend_on_function=False)
+
+    def do_count(job_id, res):
+        def inner():
+            print("inner", job_id)
+            if not job_id in fi_counter:
+                fi_counter[job_id] = 0
+            fi_counter[job_id] += 1
+            return res
+
+        return inner
+    job_DlA = ppg.DataLoadingJob("DlA", do_count('DlA', 35), depend_on_function=False)
     job_FgB = ppg.FileGeneratingJob("FgB", dummy_fg, depend_on_function=False)
 
-    job_DlC = ppg.DataLoadingJob("DlC", lambda: 35, depend_on_function=False)
-    job_DlD = ppg.DataLoadingJob("DlD", lambda: 35, depend_on_function=False)
+    job_DlC = ppg.DataLoadingJob("DlC", do_count('DlC', 35), depend_on_function=False)
+    job_DlD = ppg.DataLoadingJob("DlD", do_count('DlD', 35), depend_on_function=False)
+
 
     if change_edge:
         job_FiE = ppg.FunctionInvariant("FiE", lambda: 56)
@@ -1911,4 +1938,4 @@ def gen_20241121(change_edge=False):
     for a, b in edges:
         if a in cjobs_by_no and b in cjobs_by_no:
             cjobs_by_no[a].depends_on(cjobs_by_no[b])
-            #print(f"ea(('{a}', '{b}'))")
+            # print(f"ea(('{a}', '{b}'))")
