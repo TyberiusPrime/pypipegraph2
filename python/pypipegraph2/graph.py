@@ -127,7 +127,7 @@ class PyPipeGraph:
         else:
             if isinstance(cores, (DirConfig, str, Path)):  # pragma: no cover
                 raise ValueError(
-                    "You tried to pass dir_config by positin, but the first argument is cores"
+                    "You tried to pass dir_config by position, but the first argument is cores"
                 )
             self.cores = int(cores)
         if isinstance(dir_config, (str, Path)):
