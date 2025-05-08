@@ -179,11 +179,11 @@ class Runner:
         with _with_changed_global_pipegraph(JobCollector(job_graph.run_mode)):
             self.job_graph = job_graph
             self.jobs = job_graph.jobs.copy()
-            print("Now cloning job_inputs")
+            #print("Now cloning job_inputs")
             self.job_inputs = copy.deepcopy(
                 job_graph.job_inputs
             )  # job_graph.job_inputs.copy()
-            print(self.job_inputs)
+            #print(self.job_inputs)
             self.outputs_to_job_ids = job_graph.outputs_to_job_ids.copy()
             self.next_job_number = self.job_graph.next_job_number
             self.core_lock = CoreLock(job_graph.cores)
