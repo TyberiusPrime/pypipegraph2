@@ -57,28 +57,29 @@ from . import util
 from .util import assert_uniqueness_of_object
 from .pypipegraph2 import enable_logging as enable_rust_logging
 
-try: 
+try:
     # if you're using numba, we need a thread and fork safe threading layer
     # we request this here,
     # but it will fail the first time numba parallelization is used
     # if tbb can't be found.
-    # otherwise you'll get some shiny 
+    # otherwise you'll get some shiny
     # 'Terminating: fork() called from a process already using GNU OpenMP, this is unsafe';
     # error messages.
 
-
     from numba import config, njit
-    config.THREADING_LAYER = 'safe'
+
+    config.THREADING_LAYER = "safe"
     import numpy as np
+
     @njit(parallel=True)
     def foo(a, b):
         return a + b
-    x = np.arange(10.)
-    y = x.copy()
-    foo(x,y)
-except (ImportError, ValueError) :
-    pass
 
+    x = np.arange(10.0)
+    y = x.copy()
+    foo(x, y)
+except (ImportError, ValueError):
+    pass
 
 
 except ImportError:
@@ -161,6 +162,18 @@ def new(
     return global_pipegraph
 
 
+def _getname_jupyter_notebook_name() -> str:
+    """Try to get the name of the jupyter notebook.
+    Will raise if it's Untitled.ipynb
+    """
+    import os
+
+    res = os.environ["JPY_SESSION_NAME"]
+    if "Untitled.ipynb" in res:
+        raise ValueError("Session still Untitled.ipynb - restart notebook?")
+    return res.split("/")[-1].rsplit(".", 1)[0]
+
+
 def _get_default_dir_config():
     # we need the script name
     import lib_programname
@@ -171,6 +184,10 @@ def _get_default_dir_config():
             "Could not determine path to executed script. Set a DirConfig when calling ppg2.new()"
         )
     pn = Path(path_to_program).name
+
+    if pn == "ipykernel_launcher.py":
+        pn = _getname_jupyter_notebook_name()
+
     if (  # fallback for before this change.
         Path(".ppg/history/ppg_history.2.zstd").exists()
         and (pn == "run.py")
