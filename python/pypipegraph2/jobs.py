@@ -3331,11 +3331,12 @@ class ExternalOutputPath:
     """This allows you to refer to the output path
     in your ExternalJob commands in a don't-need-to-know-the -path way
     Just plug cmd = [..., ExternalOutputPath / "output.txt",...]
-    in there
+    in there (or ExternalOutputPat("output.txt")
     """
 
-    def __init__(self):
-        self.path = ""
+    def __init__(self, sub_path = ""):
+        assert not sub_path.startswith('/')
+        self.path = sub_path
 
     # implement /
     def __truediv__(self, other):
@@ -3385,8 +3386,11 @@ def ExternalJob(
     adjust allowed_return_codes.
 
     use @call_before(job) and @call_after(job) for pre/postprocessing.
-    Use job.files[key] to access our output files
-    (default keys are 'stdout', 'stderr', 'cmd' and 'return_code').
+    The output directory will have been created before call_before is called,
+
+    Use job.files[key] to access your output files
+    (default keys are 'stdout', 'stderr', 'cmd' and 'return_code',
+    plus all your additional_created_files).
 
     You can create tempfile generating jobs by adjusting the job_cls to
     ppg.TempFileGeneratingJob.
@@ -3399,6 +3403,7 @@ def ExternalJob(
     @start_new_session is passed on to subprocess.Popen
 
     """
+    import shlex
     output_path = Path(output_path)
     assert isinstance(additional_created_files, dict)
     for k, v in additional_created_files.items():
@@ -3407,12 +3412,20 @@ def ExternalJob(
                 f"additional_created_files contained Paths when it should be strs relative to output_path. {k} was {v}"
             )
 
-    def run(output_files):
+    def run(output_files,
+            cmd_or_cmd_func = cmd_or_cmd_func,
+            call_before = call_before,
+            call_after = call_after,
+            cwd = cwd,
+            allowed_return_codes=allowed_return_codes,
+            output_path = output_path,
+            start_new_session = start_new_session
+            ):
         import subprocess
 
+        output_files["stdout"].parent.mkdir(exist_ok=True, parents=True)
         if call_before is not None:
             call_before(res)
-        output_files["stdout"].parent.mkdir(exist_ok=True, parents=True)
         if callable(cmd_or_cmd_func):
             cmd = cmd_or_cmd_func()
         else:
@@ -3425,7 +3438,7 @@ def ExternalJob(
             )
             for x in cmd
         ]
-        output_files["cmd"].write_text(" ".join([str(x) for x in cmd]) + "\n")
+        output_files["cmd"].write_text(" ".join([shlex.quote(str(x)) for x in cmd]) + "\n")
         p = subprocess.Popen(
             cmd,
             stdout=open(output_files["stdout"], "wb"),
