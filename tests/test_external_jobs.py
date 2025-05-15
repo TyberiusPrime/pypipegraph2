@@ -3,6 +3,8 @@ import sys
 import pytest
 import pypipegraph2 as ppg
 from .shared import write, read, Dummy, append, counter
+import os
+import subprocess
 
 
 @pytest.mark.usefixtures("ppg2_per_test")
@@ -106,3 +108,33 @@ class TestExternalJobs:
         assert job["two"].exists()
         assert job["stdout"].read_text().strip() == ""
         assert job["stderr"].read_text().strip() == ""
+
+    def test_start_new_session(self):
+        """Test that start_new_session really starts a new session."""
+        job1 = ppg.ExternalJob(
+            "no_new_session",
+            {"session_info": "session.txt"},
+            ["bash", "-c", "ps -o sess= -p $$ > session.txt"],
+            start_new_session=False,
+        )
+
+        job2 = ppg.ExternalJob(
+            "with_new_session",
+            {"session_info": "session.txt"},
+            ["bash", "-c", "ps -o sess= -p $$ > session.txt"],
+            start_new_session=True,
+        )
+        our_session = (
+            subprocess.check_output(["ps", "-o", "sess=", "-p", str(os.getpid())])
+            .decode()
+            .strip()
+        )
+
+        ppg.run()
+
+        assert our_session == job1["session_info"].read_text().strip()
+        assert our_session != job2["session_info"].read_text().strip()
+        assert (
+            job1["session_info"].read_text().strip()
+            != job2["session_info"].read_text().strip()
+        )
