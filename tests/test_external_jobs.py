@@ -138,98 +138,79 @@ class TestExternalJobs:
             job1["session_info"].read_text().strip()
             != job2["session_info"].read_text().strip()
         )
-        
+
     def test_trigger_rebuild_on_change(self):
         """Test that changes to command, call_before, or call_after trigger a rebuild."""
-        # Set up counter to track rebuilds
-        c = counter()
-        
-        # Test command changes
+
         output_path = Path("rebuild_test_cmd")
-        def cmd_func():
-            c.count()
-            return ["echo", str(c.count)]
-        
-        job1 = ppg.ExternalJob(
+
+        job = ppg.ExternalJob(output_path, {}, ["echo", "1"])
+        ppg.run()
+        assert job["stdout"].read_text().strip() == "1"
+
+        ppg.run()
+        ppg.new()
+        assert job["stdout"].read_text().strip() == "1"
+
+        job = ppg.ExternalJob(output_path, {}, ["echo", "2"])
+        ppg.run()
+        ppg.new()
+        assert job["stdout"].read_text().strip() == "2"
+
+        job = ppg.ExternalJob(output_path, {}, lambda: ["echo", "3"])
+        ppg.run()
+        ppg.new()
+        assert job["stdout"].read_text().strip() == "3"
+
+        job = ppg.ExternalJob(output_path, {}, lambda: ["echo", "4"])
+        ppg.run()
+        ppg.new()
+        assert job["stdout"].read_text().strip() == "4"
+
+        job = ppg.ExternalJob(
             output_path,
             {},
-            cmd_func
+            lambda: ["echo", "4"],
+            call_before=lambda job: (job.output_path / "before").write_text("5"),
         )
         ppg.run()
-        assert c.count == 1
-        cmd_value1 = job1["cmd"].read_text()
-        
-        # Change the output of the command function
-        c.count += 1
-        ppg.run()
-        assert c.count == 3  # Called once more during depend_on hash calc, once for execution
-        cmd_value2 = job1["cmd"].read_text()
-        assert cmd_value1 != cmd_value2
-        
-        # Test call_before changes
-        c.reset()
-        output_path = Path("rebuild_test_before")
-        def before_func(job):
-            c.count()
-            write(job["out"], f"before-{c.count}")
-        
-        job2 = ppg.ExternalJob(
+        ppg.new()
+        assert job["stdout"].read_text().strip() == "4"
+        assert (job.output_path / "before").read_text().strip() == "5"
+
+        job = ppg.ExternalJob(
             output_path,
-            {"out": "out.txt"},
-            ["echo", "test"],
-            call_before=before_func
+            {},
+            lambda: ["echo", "4"],
+            call_before=lambda job: (job.output_path / "before").write_text("6"),
         )
         ppg.run()
-        assert c.count == 1
-        out_value1 = job2["out"].read_text()
-        
-        # Change the call_before function
-        def before_func_modified(job):
-            c.count()
-            write(job["out"], f"modified-{c.count}")
-        
-        job2 = ppg.ExternalJob(
+        ppg.new()
+        assert job["stdout"].read_text().strip() == "4"
+        assert (job.output_path / "before").read_text().strip() == "6"
+
+        job = ppg.ExternalJob(
             output_path,
-            {"out": "out.txt"},
-            ["echo", "test"],
-            call_before=before_func_modified
+            {},
+            lambda: ["echo", "4"],
+            call_before=lambda job: (job.output_path / "before").write_text("6"),
+            call_after=lambda job: (job.output_path / "after").write_text("7"),
         )
         ppg.run()
-        assert c.count > 1  # Should have run again
-        out_value2 = job2["out"].read_text()
-        assert out_value1 != out_value2
-        assert "modified" in out_value2
-        
-        # Test call_after changes
-        c.reset()
-        output_path = Path("rebuild_test_after")
-        def after_func(job):
-            c.count()
-            write(job["out"], f"after-{c.count}")
-        
-        job3 = ppg.ExternalJob(
+        ppg.new()
+        assert job["stdout"].read_text().strip() == "4"
+        assert (job.output_path / "before").read_text().strip() == "6"
+        assert (job.output_path / "after").read_text().strip() == "7"
+
+        job = ppg.ExternalJob(
             output_path,
-            {"out": "out.txt"},
-            ["echo", "test"],
-            call_after=after_func
+            {},
+            lambda: ["echo", "4"],
+            call_before=lambda job: (job.output_path / "before").write_text("6"),
+            call_after=lambda job: (job.output_path / "after").write_text("8"),
         )
         ppg.run()
-        assert c.count == 1
-        out_value1 = job3["out"].read_text()
-        
-        # Change the call_after function
-        def after_func_modified(job):
-            c.count()
-            write(job["out"], f"modified-{c.count}")
-        
-        job3 = ppg.ExternalJob(
-            output_path,
-            {"out": "out.txt"},
-            ["echo", "test"],
-            call_after=after_func_modified
-        )
-        ppg.run()
-        assert c.count > 1  # Should have run again
-        out_value2 = job3["out"].read_text()
-        assert out_value1 != out_value2
-        assert "modified" in out_value2
+        # ppg.new()
+        assert job["stdout"].read_text().strip() == "4"
+        assert (job.output_path / "before").read_text().strip() == "6"
+        assert (job.output_path / "after").read_text().strip() == "8"

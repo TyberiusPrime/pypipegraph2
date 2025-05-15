@@ -82,3 +82,4 @@ tests/**/run
 *shu*
 examples/run
 python/localscope
+.aider*

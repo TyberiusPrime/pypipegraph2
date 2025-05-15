@@ -182,10 +182,10 @@ class LocalscopeException(RuntimeError):
                     )
                     lines = textwrap.indent(text, "    ").split("\n")
                     offset = lineno - start
-                    lines[offset] = "--> " + lines[offset][4:]
-
-                    # Don't show all lines of the source.
-                    lines = lines[max(0, offset - 2) : offset + 3]
+                    if offset >= 0 or offset < len(lines):
+                        lines[offset] = "--> " + lines[offset][4:]
+                        # Don't show all lines of the source.
+                        lines = lines[max(0, offset - 2) : offset + 3]
                     source = "\n".join(lines)
                 except OSError:  # pragma: no cover
                     pass
