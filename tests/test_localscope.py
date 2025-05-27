@@ -67,3 +67,10 @@ class TestLocalScope:
 
         with pytest.raises(TypeError):
             ppg2.FunctionInvariant(inner, allowed_non_locals=[5])
+
+
+    def test_attribute_jobs_check(self):
+
+        s = 5
+        with pytest.raises(ppg2.FunctionUsesUndeclaredNonLocalsError):
+            ppg2.AttributeLoadingJob('jobname', self, 'attrname', lambda: 5 + s)

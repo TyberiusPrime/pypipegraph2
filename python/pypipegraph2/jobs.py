@@ -2270,6 +2270,7 @@ class AttributeLoadingJob(
         self.depend_on_function = depend_on_function
         self.object = object
         self.attribute_name = attribute_name
+        _verify_function_outside_variables(data_function, allowed_non_locals, job_id)
         self.callback = data_function
         self.do_cleanup = True
         super().__init__([job_id], resources=resources)
@@ -2452,27 +2453,6 @@ def CachedDictEntryLoadingJob(
 ):
     return _CachedAttributeLoadingJob(
         DictEntryLoadingJob,
-        cache_filename,
-        object,
-        attribute_name,
-        data_function,
-        depend_on_function,
-        resources,
-        allowed_non_locals,
-    )
-
-
-def CachedAttributeLoadingJob(
-    cache_filename,
-    object,
-    attribute_name,
-    data_function,
-    depend_on_function=True,
-    resources: Resources = Resources.SingleCore,
-    allowed_non_locals: List[str] = None,
-):
-    return _CachedAttributeLoadingJob(
-        AttributeLoadingJob,
         cache_filename,
         object,
         attribute_name,
@@ -3094,7 +3074,7 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob, _InputHashAwareJobMix
         #     with lock:
         #         self._log_local_usage(by_input_key)
 
-        retries = 10 # bound it, forever means you'd never see any bug in here
+        retries = 10  # bound it, forever means you'd never see any bug in here
         while retries > 0:
             retries -= 1
             try:
@@ -3334,8 +3314,8 @@ class ExternalOutputPath:
     in there (or ExternalOutputPat("output.txt")
     """
 
-    def __init__(self, sub_path = ""):
-        assert not sub_path.startswith('/')
+    def __init__(self, sub_path=""):
+        assert not sub_path.startswith("/")
         self.path = sub_path
 
     # implement /
@@ -3404,6 +3384,7 @@ def ExternalJob(
 
     """
     import shlex
+
     output_path = Path(output_path)
     assert isinstance(additional_created_files, dict)
     for k, v in additional_created_files.items():
@@ -3412,15 +3393,16 @@ def ExternalJob(
                 f"additional_created_files contained Paths when it should be strs relative to output_path. {k} was {v}"
             )
 
-    def run(output_files,
-            cmd_or_cmd_func = cmd_or_cmd_func,
-            call_before = call_before,
-            call_after = call_after,
-            cwd = cwd,
-            allowed_return_codes=allowed_return_codes,
-            output_path = output_path,
-            start_new_session = start_new_session
-            ):
+    def run(
+        output_files,
+        cmd_or_cmd_func=cmd_or_cmd_func,
+        call_before=call_before,
+        call_after=call_after,
+        cwd=cwd,
+        allowed_return_codes=allowed_return_codes,
+        output_path=output_path,
+        start_new_session=start_new_session,
+    ):
         import subprocess
 
         output_files["stdout"].parent.mkdir(exist_ok=True, parents=True)
@@ -3438,7 +3420,9 @@ def ExternalJob(
             )
             for x in cmd
         ]
-        output_files["cmd"].write_text(" ".join([shlex.quote(str(x)) for x in cmd]) + "\n")
+        output_files["cmd"].write_text(
+            " ".join([shlex.quote(str(x)) for x in cmd]) + "\n"
+        )
         p = subprocess.Popen(
             cmd,
             stdout=open(output_files["stdout"], "wb"),
