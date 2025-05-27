@@ -247,7 +247,7 @@ class TestFileGeneratingJob:
         for i in range(1):
             j = ppg.FileGeneratingJob(
                 "out/%i" % i,
-                lambda i=i: write("out/%i" % i, "b"),
+                lambda of, i=i: write("out/%i" % of, "b"),
                 depend_on_function=False,
             )
 

@@ -713,6 +713,12 @@ class MultiFileGeneratingJob(Job):
             raise TypeError(
                 "A *FileGeneratingJobs callback function must take at least one parameter: The file(s) to create"
             )
+        # verify that the first parameter does not have a default value bound
+        first_param = next(iter(sig.parameters.values()))
+        if first_param.default is not inspect.Parameter.empty:
+            raise TypeError(
+                "The first parameter of a FileGeneratingJob callback function is the output filename and must not have a default value bound. That's typically a signature of a mistake."
+            )
 
         _verify_function_outside_variables(func, allowed_non_locals, job_id)
         return func
@@ -3342,6 +3348,7 @@ def ExternalJob(
     cwd: Optional[Union(Path, str)] = None,
     start_new_session: bool = False,
     std_prefix="",
+    env=None,
 ):
     """A job that calls an external program,
     logging the command, stdout & stderr to files
@@ -3402,6 +3409,7 @@ def ExternalJob(
         allowed_return_codes=allowed_return_codes,
         output_path=output_path,
         start_new_session=start_new_session,
+        env=env,
     ):
         import subprocess
 
@@ -3429,6 +3437,7 @@ def ExternalJob(
             stderr=open(output_files["stderr"], "wb"),
             cwd=output_path if cwd is None else cwd,
             start_new_session=start_new_session,
+            env=env
         )
         _, _ = p.communicate()
         output_files["return_code"].write_text(str(p.returncode))
@@ -3464,6 +3473,7 @@ def ExternalJob(
         res.depends_on(FunctionInvariant(res.job_id + "_cmd", cmd_or_cmd_func))
     else:
         res.depends_on(ParameterInvariant(res.job_id + "_cmd", cmd_or_cmd_func))
+    res.depends_on(ParameterInvariant(res.job_id + "_env", env))
     if call_before is not None:
         res.depends_on(FunctionInvariant(res.job_id + "_call_before", call_before))
     if call_after is not None:

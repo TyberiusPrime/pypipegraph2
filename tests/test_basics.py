@@ -1603,6 +1603,12 @@ class TestPypipegraph2:
         with pytest.raises(TypeError):
             ppg.FileGeneratingJob("A", lambda: None)
 
+    def test_declaring_filegen_with_function_with_first_parameter_is_default(self):
+        with pytest.raises(TypeError):
+            a = 5
+            ppg.FileGeneratingJob("A", lambda a=a: None)
+
+
     def test_multi_file_generating_job_with_dict_file_definition(self):
         def ab(files):
             files["a"].write_text("A")
