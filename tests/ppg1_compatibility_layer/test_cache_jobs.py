@@ -159,7 +159,7 @@ class TestCachedAttributeJob:
         o = Dummy()
         load_attr = ppg.AttributeLoadingJob("load_attr", o, "o", lambda: 55)
 
-        def calc():
+        def calc(o=o):
             return o.o
 
         def out():
@@ -229,7 +229,7 @@ class TestCachedAttributeJob:
     ):
         o = Dummy()
 
-        def calc():
+        def calc(o=o):
             return list(range(0, o.b))
 
         job = ppg.CachedAttributeLoadingJob("a", o, "a", calc)
@@ -268,7 +268,7 @@ class TestCachedAttributeJob:
             append("out/A", "A")
             return 1 # any constant, No UseInputHashesForOutput for ppg1
 
-        def calc():
+        def calc(o=o):
             append("out/B", "B")
             return o.a * 2
 

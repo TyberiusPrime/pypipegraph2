@@ -1285,7 +1285,7 @@ class TestAttributeJob:
         def load():
             return "shu"
 
-        def load2():
+        def load2(o=o):
             return o.a + "sha"
 
         job = ppg.AttributeLoadingJob("load_dummy_shu", o, "a", load)
@@ -1321,7 +1321,7 @@ class TestAttributeJob:
         o = Dummy()
         tf = "out/testfile"
 
-        def load():
+        def load(tf=tf):
             counter(tf)
             return "shu"
 
@@ -1339,7 +1339,7 @@ class TestAttributeJob:
         o = Dummy()
         tf = "out/testfile"
 
-        def load():
+        def load(tf=tf):
             write(tf, "hello")
             return "shu"
 

@@ -2388,7 +2388,7 @@ def _CachedAttributeLoadingJob(
                 pass
             raise
 
-    def load(object=object, attribute_name=attribute_name):
+    def load(object=object, attribute_name=attribute_name, cache_filename=cache_filename):
         try:
             with open(cache_filename, "rb") as op:
                 raw = op.read()
