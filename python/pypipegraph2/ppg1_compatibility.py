@@ -314,9 +314,9 @@ def _ignore_code_changes(job):
         log_job_trace(f"ignoring changes for {job.job_id}")
         util.global_pipegraph.job_dag.remove_edge(job.func_invariant.job_id, job.job_id)
         for k in job.func_invariant.outputs:
-            print(
-                f"removing from {job.job_id} input: {k}, id: {util.global_pipegraph.job_inputs[job.job_id]}"
-            )
+            # print(
+            #     f"removing from {job.job_id} input: {k}, id: {util.global_pipegraph.job_inputs[job.job_id]}"
+            # )
             util.global_pipegraph.job_inputs[job.job_id].remove(k)
 
         if hasattr(job.func_invariant, "usage_counter"):
