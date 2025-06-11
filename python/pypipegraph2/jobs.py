@@ -3390,7 +3390,6 @@ def ExternalJob(
     @start_new_session is passed on to subprocess.Popen
 
     """
-    import shlex
 
     output_path = Path(output_path)
     assert isinstance(additional_created_files, dict)
@@ -3428,9 +3427,7 @@ def ExternalJob(
             )
             for x in cmd
         ]
-        output_files["cmd"].write_text(
-            " ".join([shlex.quote(str(x)) for x in cmd]) + "\n"
-        )
+        output_files["cmd"].write_text(external_job_pretty_print_cmd(cmd))
         p = subprocess.Popen(
             cmd,
             stdout=open(output_files["stdout"], "wb"),
@@ -3478,4 +3475,36 @@ def ExternalJob(
         res.depends_on(FunctionInvariant(res.job_id + "_call_before", call_before))
     if call_after is not None:
         res.depends_on(FunctionInvariant(res.job_id + "_call_after", call_after))
+    return res
+
+
+def external_job_pretty_print_cmd(cmd_args: [str]) -> str:
+    """
+    Pretty prints a command line from a list of exec arguments,
+    grouping '--key value' pairs intelligently across multiple lines.
+    """
+    import shlex
+    lines = []
+    first = True
+    for arg in cmd_args:
+        if first:
+            first = False
+            lines.append(shlex.quote(str(arg)))
+        elif arg.startswith("-"):
+            # --key value
+            lines.append("  " + shlex.quote(str(arg)))
+        else:
+            lines[-1] += " " + shlex.quote(str(arg))
+
+    return ' \\\n'.join(lines)
+
+def external_job_pretty_print_cmd_flo(cmd: List[Union[str, ExternalOutputPath]]) -> str:
+    import shlex
+
+    parts = [shlex.quote(str(x)) for x in cmd]
+    res = parts[0]
+    if len(res) > 1:
+        res += " \\\n"
+        for x in parts[1:]:
+            res += f"  {x} \\\n" + "\n"
     return res

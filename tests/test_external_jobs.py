@@ -49,7 +49,8 @@ class TestExternalJobs:
         assert job["stderr"].read_text().strip() == "hello_err"
         assert (
             job["cmd"].read_text().strip()
-            == "bash -c 'echo hello; echo 42 > two.txt; echo hello_err >&2'"
+            == """bash \\
+  -c 'echo hello; echo 42 > two.txt; echo hello_err >&2'"""
         )
         assert job["stdout"].name.startswith("hello_")
         assert job["stderr"].name.startswith("hello_")
@@ -214,3 +215,42 @@ class TestExternalJobs:
         assert job["stdout"].read_text().strip() == "4"
         assert (job.output_path / "before").read_text().strip() == "6"
         assert (job.output_path / "after").read_text().strip() == "8"
+
+
+def test_external_job_pretty_print_cmd():
+    from pypipegraph2.jobs import external_job_pretty_print_cmd
+
+    test_cases = [
+        (
+            [
+                "python",
+                "script.py",
+                "--input",
+                "data.txt",
+                "--output",
+                "results.txt",
+                "--verbose",
+            ],
+            """python script.py \\
+  --input data.txt \\
+  --output results.txt \\
+  --verbose""",
+        ),
+        (
+            ["cmd", "--arg1", "val1", "--arg2", "val2", "--flag", "--arg3", "val3"],
+            """cmd \\
+  --arg1 val1 \\
+  --arg2 val2 \\
+  --flag \\
+  --arg3 val3""",
+        ),
+        (
+            ["exec", "--path", "/some/long/path with spaces", "--enable", "--timeout", "30"],
+           """exec \\
+  --path '/some/long/path with spaces' \\
+  --enable \\
+  --timeout 30""",
+        ),
+    ]
+    for input, output in test_cases:
+        assert output == external_job_pretty_print_cmd(input)
