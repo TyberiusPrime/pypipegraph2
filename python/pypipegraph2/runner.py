@@ -43,13 +43,14 @@ watcher_ignored_processes = None
 watcher_session_id = None
 
 
+
 def get_same_session_id_processes():
     for proc in psutil.process_iter():
         try:
             proc_sid = os.getpgid(proc.pid)
             if proc_sid == watcher_session_id:
                 yield proc
-        except psutil.ProcessLookupError:
+        except psutil.Error:
             continue
 
 
