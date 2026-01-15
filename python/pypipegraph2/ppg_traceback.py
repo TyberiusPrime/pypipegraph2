@@ -18,6 +18,7 @@ import sys
 import os
 from dataclasses import dataclass, field
 import textwrap
+from rich.markup import escape
 
 _load_cwd = os.path.abspath(os.getcwd())
 
@@ -212,6 +213,7 @@ class Trace:
                                 c = "> "
                             else:
                                 c = "  "
+                            line = escape(line)
                             out.append(f"\t{c}{ii} {line}")
                         if frame.locals:
                             render_locals(frame)

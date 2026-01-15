@@ -727,10 +727,11 @@ class Runner:
                         RunMode.CONSOLE,
                         RunMode.CONSOLE_INTERACTIVE,
                     ):
-                        console.print(
-                            stacks._format_rich_traceback_fallback(
+                        formated = stacks._format_rich_traceback_fallback(
                                 False, True, skip_ppg=True
                             ).replace("\n", "\n\t")
+                        console.print(
+                            formated
                         )
                     else:
                         log_warning(
