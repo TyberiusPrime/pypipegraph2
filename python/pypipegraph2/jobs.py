@@ -1608,7 +1608,7 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
                     set_b = set()
                     for x in a.__closure__:
                         xc = x.cell_contents
-                        in_a += f"\t{id(xc)} {type(xc) }{_safe_str(xc)[:40]}\n"
+                        in_a += f"\t{id(xc)} {type(xc)}{_safe_str(xc)[:40]}\n"
                         try:
                             set_a.add(xc)
                         except:  # noqa: E722  pragma: no cover
@@ -2394,7 +2394,9 @@ def _CachedAttributeLoadingJob(
                 pass
             raise
 
-    def load(object=object, attribute_name=attribute_name, cache_filename=cache_filename):
+    def load(
+        object=object, attribute_name=attribute_name, cache_filename=cache_filename
+    ):
         try:
             with open(cache_filename, "rb") as op:
                 raw = op.read()
@@ -3434,7 +3436,7 @@ def ExternalJob(
             stderr=open(output_files["stderr"], "wb"),
             cwd=output_path if cwd is None else cwd,
             start_new_session=start_new_session,
-            env=env
+            env=env,
         )
         _, _ = p.communicate()
         output_files["return_code"].write_text(str(p.returncode))
@@ -3484,6 +3486,7 @@ def external_job_pretty_print_cmd(cmd_args: [str]) -> str:
     grouping '--key value' pairs intelligently across multiple lines.
     """
     import shlex
+
     lines = []
     first = True
     for arg in cmd_args:
@@ -3496,7 +3499,8 @@ def external_job_pretty_print_cmd(cmd_args: [str]) -> str:
         else:
             lines[-1] += " " + shlex.quote(str(arg))
 
-    return ' \\\n'.join(lines)
+    return " \\\n".join(lines)
+
 
 def external_job_pretty_print_cmd_flo(cmd: List[Union[str, ExternalOutputPath]]) -> str:
     import shlex
@@ -3508,3 +3512,48 @@ def external_job_pretty_print_cmd_flo(cmd: List[Union[str, ExternalOutputPath]])
         for x in parts[1:]:
             res += f"  {x} \\\n" + "\n"
     return res
+
+
+def ShellJob(
+    output_path: Union[str, Path],
+    additional_created_files: Dict[str, Union[str, Path, ExternalOutputPath]],
+    shell_script: str,
+    **kwargs,
+):
+    if not callable(shell_script) and not (shell_script.strip().startswith("#!")):
+        raise ValueError(
+            "ShellJob requires a shell script that starts with a she-bang (#!) line"
+        )
+    output_path = Path(output_path)
+
+    if "call_before" in kwargs:
+        parent_call_before = kwargs["call_before"]
+        del kwargs["call_before"]
+    else:
+        parent_call_before = None
+
+    def call_before(
+        job, parent_call_before=parent_call_before, shell_script_or_callback=shell_script
+    ):
+        job.output_path.mkdir(exist_ok=True, parents=True)
+        output_script = job.output_path / "script.sh"
+        if callable(shell_script_or_callback):
+            shell_script = shell_script_or_callback(job).strip()
+            if not (shell_script.startswith("#!")):
+                raise ValueError(
+                    "ShellJob requires a shell script that starts with a she-bang (#!) line."
+                )
+        else:
+            shell_script = shell_script_or_callback.strip()
+        output_script.write_text(shell_script)
+        output_script.chmod(0o755)
+        if parent_call_before is not None:
+            parent_call_before(job)
+
+    return ExternalJob(
+        output_path,
+        additional_created_files,
+        cmd_or_cmd_func=[str((output_path / "script.sh").absolute())],
+        call_before=call_before,
+        **kwargs,
+    )

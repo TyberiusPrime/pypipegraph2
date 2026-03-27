@@ -34,6 +34,7 @@ from .jobs import (
     DependsOnInvariant,
     CachedJobTuple,
     PlotJobTuple,
+    ShellJob,
 )
 
 from .exceptions import (
@@ -302,6 +303,7 @@ __all__ = [
     "SharedMultiFileGeneratingJob",
     "ExternalJob",
     "ExternalOutputPath",
+    "ShellJob",
     "PPGException",
     "NotADag",
     "FatalGraphException",
@@ -323,4 +325,7 @@ __all__ = [
     "inside_ppg",
     "assert_uniqueness_of_object",
     "enable_rust_logging",
+    "DependsOnInvariant",
+    "CachedJobTuple",
+    "PlotJobTuple",
 ]

@@ -244,7 +244,7 @@ def _localscope(
     if not allow_closure:
         forbidden_opnames.add("LOAD_DEREF")
 
-    LOGGER.info("analysing instructions for %s...", func)
+    LOGGER.debug("analysing instructions for %s...", func)
     lineno: Any = None
     if _errors is None:
         _errors = []
@@ -252,7 +252,7 @@ def _localscope(
     else:
         top_level = False
     for instruction in dis.get_instructions(code):
-        LOGGER.info(instruction)
+        LOGGER.debug(instruction)
         # TODO: Conditional coverage.
         if PY_LT_3_13:  # pragma: no cover
             if instruction.starts_line is not None:  # type: ignore[attr-defined]
