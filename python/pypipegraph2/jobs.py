@@ -2308,6 +2308,7 @@ class AttributeLoadingJob(
             f"{self.job_id} loaded hash hash {last_hash} -current: {current_hash}"
         )
 
+        assert current_hash is not None
         if current_hash != last_hash:
             value = self.callback()
             if value is None:
@@ -2369,6 +2370,10 @@ class DictEntryLoadingJob(AttributeLoadingJob):
     def cleanup(self, runmode):
         if runmode != RunMode.CONSOLE_INTERACTIVE:
             del self.object[self.attribute_name]
+            try:
+                del self.object["_" + self.attribute_name + "_hash"]
+            except KeyError:
+                pass
 
 
 def _CachedAttributeLoadingJob(
@@ -3533,7 +3538,9 @@ def ShellJob(
         parent_call_before = None
 
     def call_before(
-        job, parent_call_before=parent_call_before, shell_script_or_callback=shell_script
+        job,
+        parent_call_before=parent_call_before,
+        shell_script_or_callback=shell_script,
     ):
         job.output_path.mkdir(exist_ok=True, parents=True)
         output_script = job.output_path / "script.sh"
