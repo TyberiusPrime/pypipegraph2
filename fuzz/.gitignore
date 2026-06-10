@@ -1,5 +1,5 @@
 out/
 target/
 target_claude/
-out_postfix/
+out_*/
 core*

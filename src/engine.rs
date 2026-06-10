@@ -1452,11 +1452,35 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                             );
                         }
                         JobState::Output(JobStateOutput::FinishedSkipped) => {
+                            // A skipped job retroactively learns of an upstream
+                            // failure: a validated ephemeral it had been skipped
+                            // 'on the word of' ran after all (someone else needed
+                            // it) and failed / changed its output.
+                            // We flag the job (see
+                            // test_ephemeral_retriggered_changing_output),
+                            // but we must *not* propagate further: this job never
+                            // ran, its on-disk output is unchanged, so its
+                            // downstreams' premises still hold - and they may
+                            // already be ReadyToRun/Running/FinishedSuccess
+                            // ('unexpected was 7' otherwise).
+                            // The next run re-converges: the failed ephemeral
+                            // lost its history, reruns, and invalidates this job
+                            // through the edge history.
                             set_node_state!(
                                 j,
                                 JobState::Output(JobStateOutput::FinishedUpstreamFailure),
                                 self.gen
                             );
+                            propagate = false;
+                        }
+                        JobState::Ephemeral(JobStateEphemeral::FinishedSkipped) => {
+                            // same as the Output case above.
+                            set_node_state!(
+                                j,
+                                JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure),
+                                self.gen
+                            );
+                            propagate = false;
                         }
                         _ => {
                             return Err(PPGEvaluatorError::InternalError(format!(

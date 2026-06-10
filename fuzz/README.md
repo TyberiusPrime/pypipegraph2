@@ -83,14 +83,20 @@ crashing seed corpora; fixed entries are kept as regression inputs).
   `assert!(job.state.is_failed() || _job_and_downstreams_are_ephemeral)`
   panic in `new_history()` (engine.rs ~796): a FinishedSkipped ephemeral with
   `history_output = None` whose downstreams are not all ephemeral.
-* `upstream_failure_after_skip_unexpected_was_7` — **still open**: an
-  upstream-failure wave reaches an Output that already `FinishedSkipped`
-  (it validated against a pending-but-validated ephemeral); the skip is
-  converted to `FinishedUpstreamFailure` and propagated into downstreams
-  that already proceeded (`ReadyToRun`/`Running`/`FinishedSuccess`) ->
-  `InternalError("unexpected was 7 ...")`. See
+* `upstream_failure_after_skip_unexpected_was_7` — **fixed 2026-06-10**
+  (the upstream-failure wave now stops at a converted skipped job): an
+  upstream-failure wave reached a job that already `FinishedSkipped`
+  (it validated against a pending-but-validated ephemeral); the skip was
+  converted to `FinishedUpstreamFailure` (deliberate, pinned by
+  `test_ephemeral_retriggered_changing_output`) and then *propagated* into
+  downstreams that already proceeded (`ReadyToRun`/`Running`/
+  `FinishedSuccess`) -> `InternalError("unexpected was 7 ...")`. Since the
+  skipped job never ran and its on-disk output is unchanged, its
+  downstreams' premises still hold - the conversion is kept for reporting,
+  the propagation is not. See
   `test_upstream_failure_after_skip_hits_proceeded_downstream` in
-  `src/tests.rs` (ignored test).
+  `src/tests.rs`.
 
-Before the fix, a 4-minute AFL run (2.9M execs) found all three buckets
-(149 crashes); after it, only the `unexpected was 7` bucket remains.
+Before the fixes, a 4-minute AFL run (2.9M execs) found all three buckets
+(149 crashes); with both fixes in, all 227 historical crash inputs pass and
+fresh AFL runs find nothing.

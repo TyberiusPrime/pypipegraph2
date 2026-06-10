@@ -2684,7 +2684,9 @@ fn test_fail_panic_after_20231120_fix2() { //and another one.
 //
 // These tests document the *intended* behavior (a validated-by-edges
 // ephemeral without job history must be treated conservatively, i.e. rerun)
-// and currently fail with the InternalError above.
+// they failed with the InternalError above until the fix in
+// update_validation_status (edges-validated ephemeral without job-output
+// history -> Invalidated, i.e. conservative rerun).
 // ----------------------------------------------------------------------------
 
 #[test]
@@ -2724,7 +2726,7 @@ fn test_ephemeral_failed_last_run_validated_by_edges_only() {
     // update_validation_status(D) needs history['E'] -> InternalError
     // (in production: swallowed -> 'no jobs ready, none running' deadlock).
     ro.outputs.insert("X".to_string(), "x1".to_string());
-    ro.run(&[]).unwrap(); // <- currently dies with 'internal error ... Should have had history for it, if it was validated?!'
+    ro.run(&[]).unwrap(); // used to die: 'internal error ... Should have had history for it, if it was validated?!'
 
     // Intended behavior: E can not prove its output unchanged (no history),
     // so it must run again; D revalidates against E's (identical) output.
@@ -2765,7 +2767,7 @@ fn test_resume_with_ephemeral_edge_history_but_no_job_history() {
 
     let mut g = PPGEvaluator::new_with_history(history, strat);
     create_graph(&mut g);
-    g.event_startup().unwrap(); // <- currently fails with the InternalError
+    g.event_startup().unwrap(); // used to fail with the InternalError
 
     // Intended: E must rerun (it can't prove anything about its output).
     assert_eq!(g.query_ready_to_run(), set!["E"]);
@@ -2776,9 +2778,9 @@ fn test_resume_with_ephemeral_edge_history_but_no_job_history() {
 }
 
 #[test]
-#[ignore = "documents unfixed bug: 'unexpected was 7' - upstream failure propagates through an already-skipped Output into downstreams that already proceeded. Run with --ignored."]
 fn test_upstream_failure_after_skip_hits_proceeded_downstream() {
-    // Found by fuzz/ (cargo-afl). Second distinct state machine hole:
+    // Found by fuzz/ (cargo-afl). Second distinct state machine hole
+    // (fixed 2026-06-10):
     //
     // A *validated* ephemeral E lets its downstream Output B skip while E
     // itself is still pending (ReadyButDelayed - a validated ephemeral can
@@ -2787,13 +2789,17 @@ fn test_upstream_failure_after_skip_hits_proceeded_downstream() {
     //
     // If E later runs after all (another downstream D required it) and
     // *fails*, JobUpstreamFailure(B) converts the already-FinishedSkipped B
-    // to FinishedUpstreamFailure and propagates JobUpstreamFailure to C -
-    // but C is in Always(ReadyToRun) (or Running/FinishedSuccess), which the
-    // JobUpstreamFailure handler does not expect:
-    //   InternalError("unexpected was 7 ...")
-    // In production this surfaces out of event_job_failure/success, gets
-    // swallowed by runner.py (~line 1011), and the run deadlocks with
-    // 'Evaluator is not finished, reports no jobs ready to run, ...'.
+    // to FinishedUpstreamFailure (deliberate, see
+    // test_ephemeral_retriggered_changing_output) - but it used to also
+    // propagate JobUpstreamFailure to C, which may be in
+    // ReadyToRun/Running/FinishedSuccess, states the handler does not
+    // expect: InternalError("unexpected was 7 ...") -> on the python side
+    // the run died / deadlocked.
+    //
+    // The fix: the wave stops at the converted skipped job. B never ran,
+    // its on-disk output is unchanged, so C's premises still hold; only
+    // B's pedigree is suspect, which the *next* run resolves (E lost its
+    // history -> reruns -> invalidates B through the edge history).
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
         g.add_node("E", JobKind::Ephemeral); // root
         g.add_node("X", JobKind::Always); // root
@@ -2826,12 +2832,13 @@ fn test_upstream_failure_after_skip_hits_proceeded_downstream() {
     assert_eq!(g.query_ready_to_run(), set!["E", "C"]);
     g.event_now_running("E").unwrap();
     // E fails -> upstream-failure wave reaches the already skipped B,
-    // which converts to FinishedUpstreamFailure and propagates to C,
-    // which is Always(ReadyToRun) -> 'unexpected was 7' InternalError.
-    g.event_job_finished_failure("E").unwrap(); // <- currently fails here
+    // which converts to FinishedUpstreamFailure - and stops there.
+    g.event_job_finished_failure("E").unwrap();
 
-    // Intended behavior: C may still run (its input B was *validated*,
-    // B's history did not change - E's failure only dooms D).
+    // B is flagged for reporting, D (which actually needed E now) too.
+    assert_eq!(g.query_upstream_failed(), set!["B", "D"]);
+    // C may still run: its input B was *validated*, B's on-disk output
+    // did not change - E's failure only dooms D.
     assert_eq!(g.query_ready_to_run(), set!["C"]);
     g.event_now_running("C").unwrap();
     g.event_job_finished_success("C", "c".to_string()).unwrap();
