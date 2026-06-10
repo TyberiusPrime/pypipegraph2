@@ -1939,6 +1939,23 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         if not_done == 0 {
             if invalidated {
                 Ok(ValidationStatus::Invalidated)
+            } else if matches!(jobs[node_idx as usize].state, JobState::Ephemeral(_))
+                && !history.contains_key(&jobs[node_idx as usize].job_id)
+            {
+                // An ephemeral may only count as validated if we still have its
+                // job-output history: downstream validation and the skip path
+                // read history[job_id] once we're NotReady(Validated)/ReadyButDelayed.
+                // A previous failed/aborted run removes the job keys but keeps the
+                // (still matching) edge keys, so edges alone prove nothing about
+                // the output -> conservatively rerun.
+                // (Output jobs are covered in identify_missing_outputs; an
+                // ephemeral with a healthy history always has this key - it either
+                // ran when it first appeared, or was pruned as an ephemeral leaf.)
+                debug!(
+                    "\t\t edges validated {}, but no job-output history -> Invalidated",
+                    jobs[node_idx as usize].job_id
+                );
+                Ok(ValidationStatus::Invalidated)
             } else {
                 Ok(ValidationStatus::Validated)
             }

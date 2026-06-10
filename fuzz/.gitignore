@@ -1,0 +1,5 @@
+out/
+target/
+target_claude/
+out_postfix/
+core*

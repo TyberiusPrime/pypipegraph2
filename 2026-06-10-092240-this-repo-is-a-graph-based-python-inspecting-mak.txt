@@ -1,0 +1,733 @@
+ ▐▛███▜▌   Claude Code v2.1.170
+▝▜█████▛▘  Fable 5 · Claude Pro
+  ▘▘ ▝▝    /project
+
+ ▎ Fable 5 is here! Our newest model for complex, long-running work
+ ▎ Included in your plan limits until Jun 22, then switch to usage credits to continue.
+
+❯ This repo is a graph based, python inspecting make with a quest for
+  reproducibility. On the rust side, that's doing the hard graph evealuation
+  (@src/engine.rs) it's justh three kinds of jobs, but the ephemeral one
+  together
+  with the evaluation rules (see @docs/content/docs/concepts/ ) make for some
+  gnarly code flows.
+
+  There is at least one bug left that triggers '"Evaluator is not finished,
+  reports no jobs ready to run, but no jobs currently running -> a bug in the
+  state machine. No way forward, aborting graph executing (cleanly). Graph
+  written to debug.txt "' on the python side ( @python/pypipegraph2/runner.py ,
+  line 797). It only seems to happen in resumed projects, so something to do
+  with having history.
+
+  There's a test helper script in @dev_utils/run_pytest.sh that compiles the
+  rust
+  side before running python.o
+
+  I want you too look long and hard at the code,
+  derive some hypothesis to what might go wrong, then write test cases.
+  Don't fix it yet, your goal is to find it and describe it to me.
+
+  Perhaps create a cargo-afl bazzed fuzzer to simulate graphs with history:
+  cargo-afl is available at
+  /nix/store/7bbgfnflvi7i2fgvw5dv10bvbjqzrkdi-cargo-afl-wrapped/bin/cargo-afl
+  (for now, will be integrated into the flake, not your job)
+
+  ⎿  Listed directory docs/content/docs/concepts/
+  ⎿  Read python/pypipegraph2/runner.py (1097 lines)
+  ⎿  Read dev_utils/run_pytest.sh (10 lines)
+
+● I'll start by reading the engine and the concept docs to understand the state
+  machine.
+
+  Read 3 files, listed 1 directory (ctrl+o to expand)
+
+● Now let me skim the existing test suite and the other concept docs.
+
+  Searched for 1 pattern, read 4 files, listed 1 directory (ctrl+o to expand)
+
+● Bash(grep -rn "No way forward\|reconsider_all\|state machine" /project/python
+      /project/todo.md /project/CHANGELOG.rst 2>/dev/null | grep -v ".pyc" |
+      head -20; echo -…)
+  ⎿  /project/python/pypipegraph2/runner.py:798:
+                      "Evaluator is not finished, reports no jobs ready to
+     run, but no jobs currently running -> a bug in the state machine. No w
+     … +15 lines (ctrl+o to expand)
+
+● Bash(ls /project/dev_utils/; grep -n "afl\|cargo-afl" /project/flake.nix |
+      head; cargo --version 2>/dev/null; ls
+      /nix/store/7bbgfnflvi7i2fgvw5dv10bvbjqzrkdi-cargo-af…)
+  ⎿  bacon.sh
+     edit_version.py
+     interactive_test.py
+     … +10 lines (ctrl+o to expand)
+
+  Read 1 file (ctrl+o to expand)
+
+● Update(src/tests.rs)
+  ⎿  Added 116 lines
+      2659      start_logging();
+      2660      let g = ro.run(&[]).unwrap();
+      2661  }
+      2662 +// ----------------------------------------------------------
+           +------------------
+      2663 +// 2026-06-10: Test cases for the 'Evaluator is not finished,
+           + reports no jobs
+      2664 +// ready to run, but no jobs currently running' bug observed
+           +on resumed
+      2665 +// projects (runner.py, line ~797).
+      2666 +//
+      2667 +// Hypothesis under test:
+      2668 +//   When an ephemeral E ran and *failed* (or was aborted) in
+           + a previous run,
+      2669 +//   new_history() removes E's job-output key ('E') and input
+           +-list key
+      2670 +//   ('E!!!'), but the *edge* keys ('U!!!E', 'E!!!D') survive
+           + - they are only
+      2671 +//   filtered when nodes/edges disappear, never removed on fa
+           +ilure.
+      2672 +//
+      2673 +//   On resume, E is then validated purely from the (still ma
+           +tching) edge
+      2674 +//   history -> NotReady(Validated) -> ReadyButDelayed. When
+           +a downstream's
+      2675 +//   update_validation_status() then looks at the not-yet-fin
+           +ished upstream E,
+      2676 +//   it unconditionally requires history['E'] to exist (engin
+           +e.rs,
+      2677 +//   'Should have had history for it, if it was validated?!')
+           + and returns
+      2678 +//   an InternalError.
+      2679 +//
+      2680 +//   In production that error surfaces out of event_job_succe
+           +ss(); the python
+      2681 +//   runner swallows it as a 'constraint violation' (runner.p
+           +y ~line 1011),
+      2682 +//   the engine's signal cascade is lost, the downstream stay
+           +s NotReady
+      2683 +//   forever -> the deadlock message.
+      2684 +//
+      2685 +// These tests document the *intended* behavior (a validated-
+           +by-edges
+      2686 +// ephemeral without job history must be treated conservative
+           +ly, i.e. rerun)
+      2687 +// and currently fail with the InternalError above.
+      2688 +// ----------------------------------------------------------
+           +------------------
+      2689 +
+      2690 +#[test]
+      2691 +fn test_ephemeral_failed_last_run_validated_by_edges_only() {
+      2692 +    // U -> E -> D, X -> D.
+      2693 +    // Run 2 invalidates D via X, so the (validated!) E is re
+           +quired, runs,
+      2694 +    // and fails. Run 3 reverts X's output - now nothing requ
+           +ires E,
+      2695 +    // but E's job history is gone while its edges still vali
+           +date it.
+      2696 +    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>)
+           + {
+      2697 +        g.add_node("U", JobKind::Always);
+      2698 +        g.add_node("X", JobKind::Always);
+      2699 +        g.add_node("E", JobKind::Ephemeral);
+      2700 +        g.add_node("D", JobKind::Output);
+      2701 +        g.depends_on("E", "U");
+      2702 +        g.depends_on("D", "E");
+      2703 +        g.depends_on("D", "X");
+      2704 +    }
+      2705 +    let mut ro = TestGraphRunner::new(Box::new(create_graph))
+           +;
+      2706 +    ro.outputs.insert("X".to_string(), "x1".to_string());
+      2707 +    ro.run(&[]).unwrap();
+      2708 +    assert_eq!(ro.run_counters.get("E"), Some(&1));
+      2709 +
+      2710 +    // X changes output -> D invalidated -> E required (still
+           + Validated,
+      2711 +    // U unchanged) -> E runs -> fails -> D upstream-failed.
+      2712 +    // new_history removes 'E' and 'E!!!', keeps 'U!!!E' (mat
+           +ching U)
+      2713 +    // and the stale-but-restorable 'X!!!D' (still x1, D neve
+           +r reran).
+      2714 +    ro.outputs.insert("X".to_string(), "x2".to_string());
+      2715 +    ro.run(&["E"]).unwrap();
+      2716 +    assert_eq!(ro.run_counters.get("E"), Some(&2));
+      2717 +    assert!(!ro.history.contains_key("E"));
+      2718 +    assert!(!ro.history.contains_key("E!!!"));
+      2719 +    assert!(ro.history.contains_key("U!!!E")); // <- the pois
+           +oned state
+      2720 +    assert_eq!(ro.history.get("X!!!D").map(|s| s.as_str()), S
+           +ome("x1"));
+      2721 +
+      2722 +    // X reverts to x1: D's edges all match again -> D NotRea
+           +dy(Unknown),
+      2723 +    // E validates from U!!!E -> ReadyButDelayed -> considers
+           + D ->
+      2724 +    // update_validation_status(D) needs history['E'] -> Inte
+           +rnalError
+      2725 +    // (in production: swallowed -> 'no jobs ready, none runn
+           +ing' deadlock).
+      2726 +    ro.outputs.insert("X".to_string(), "x1".to_string());
+      2727 +    ro.run(&[]).unwrap(); // <- currently dies with 'internal
+           + error ... Should have had history for it, if it was validate
+           +d?!'
+      2728 +
+      2729 +    // Intended behavior: E can not prove its output unchange
+           +d (no history),
+      2730 +    // so it must run again; D revalidates against E's (ident
+           +ical) output.
+      2731 +    assert_eq!(ro.run_counters.get("E"), Some(&3));
+      2732 +    assert_eq!(ro.run_counters.get("D"), Some(&1));
+      2733 +}
+      2734 +
+      2735 +#[test]
+      2736 +fn test_resume_with_ephemeral_edge_history_but_no_job_history
+           +() {
+      2737 +    // Same poisoned history state as above, but constructed
+           +directly and
+      2738 +    // with Output roots, so the InternalError already fires
+           +inside
+      2739 +    // event_startup() (everything upstream of E skips immedi
+           +ately).
+      2740 +    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>)
+           + {
+      2741 +        g.add_node("U", JobKind::Output);
+      2742 +        g.add_node("X", JobKind::Output);
+      2743 +        g.add_node("E", JobKind::Ephemeral);
+      2744 +        g.add_node("D", JobKind::Output);
+      2745 +        g.depends_on("E", "U");
+      2746 +        g.depends_on("D", "E");
+      2747 +        g.depends_on("D", "X");
+      2748 +    }
+      2749 +    let strat = StrategyForTesting::new();
+      2750 +    strat.already_done.borrow_mut().insert("U".to_string());
+      2751 +    strat.already_done.borrow_mut().insert("X".to_string());
+      2752 +    strat.already_done.borrow_mut().insert("D".to_string());
+      2753 +
+      2754 +    let mut history = HashMap::new();
+      2755 +    history.insert("U".to_string(), "u".to_string());
+      2756 +    history.insert("U!!!".to_string(), "".to_string());
+      2757 +    history.insert("X".to_string(), "x".to_string());
+      2758 +    history.insert("X!!!".to_string(), "".to_string());
+      2759 +    // E ran & failed last run: job keys removed, edge keys r
+           +etained.
+      2760 +    history.insert("U!!!E".to_string(), "u".to_string());
+      2761 +    history.insert("E!!!D".to_string(), "e".to_string());
+      2762 +    history.insert("D".to_string(), "d".to_string());
+      2763 +    history.insert("D!!!".to_string(), "E\nX".to_string());
+      2764 +    history.insert("X!!!D".to_string(), "x".to_string());
+      2765 +
+      2766 +    let mut g = PPGEvaluator::new_with_history(history, strat
+           +);
+      2767 +    create_graph(&mut g);
+      2768 +    g.event_startup().unwrap(); // <- currently fails with th
+           +e InternalError
+      2769 +
+      2770 +    // Intended: E must rerun (it can't prove anything about
+           +its output).
+      2771 +    assert_eq!(g.query_ready_to_run(), set!["E"]);
+      2772 +    g.event_now_running("E").unwrap();
+      2773 +    g.event_job_finished_success("E", "e".to_string()).unwrap
+           +();
+      2774 +    // E's output matches E!!!D -> D is validated and skips.
+      2775 +    assert!(g.is_finished());
+      2776 +}
+      2777 +
+      2778  /*
+      2779  #[test]
+      2780  fn test_multi_file_job_gaining_output() {
+
+● Bash(CARGO_TARGET_DIR=target_claude cargo test --lib
+      test_ephemeral_failed_last_run_validated_by_edges_only
+      test_resume_with_ephemeral_edge_history_but_no_job_histor…)
+  ⎿  error: unexpected argument 'test_resume_with_ephemeral_edge_history_bu
+     t_no_job_history' found
+     … +3 lines (ctrl+o to expand)
+  ⎿  Found 3 new diagnostic issues in 2 files (ctrl+o to expand)
+
+● Bash(CARGO_TARGET_DIR=target_claude cargo test --lib validated_by_edges 2>&1 |
+      tail -30)
+  ⎿     Compiling pyo3-ffi v0.21.2
+        Compiling pyo3 v0.21.2
+        Compiling parking_lot v0.12.3
+     … +27 lines (ctrl+o to expand)
+  ⎿  (timeout 5m)
+
+● Bash(CARGO_TARGET_DIR=target_claude cargo test --lib
+      edge_history_but_no_job_history 2>&1 | tail -20)
+  ⎿      Finished `test` profile [unoptimized + debuginfo] target(s) in 0.0
+     2s
+          Running unittests src/lib.rs (target_claude/debug/deps/pypipegrap
+     … +23 lines (ctrl+o to expand)
+● Update(src/tests.rs)
+  ⎿  Added 1 line
+      2688  // ----------------------------------------------------------
+            ------------------
+      2689
+      2690  #[test]
+      2691 +#[ignore = "documents unfixed bug: InternalError 'Should have
+           + had history for it, if it was validated?!' -> python-side de
+           +adlock. Run with --ignored."]
+      2692  fn test_ephemeral_failed_last_run_validated_by_edges_only() {
+      2693      // U -> E -> D, X -> D.
+      2694      // Run 2 invalidates D via X, so the (validated!) E is re
+            quired, runs,
+
+● Update(src/tests.rs)
+  ⎿  Added 1 line
+      2734  }
+      2735
+      2736  #[test]
+      2737 +#[ignore = "documents unfixed bug: same as test_ephemeral_fai
+           +led_last_run_validated_by_edges_only, but firing already in e
+           +vent_startup. Run with --ignored."]
+      2738  fn test_resume_with_ephemeral_edge_history_but_no_job_history
+            () {
+      2739      // Same poisoned history state as above, but constructed
+            directly and
+      2740      // with Output roots, so the InternalError already fires
+            inside
+
+● Bash(cd /tmp && cargo search afl --limit 1 2>&1 | head -3; echo "---registry
+      check---"; ls ~/.cargo/registry 2>/dev/null)
+  ⎿  afl = "0.18.2"    # Fuzzing Rust code with american-fuzzy-lop
+     ... and 159 crates more (use --limit N to see more)
+     ---registry check---
+     … +4 lines (ctrl+o to expand)
+  ⎿  Shell cwd was reset to /project
+
+● Bash(/nix/store/7bbgfnflvi7i2fgvw5dv10bvbjqzrkdi-cargo-afl-wrapped/bin/cargo-a
+      fl afl --version 2>&1 | head -2; rustc --version)
+  ⎿  cargo-afl 0.18.1 (AFL++ version 4.34c)
+     rustc 1.78.0 (9b00956e5 2024-04-29)
+
+● Write(fuzz/Cargo.toml)
+  ⎿  Wrote 20 lines to fuzz/Cargo.toml
+       1 [package]
+       2 name = "ppg2-fuzz"
+       3 version = "0.1.0"
+       4 edition = "2018"
+       5 publish = false
+       6
+       7 # standalone, not part of the main crate's (non-)workspace
+       8 [workspace]
+       9
+      10 [[bin]]
+     … +11 lines (ctrl+o to expand)
+
+● Write(fuzz/src/main.rs)
+  ⎿  Wrote 253 lines to fuzz/src/main.rs
+       2 //! focused on *resumed* projects, i.e. graphs evaluated multipl
+         e times where
+         uced by thetory is carried over between runs (and only ever prod
+       4 //! engine itself - we never synthesize history by hand, just li
+         ke real runs).
+       6 //! A fuzz input decodes to:
+       7 //!   - a small DAG (2..=7 nodes, Always/Output/Ephemeral),
+       9 //!       fail this job, toggle its output ("code changed" / "re
+         verted"),
+      10 //!       delete its output ("file removed on disk"),
+     … +287 lines (ctrl+o to expand)
+
+● Bash(mkdir -p /project/fuzz/seeds /project/fuzz/known_crashes
+      # known crash: reproduces the 'Should have had history for it, if it was
+      validated?!' InternalError…)
+  ⎿    feature `edition2024` is required
+
+       The package requires the Cargo feature called `edition2024`, but tha
+     … +6 lines (ctrl+o to expand)
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+  Listed 2 directories (ctrl+o to expand)
+
+● Bash(PATH=/nix/store/0s4hchhcmppcw7qn6jlzzf46bh4cw734-rust-default-1.95.0/bin:
+      $PATH cargo build --release 2>&1 | tail -5)
+  ⎿            >>>               /project/fuzz/target_claude/release/deps/f
+     uzz_history-70736b9152dad600.fuzz_history.8c422ce8814a9ea1-cgu.06.rcgu
+     .o:(afl::fuzz_with_reset::h1495f513dfe4f424)
+     … +5 lines (ctrl+o to expand)
+  ⎿  (timeout 5m)
+
+● Expected — the AFL runtime only links via cargo-afl afl build. Let me use the
+  nix-store wrapper with the newer rust on PATH:
+
+● Bash(PATH=/nix/store/0s4hchhcmppcw7qn6jlzzf46bh4cw734-rust-default-1.95.0/bin:
+      $PATH /nix/store/7bbgfnflvi7i2fgvw5dv10bvbjqzrkdi-cargo-afl-wrapped/bin/ca
+      rgo-afl afl b…)
+  ⎿     Compiling pyo3-macros v0.21.2
+        Compiling thiserror-impl v1.0.69
+        Compiling pypipegraph2 v3.4.3 (/project)
+     … +3 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+● Bash(B=$(ls target_claude/release/fuzz_history target/release/fuzz_history
+      2>/dev/null | head -1) && echo "binary: $B" && for f in seeds/*; do echo
+      "== $f"; $B < $f…)
+  ⎿  binary: target_claude/release/fuzz_history
+     == seeds/chain_abort
+     OK
+     … +9 lines (ctrl+o to expand)
+
+● Bash(target_claude/release/fuzz_history <
+      known_crashes/ephemeral_validated_no_job_history 2>&1 | grep -m2
+      "panicked\|success event\|Should have")
+  ⎿  thread 'main' (6443) panicked at src/main.rs:223:29:
+     success event: InternalError("Should have had history for it, if it wa
+     s validated?!")
+
+● The harness works end-to-end. Now let me run AFL for a few minutes to validate
+  it under the real fuzzer and see if it finds additional, distinct failures:
+
+● Bash(AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_SKIP_CPUFREQ=1 AFL_NO_UI=1 /n
+      ix/store/7bbgfnflvi7i2fgvw5dv10bvbjqzrkdi-cargo-afl-wrapped/bin/cargo-afl
+      afl fuzz -V 2…)
+  ⎿  Running in the background (↓ to manage)
+
+● While AFL runs, let me write the fuzzer README:
+
+● Write(fuzz/README.md)  ⎿  Wrote 79 lines to fuzz/README.md
+       2 # ppg2 history fuzzer (cargo-afl)
+         onsecutive rust `PPGEvaluator` state machine across **multiple c
+       4 runs with carried-over history** — the "resumed project" situati
+       5 the `"Evaluator is not finished, reports no jobs ready to run, b
+         ut no jobs
+         7) shows up.nning"` bug (python/pypipegraph2/runner.py, ~line 79
+       8 History is never synthesized: it is only ever produced by `new_h
+         istory()` of
+          runs theous simulated run, exactly like a real project. Between
+      10 fuzzer may, per node:
+     … +92 lines (ctrl+o to expand)
+
+● Bash(sleep 60; grep -E "execs_done|unique_crashes|saved_crashes|corpus_count"
+      /project/fuzz/out/default/fuzzer_stats 2>/dev/null; ls
+      /project/fuzz/out/default/crashe…)
+  ⎿  Error: Blocked: sleep 60 followed by: grep -E
+     "execs_done|unique_crashes|saved_crashes|corpus_count"
+     /project/fuzz/out/default/fuzzer_stats ls
+     /project/fuzz/out/default/crashes/ head -5. To wait for a condition, use
+     Monitor with an until-loop (e.g. `until <check>; do sleep 2; done`). To
+     wait for a command you started, use run_in_background: true. Do not chain
+     shorter sleeps to work around this block.
+
+  Read 1 file, listed 1 directory (ctrl+o to expand)
+
+● Bash(for f in out/default/crashes/id*; do
+      msg=$(target_claude/release/fuzz_history < "$f" 2>&1 | grep -m1 "panicked
+      at" -A1 | tail -1 | cut -c1-130); echo "$msg"; do…)
+  ⎿       76 success event: InternalError("Should have had history for it,
+     if it was validated?!")
+          33 event_startup failed: InternalError("Should have had history f
+     … +15 lines (ctrl+o to expand)
+
+● Bash(for f in $(ls -S out/default/crashes/id* | tac); do
+      msg=$(target_claude/release/fuzz_history < "$f" 2>&1 | grep -m1 -A1
+      "panicked at" | tail -1); case "$msg" in…)
+  ⎿  UNEX7 out/default/crashes/id:000034,sig:06,src:000219,time:8751,execs:
+     114475,op:havoc,rep:2
+     ASSERT out/default/crashes/id:000105,sig:06,src:000515,time:44866,exec
+     s:453800,op:havoc,rep:3
+
+● Bash(target_claude/release/fuzz_history < "out/default/crashes/id:000034,sig:0
+      6,src:000219,time:8751,execs:114475,op:havoc,rep:2" 2>&1 | grep -m1
+      "scenario:" | head…)
+  ⎿  scenario: Scenario { kinds: [Always, Ephemeral, Output, Always, Always
+     ], edges: [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3), (2, 3), (2,
+      4)], runs: [RunSpec { flags: [NodeRunFlags { fail: true, toggle_outpu
+     … +20 lines (ctrl+o to expand)
+
+● Update(fuzz/src/main.rs)
+  ⎿  Added 3 lines
+      248  fn main() {
+      249      afl::fuzz!(|data: &[u8]| {
+      250          let scenario = decode(data);
+      251 +        if std::env::var_os("PPG2_FUZZ_DUMP").is_some() {
+      252 +            eprintln!("scenario: {:?}", scenario);
+      253 +        }
+      254          run_scenario(&scenario);
+      255      });
+      256  }
+
+● Bash(PATH=/nix/store/0s4hchhcmppcw7qn6jlzzf46bh4cw734-rust-default-1.95.0/bin:
+      $PATH /nix/store/7bbgfnflvi7i2fgvw5dv10bvbjqzrkdi-cargo-afl-wrapped/bin/ca
+      rgo-afl afl b…)
+  ⎿      Finished `release` profile [optimized + debuginfo] target(s) in 3.
+     14s
+     scenario: Scenario { kinds: [Always, Ephemeral, Output, Ephemeral, Out
+     … +29 lines (ctrl+o to expand)
+  ⎿  (timeout 5m)
+
+● Update(src/tests.rs)
+  ⎿  Added 64 lines
+      2777      assert!(g.is_finished());
+      2778  }
+      2779
+      2780 +#[test]
+      2781 +#[ignore = "documents unfixed bug: 'unexpected was 7' - upstr
+           +eam failure propagates through an already-skipped Output into
+           + downstreams that already proceeded. Run with --ignored."]
+      2782 +fn test_upstream_failure_after_skip_hits_proceeded_downstream
+           +() {
+      2783 +    // Found by fuzz/ (cargo-afl). Second distinct state mach
+           +ine hole:
+      2784 +    //
+      2785 +    // A *validated* ephemeral E lets its downstream Output B
+           + skip while E
+      2786 +    // itself is still pending (ReadyButDelayed - a validated
+           + ephemeral can
+      2787 +    // not invalidate, so B's validation treats it as done).
+           +B's downstream C
+      2788 +    // then proceeds (ReadyToRun).
+      2789 +    //
+      2790 +    // If E later runs after all (another downstream D requir
+           +ed it) and
+      2791 +    // *fails*, JobUpstreamFailure(B) converts the already-Fi
+           +nishedSkipped B
+      2792 +    // to FinishedUpstreamFailure and propagates JobUpstreamF
+           +ailure to C -
+      2793 +    // but C is in Always(ReadyToRun) (or Running/FinishedSuc
+           +cess), which the
+      2794 +    // JobUpstreamFailure handler does not expect:
+      2795 +    //   InternalError("unexpected was 7 ...")
+      2796 +    // In production this surfaces out of event_job_failure/s
+           +uccess, gets
+      2797 +    // swallowed by runner.py (~line 1011), and the run deadl
+           +ocks with
+      2798 +    // 'Evaluator is not finished, reports no jobs ready to r
+           +un, ...'.
+      2799 +    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>)
+           + {
+      2800 +        g.add_node("E", JobKind::Ephemeral); // root
+      2801 +        g.add_node("X", JobKind::Always); // root
+      2802 +        g.add_node("B", JobKind::Output);
+      2803 +        g.add_node("C", JobKind::Always);
+      2804 +        g.add_node("D", JobKind::Output);
+      2805 +        g.depends_on("B", "E");
+      2806 +        g.depends_on("C", "B");
+      2807 +        g.depends_on("D", "E");
+      2808 +        g.depends_on("D", "X");
+      2809 +    }
+      2810 +    let mut ro = TestGraphRunner::new(Box::new(create_graph))
+           +;
+      2811 +    ro.outputs.insert("X".to_string(), "x1".to_string());
+      2812 +    ro.run(&[]).unwrap();
+      2813 +
+      2814 +    // run 2, driven by hand so we control the order:
+      2815 +    let strat = StrategyForTesting::new();
+      2816 +    for k in ro.already_done.iter() {
+      2817 +        strat.already_done.borrow_mut().insert(k.clone());
+      2818 +    }
+      2819 +    let mut g = PPGEvaluator::new_with_history(ro.history.clo
+           +ne(), strat);
+      2820 +    create_graph(&mut g);
+      2821 +    g.event_startup().unwrap();
+      2822 +    // E validated -> ReadyButDelayed; B validated via the pe
+           +nding-but-
+      2823 +    // validated E -> FinishedSkipped; C ready. X ready (Alwa
+           +ys).
+      2824 +    assert_eq!(g.query_ready_to_run(), set!["X", "C"]);
+      2825 +    g.event_now_running("X").unwrap();
+      2826 +    // X's output changes -> D invalidated -> E now required.
+      2827 +    g.event_job_finished_success("X", "x2".to_string()).unwra
+           +p();
+      2828 +    assert_eq!(g.query_ready_to_run(), set!["E", "C"]);
+      2829 +    g.event_now_running("E").unwrap();
+      2830 +    // E fails -> upstream-failure wave reaches the already s
+           +kipped B,
+      2831 +    // which converts to FinishedUpstreamFailure and propagat
+           +es to C,
+      2832 +    // which is Always(ReadyToRun) -> 'unexpected was 7' Inte
+           +rnalError.
+      2833 +    g.event_job_finished_failure("E").unwrap(); // <- current
+           +ly fails here
+      2834 +
+      2835 +    // Intended behavior: C may still run (its input B was *v
+           +alidated*,
+      2836 +    // B's history did not change - E's failure only dooms D)
+           +.
+      2837 +    assert_eq!(g.query_ready_to_run(), set!["C"]);
+      2838 +    g.event_now_running("C").unwrap();
+      2839 +    g.event_job_finished_success("C", "c".to_string()).unwrap
+           +();
+      2840 +    assert!(g.is_finished());
+      2841 +    g.new_history().unwrap();
+      2842 +}
+      2843 +
+      2844  /*
+      2845  #[test]
+      2846  fn test_multi_file_job_gaining_output() {
+
+● Bash(cd /project && CARGO_TARGET_DIR=target_claude cargo test --lib
+      test_upstream_failure_after_skip_hits_proceeded_downstream -- --ignored
+      2>&1 | tail -15)
+  ⎿  failures:
+
+     ---- tests::test_upstream_failure_after_skip_hits_proceeded_downstream
+     … +17 lines (ctrl+o to expand)
+  ⎿  (timeout 5m)
+
+● Reproduced exactly as derived. Let me check the AFL run and finalize the
+  artifacts:
+
+● Bash(cd /project/fuzz && grep -E "^(execs_done|saved_crashes|run_time)"
+      out/default/fuzzer_stats; cp
+      "out/default/crashes/id:000034,sig:06,src:000219,time:8751,execs…)
+  ⎿  run_time          : 240
+     execs_done        : 2884209
+     saved_crashes     : 149
+     … +3 lines (ctrl+o to expand)
+
+● Background command "Run AFL fuzzing for 4 minutes" completed (exit code 0)
+
+● Bash(for f in out/default/crashes/id*; do target_claude/release/fuzz_history <
+      "$f" 2>&1 | grep -m1 -A1 "panicked at" | tail -1 | cut -c1-60; done |
+      sort | uniq -c |…)
+  ⎿       97 success event: InternalError("Should have had history for it
+          34 event_startup failed: InternalError("Should have had history
+           9 success event: InternalError("unexpected was 7 NodeInfo { jo
+     … +2 lines (ctrl+o to expand)
+● Update(fuzz/README.md)
+  ⎿  Added 16 lines
+      77    `InternalError("Should have had history for it, if it was val
+          idated?!")`.
+      78    See `test_ephemeral_failed_last_run_validated_by_edges_only`
+          in
+      79    `src/tests.rs` (ignored test).
+      80 +* `upstream_failure_after_skip_unexpected_was_7` — an upstream-
+         +failure wave
+      81 +  reaches an Output that already `FinishedSkipped` (it validate
+         +d against a
+      82 +  pending-but-validated ephemeral); the skip is converted to
+      83 +  `FinishedUpstreamFailure` and propagated into downstreams tha
+         +t already
+      84 +  proceeded (`ReadyToRun`/`Running`/`FinishedSuccess`) ->
+      85 +  `InternalError("unexpected was 7 ...")`. See
+      86 +  `test_upstream_failure_after_skip_hits_proceeded_downstream`
+         +in
+      87 +  `src/tests.rs` (ignored test).
+      88 +* `new_history_assert_skipped_eph_no_history` — same poisoned-h
+         +istory family
+      89 +  as the first entry, but surfacing as the
+      90 +  `assert!(job.state.is_failed() || _job_and_downstreams_are_ep
+         +hemeral)`
+      91 +  panic in `new_history()` (engine.rs ~796): a FinishedSkipped
+         +ephemeral with
+      92 +  `history_output = None` whose downstreams are not all ephemer
+         +al.
+      93 +
+      94 +A 4-minute AFL run (2.9M execs) reliably finds all three bucket
+         +s; no others
+      95 +have shown up so far.
+
+● Bash(cd /project && CARGO_TARGET_DIR=target_claude cargo test --lib 2>&1 |
+      tail -3)
+  ⎿  test result: ok. 74 passed; 0 failed; 3 ignored; 0 measured; 0 filtere
+     d out; finished in 0.13s
+
+  Wrote 1 memory (ctrl+o to expand)
+
+● Bash(grep -q "ppg2" /home/.claude/projects/-project/memory/MEMORY.md || sed -i
+      's|^# General|# Project: pypipegraph2 (/project)\n\n- [ppg2 state-machine
+      bug findings…)
+  ⎿  103:- [ppg2 state-machine bug findings](project_ppg2_state_machine_bug
+     .md) — deadlock root causes, fuzzer, toolchain gotchas
+
+● Done. Here's what I found.
+
+  TL;DR
+
+  The deadlock is real, reproduced, and has (at least) two distinct root causes
+  in the rust engine, plus a Python-side aggravator that turns engine errors
+  into the deadlock message. I wrote three failing tests (marked #[ignore] so
+  cargo test stays green) and a cargo-afl fuzzer that finds all of them within
+  seconds — 149 crashes in a 4-minute run, all bucketing into these three
+  signatures. No fixes applied, as requested.
+
+  The aggravator: why you see "no way forward" instead of an error
+
+  In runner.py:1005-1029, evaluator.event_job_success(...) is wrapped in a
+  blanket except Exception that assumes any failure is a history-constraint
+  violation. But process_signals can raise InternalError mid-cascade: the job
+  itself is already marked FinishedSuccess, the queued downstream signals are
+  dropped on the floor, and Python never tells the engine anything went wrong.
+  Downstreams sit in NotReady forever → next loop iteration: not finished,
+  nothing ready, nothing in flight → your line-797 abort. So every InternalError
+  the engine can produce during a success/failure event manifests as this
+  deadlock in production. That's why ppg_evaluator_debug.txt never shows an
+  obviously stuck state — the real error scrolled by earlier as "Likely
+  constraint violation?".
+
+  Bug 1 (primary, 131/149 fuzz crashes): failed job leaves edge history behind,
+  engine later requires the job history
+
+  When a job fails or is aborted, new_history() removes its job-output key E and
+  input-list key E!!! (engine.rs:800-803) — but the edge keys (U!!!E, E!!!D)
+  are only filtered structurally, never on failure. On resume, an ephemeral in
+  that state gets validated purely from the still-matching edges →
+  NotReady(Validated) → ReadyButDelayed. Then any downstream's
+  update_validation_status hits engine.rs:1892, which unconditionally requires
+  history["E"]:
+
+  InternalError("Should have had history for it, if it was validated?!")
+
+  Sequence (test test_ephemeral_failed_last_run_validated_by_edges_only): run 1
+  all green; run 2 an unrelated input change invalidates D, so the validated
+  ephemeral E runs — and fails; run 3 reverts the change → boom. An abort
+  instead of a failure produces the same poisoned history (FinishedAborted takes
+  the same removal path). This matches your field signature precisely: needs
+  history, needs a prior failed/interrupted run.
+
+  Same family, different surface: a FinishedSkipped ephemeral with
+  history_output = None trips assert!(job.state.is_failed() || …) in
+  new_history() (engine.rs:796) — that one reaches Python as a rust panic. Fuzz
+  input saved as fuzz/known_crashes/new_history_assert_skipped_eph_no_history.
+
+  Fix direction (not done): either treat a by-edges-validated job with missing
+  job history as Invalidated (conservative rerun), or remove *!!!E edge keys
+  alongside the job keys in new_history().
+
+  Bug 2 (14/149): upstream failure propagates through an already-skipped job
+  into downstreams that already proceeded
+
+  A validated ephemeral can't invalidate, so its downstream Output B may skip
+  while the ephemeral is still pending (ReadyButDelayed), and B's own downstream
+  C proceeds to ReadyToRun (or even runs). If the ephemeral later runs anyway
+  (another downstream required it) and fails, the JobUpstreamFailure wave
+  converts the already-FinishedSkipped B to FinishedUpstreamFailure
+  (engine.rs:1454) and propagates onward — into C, whose state the handler
+  doesn't expect:
+
+  InternalError("unexpected was 7 NodeInfo { job_id: "C", state:
+  Always(ReadyToRun), … }")
+
+  Test: test_upstream_failure_after_skip_hits_proceeded_downstream —
+  hand-derived from the fuzzer's find, fails exactly there. This one doesn't
+  even need a failed previous run, just history (skipping requires it). The
+  design question for the fix: a skipped job's output was validated from
+  history, so retroactively upstream-failing it (and its consumers) is arguably
+  wrong in itself.
+
+  Deliverables
+
+  - src/tests.rs — three #[ignore]d tests at the end documenting intended
+  behavior, with detailed comments. Run them via cargo test -- --ignored. The
+  regular suite stays green (74 passed, 3 ignored), so dev_utils/run_pytest.sh
+  is unaffected.
+  - fuzz/ — standalone cargo-afl crate. It simulates 2–4 consecutive runs over
+  small DAGs where history evolves only through the engine (like a real
+  project), and between runs jobs can fail, toggle/revert outputs, lose outputs
+  on disk, vanish from the graph, or the run can abort mid-way (mirroring
+  runner.py's abort, including failing the running job). It panics on the exact
+  deadlock condition, on any InternalError/APIError, and on new_history()
+  failures. seeds/ are benign; known_crashes/ holds one repro per bug. The
+  README documents the byte encoding and usage. Note: the build needs the newer
+  rustc from the nix store (afl 0.18's dep tree wants edition2024; the shell's
+  1.78 won't do):
+  cd fuzz
+  PATH=/nix/store/0s4hchhcmppcw7qn6jlzzf46bh4cw734-rust-default-1.95.0/bin:$PATH
+  \
+    /nix/store/7bbgfnflvi7i2fgvw5dv10bvbjqzrkdi-cargo-afl-wrapped/bin/cargo-afl
+  afl build --release
+
+  One thing I'd flag for the eventual fix round: beyond fixing the two engine
+  bugs, the except Exception in runner.py:1011 should distinguish real
+  constraint violations from InternalError — otherwise the next state-machine
+  bug will again disguise itself as this deadlock.
+
+✻ Brewed for 21m 46s

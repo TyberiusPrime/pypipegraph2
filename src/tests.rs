@@ -2688,7 +2688,6 @@ fn test_fail_panic_after_20231120_fix2() { //and another one.
 // ----------------------------------------------------------------------------
 
 #[test]
-#[ignore = "documents unfixed bug: InternalError 'Should have had history for it, if it was validated?!' -> python-side deadlock. Run with --ignored."]
 fn test_ephemeral_failed_last_run_validated_by_edges_only() {
     // U -> E -> D, X -> D.
     // Run 2 invalidates D via X, so the (validated!) E is required, runs,
@@ -2734,7 +2733,6 @@ fn test_ephemeral_failed_last_run_validated_by_edges_only() {
 }
 
 #[test]
-#[ignore = "documents unfixed bug: same as test_ephemeral_failed_last_run_validated_by_edges_only, but firing already in event_startup. Run with --ignored."]
 fn test_resume_with_ephemeral_edge_history_but_no_job_history() {
     // Same poisoned history state as above, but constructed directly and
     // with Output roots, so the InternalError already fires inside
