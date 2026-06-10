@@ -11,6 +11,10 @@ publish = false
 name = "fuzz_history"
 path = "src/main.rs"
 
+[[bin]]
+name = "fuzz_interleave"
+path = "src/interleave.rs"
+
 [dependencies]
 # must match the cargo-afl version (currently 0.18.1 in the nix store wrapper)
 afl = "=0.18.1"
