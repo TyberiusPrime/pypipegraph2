@@ -1,5 +1,4 @@
 out/
-target/
-target_claude/
+target*/
 out_*/
 core*
