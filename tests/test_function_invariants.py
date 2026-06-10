@@ -13,6 +13,7 @@ _cytohn_func_counter = 0
 
 
 @pytest.mark.usefixtures("ppg2_per_test")
+@pytest.mark.skip # Cython has once again bitrotted away. We're going to remove support
 class TestCythonCompability:
     def source_via_func_invariant(self, name, func):
         global _cytohn_func_counter
