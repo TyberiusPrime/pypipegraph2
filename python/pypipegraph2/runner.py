@@ -1009,7 +1009,10 @@ class Runner:
                                         )
                                     failed = False
                                 except Exception as e:
-                                    log_error(
+                                    if 'Internal error' in str(e):
+                                        raise e
+                                    else:
+                                        log_error(
                                         f"Recording job success failed for {job_id}. Likely constraint violation?: Message was '{e}'"
                                     )
                                     with self.evaluator_lock:  # just so we don't mess up the file.

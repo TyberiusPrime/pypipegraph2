@@ -2659,6 +2659,188 @@ fn test_fail_panic_after_20231120_fix2() { //and another one.
     start_logging();
     let g = ro.run(&[]).unwrap();
 }
+// ----------------------------------------------------------------------------
+// 2026-06-10: Test cases for the 'Evaluator is not finished, reports no jobs
+// ready to run, but no jobs currently running' bug observed on resumed
+// projects (runner.py, line ~797).
+//
+// Hypothesis under test:
+//   When an ephemeral E ran and *failed* (or was aborted) in a previous run,
+//   new_history() removes E's job-output key ('E') and input-list key
+//   ('E!!!'), but the *edge* keys ('U!!!E', 'E!!!D') survive - they are only
+//   filtered when nodes/edges disappear, never removed on failure.
+//
+//   On resume, E is then validated purely from the (still matching) edge
+//   history -> NotReady(Validated) -> ReadyButDelayed. When a downstream's
+//   update_validation_status() then looks at the not-yet-finished upstream E,
+//   it unconditionally requires history['E'] to exist (engine.rs,
+//   'Should have had history for it, if it was validated?!') and returns
+//   an InternalError.
+//
+//   In production that error surfaces out of event_job_success(); the python
+//   runner swallows it as a 'constraint violation' (runner.py ~line 1011),
+//   the engine's signal cascade is lost, the downstream stays NotReady
+//   forever -> the deadlock message.
+//
+// These tests document the *intended* behavior (a validated-by-edges
+// ephemeral without job history must be treated conservatively, i.e. rerun)
+// and currently fail with the InternalError above.
+// ----------------------------------------------------------------------------
+
+#[test]
+#[ignore = "documents unfixed bug: InternalError 'Should have had history for it, if it was validated?!' -> python-side deadlock. Run with --ignored."]
+fn test_ephemeral_failed_last_run_validated_by_edges_only() {
+    // U -> E -> D, X -> D.
+    // Run 2 invalidates D via X, so the (validated!) E is required, runs,
+    // and fails. Run 3 reverts X's output - now nothing requires E,
+    // but E's job history is gone while its edges still validate it.
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("U", JobKind::Always);
+        g.add_node("X", JobKind::Always);
+        g.add_node("E", JobKind::Ephemeral);
+        g.add_node("D", JobKind::Output);
+        g.depends_on("E", "U");
+        g.depends_on("D", "E");
+        g.depends_on("D", "X");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    ro.outputs.insert("X".to_string(), "x1".to_string());
+    ro.run(&[]).unwrap();
+    assert_eq!(ro.run_counters.get("E"), Some(&1));
+
+    // X changes output -> D invalidated -> E required (still Validated,
+    // U unchanged) -> E runs -> fails -> D upstream-failed.
+    // new_history removes 'E' and 'E!!!', keeps 'U!!!E' (matching U)
+    // and the stale-but-restorable 'X!!!D' (still x1, D never reran).
+    ro.outputs.insert("X".to_string(), "x2".to_string());
+    ro.run(&["E"]).unwrap();
+    assert_eq!(ro.run_counters.get("E"), Some(&2));
+    assert!(!ro.history.contains_key("E"));
+    assert!(!ro.history.contains_key("E!!!"));
+    assert!(ro.history.contains_key("U!!!E")); // <- the poisoned state
+    assert_eq!(ro.history.get("X!!!D").map(|s| s.as_str()), Some("x1"));
+
+    // X reverts to x1: D's edges all match again -> D NotReady(Unknown),
+    // E validates from U!!!E -> ReadyButDelayed -> considers D ->
+    // update_validation_status(D) needs history['E'] -> InternalError
+    // (in production: swallowed -> 'no jobs ready, none running' deadlock).
+    ro.outputs.insert("X".to_string(), "x1".to_string());
+    ro.run(&[]).unwrap(); // <- currently dies with 'internal error ... Should have had history for it, if it was validated?!'
+
+    // Intended behavior: E can not prove its output unchanged (no history),
+    // so it must run again; D revalidates against E's (identical) output.
+    assert_eq!(ro.run_counters.get("E"), Some(&3));
+    assert_eq!(ro.run_counters.get("D"), Some(&1));
+}
+
+#[test]
+#[ignore = "documents unfixed bug: same as test_ephemeral_failed_last_run_validated_by_edges_only, but firing already in event_startup. Run with --ignored."]
+fn test_resume_with_ephemeral_edge_history_but_no_job_history() {
+    // Same poisoned history state as above, but constructed directly and
+    // with Output roots, so the InternalError already fires inside
+    // event_startup() (everything upstream of E skips immediately).
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("U", JobKind::Output);
+        g.add_node("X", JobKind::Output);
+        g.add_node("E", JobKind::Ephemeral);
+        g.add_node("D", JobKind::Output);
+        g.depends_on("E", "U");
+        g.depends_on("D", "E");
+        g.depends_on("D", "X");
+    }
+    let strat = StrategyForTesting::new();
+    strat.already_done.borrow_mut().insert("U".to_string());
+    strat.already_done.borrow_mut().insert("X".to_string());
+    strat.already_done.borrow_mut().insert("D".to_string());
+
+    let mut history = HashMap::new();
+    history.insert("U".to_string(), "u".to_string());
+    history.insert("U!!!".to_string(), "".to_string());
+    history.insert("X".to_string(), "x".to_string());
+    history.insert("X!!!".to_string(), "".to_string());
+    // E ran & failed last run: job keys removed, edge keys retained.
+    history.insert("U!!!E".to_string(), "u".to_string());
+    history.insert("E!!!D".to_string(), "e".to_string());
+    history.insert("D".to_string(), "d".to_string());
+    history.insert("D!!!".to_string(), "E\nX".to_string());
+    history.insert("X!!!D".to_string(), "x".to_string());
+
+    let mut g = PPGEvaluator::new_with_history(history, strat);
+    create_graph(&mut g);
+    g.event_startup().unwrap(); // <- currently fails with the InternalError
+
+    // Intended: E must rerun (it can't prove anything about its output).
+    assert_eq!(g.query_ready_to_run(), set!["E"]);
+    g.event_now_running("E").unwrap();
+    g.event_job_finished_success("E", "e".to_string()).unwrap();
+    // E's output matches E!!!D -> D is validated and skips.
+    assert!(g.is_finished());
+}
+
+#[test]
+#[ignore = "documents unfixed bug: 'unexpected was 7' - upstream failure propagates through an already-skipped Output into downstreams that already proceeded. Run with --ignored."]
+fn test_upstream_failure_after_skip_hits_proceeded_downstream() {
+    // Found by fuzz/ (cargo-afl). Second distinct state machine hole:
+    //
+    // A *validated* ephemeral E lets its downstream Output B skip while E
+    // itself is still pending (ReadyButDelayed - a validated ephemeral can
+    // not invalidate, so B's validation treats it as done). B's downstream C
+    // then proceeds (ReadyToRun).
+    //
+    // If E later runs after all (another downstream D required it) and
+    // *fails*, JobUpstreamFailure(B) converts the already-FinishedSkipped B
+    // to FinishedUpstreamFailure and propagates JobUpstreamFailure to C -
+    // but C is in Always(ReadyToRun) (or Running/FinishedSuccess), which the
+    // JobUpstreamFailure handler does not expect:
+    //   InternalError("unexpected was 7 ...")
+    // In production this surfaces out of event_job_failure/success, gets
+    // swallowed by runner.py (~line 1011), and the run deadlocks with
+    // 'Evaluator is not finished, reports no jobs ready to run, ...'.
+    fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
+        g.add_node("E", JobKind::Ephemeral); // root
+        g.add_node("X", JobKind::Always); // root
+        g.add_node("B", JobKind::Output);
+        g.add_node("C", JobKind::Always);
+        g.add_node("D", JobKind::Output);
+        g.depends_on("B", "E");
+        g.depends_on("C", "B");
+        g.depends_on("D", "E");
+        g.depends_on("D", "X");
+    }
+    let mut ro = TestGraphRunner::new(Box::new(create_graph));
+    ro.outputs.insert("X".to_string(), "x1".to_string());
+    ro.run(&[]).unwrap();
+
+    // run 2, driven by hand so we control the order:
+    let strat = StrategyForTesting::new();
+    for k in ro.already_done.iter() {
+        strat.already_done.borrow_mut().insert(k.clone());
+    }
+    let mut g = PPGEvaluator::new_with_history(ro.history.clone(), strat);
+    create_graph(&mut g);
+    g.event_startup().unwrap();
+    // E validated -> ReadyButDelayed; B validated via the pending-but-
+    // validated E -> FinishedSkipped; C ready. X ready (Always).
+    assert_eq!(g.query_ready_to_run(), set!["X", "C"]);
+    g.event_now_running("X").unwrap();
+    // X's output changes -> D invalidated -> E now required.
+    g.event_job_finished_success("X", "x2".to_string()).unwrap();
+    assert_eq!(g.query_ready_to_run(), set!["E", "C"]);
+    g.event_now_running("E").unwrap();
+    // E fails -> upstream-failure wave reaches the already skipped B,
+    // which converts to FinishedUpstreamFailure and propagates to C,
+    // which is Always(ReadyToRun) -> 'unexpected was 7' InternalError.
+    g.event_job_finished_failure("E").unwrap(); // <- currently fails here
+
+    // Intended behavior: C may still run (its input B was *validated*,
+    // B's history did not change - E's failure only dooms D).
+    assert_eq!(g.query_ready_to_run(), set!["C"]);
+    g.event_now_running("C").unwrap();
+    g.event_job_finished_success("C", "c".to_string()).unwrap();
+    assert!(g.is_finished());
+    g.new_history().unwrap();
+}
+
 /*
 #[test]
 fn test_multi_file_job_gaining_output() {

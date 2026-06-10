@@ -83,3 +83,4 @@ tests/**/run
 examples/run
 python/localscope
 .aider*
+fuzz/
