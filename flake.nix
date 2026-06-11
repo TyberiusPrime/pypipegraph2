@@ -382,6 +382,7 @@
           pkgs.bacon
           mypython
           cargo-afl
+          pkgs.cargo-mutants
           pkgs.maturin
           pkgs.py-spy
           pkgs.file
