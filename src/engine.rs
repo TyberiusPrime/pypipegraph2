@@ -1,9 +1,10 @@
 #[allow(unused_imports)]
 use log::{debug, error, info, warn};
 use petgraph::{graphmap::GraphMap, Directed, Direction};
+use rustc_hash::FxHashMap;
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashSet, VecDeque},
 };
 
 use crate::{PPGEvaluatorError, PPGEvaluatorStrategy};
@@ -349,8 +350,8 @@ impl Generation {
 pub struct PPGEvaluator<T: PPGEvaluatorStrategy> {
     dag: GraphType,
     jobs: Vec<NodeInfo>,
-    job_id_to_node_idx: HashMap<String, NodeIndex>,
-    history: HashMap<String, String>,
+    job_id_to_node_idx: FxHashMap<String, NodeIndex>,
+    history: FxHashMap<String, String>,
     strategy: T,
     already_started: StartStatus,
     jobs_ready_to_run: HashSet<String>,
@@ -364,15 +365,15 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     #[allow(dead_code)] // used for testing
     pub fn new(strategy: T) -> Self {
         // todo: get rid of the box for the caller at least?
-        Self::new_with_history(HashMap::new(), strategy)
+        Self::new_with_history(FxHashMap::default(), strategy)
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn new_with_history(history: HashMap<String, String>, strategy: T) -> Self {
+    pub fn new_with_history(history: FxHashMap<String, String>, strategy: T) -> Self {
         PPGEvaluator {
             dag: GraphMap::new(),
             jobs: Vec::new(),
-            job_id_to_node_idx: HashMap::new(),
+            job_id_to_node_idx: FxHashMap::default(),
             history,
             strategy,
             already_started: StartStatus::NotStarted,
@@ -661,7 +662,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
     ///
     /// Retrieve the 'new history' after a ppg run
-    pub fn new_history(&self) -> Result<HashMap<String, String>, PPGEvaluatorError> {
+    pub fn new_history(&self) -> Result<FxHashMap<String, String>, PPGEvaluatorError> {
         match self.already_started {
             StartStatus::Finished => {}
             _ => {
@@ -679,7 +680,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
         // when a multi-file-generating-job get's renamed, we need to remove the old history.
         // but only then.
-        let mut multi_parts_to_jobs = HashMap::new();
+        let mut multi_parts_to_jobs = FxHashMap::default();
         for j in self.jobs.iter() {
             if j.job_id.contains(":::") {
                 for part in j.job_id.split(":::") {
@@ -702,8 +703,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             }
         };
 
-        let mut out = self.history.clone();
-        let mut out: HashMap<_, _> = out
+        let mut out: FxHashMap<String, String> = self.history.clone();
+        let mut out: FxHashMap<String, String> = out
             .drain()
             .filter(|(k, _v)| {
                 if k.contains("!!!") {
@@ -880,7 +881,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         match job_idx {
             None => JobOutputResult::NoSuchJob,
             Some(job_idx) => match &self.jobs[*job_idx as usize].history_output {
-                Some(v) => JobOutputResult::Done(v.to_string()),
+                Some(v) => JobOutputResult::Done(v.clone()),
                 None => JobOutputResult::NotDone,
             },
         }
@@ -1258,7 +1259,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     self.gen
                                 );
                                 match self.history.get(&j.job_id) {
-                                    Some(x) => j.history_output = Some(x.to_string()),
+                                    Some(x) => j.history_output = Some(x.clone()),
                                     None => {
                                         return Err(PPGEvaluatorError::InternalError(format!(
                                             "Skipped job, but no history was available? {:?}",
@@ -1491,7 +1492,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     }
                     if propagate {
                         new_signals.push(NewSignal!(SignalKind::JobDone, node_idx, self.jobs));
-                        let downstreams = self.dag.neighbors_directed(node_idx, Direction::Outgoing);
+                        let downstreams =
+                            self.dag.neighbors_directed(node_idx, Direction::Outgoing);
                         for downstream_idx in downstreams {
                             //if there's a consider signal, it's not valid anymore
                             Self::remove_consider_signals(&mut new_signals, downstream_idx);
@@ -1702,7 +1704,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     fn try_finding_renamed_multi_output_job(
         missing_upstream_id: &str,
         downstream_id: &str,
-        history: &HashMap<String, String>,
+        history: &FxHashMap<String, String>,
     ) -> Option<String> {
         // since multi file output jobs change their names
         // but we only invalidate based on the actual job inputs
@@ -1728,7 +1730,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 );
                 let historical_upstream_outputs: HashSet<String> = historical_upstream_id
                     .split(":::")
-                    .map(|x| x.to_string())
+                    .map(|x: &str| x.to_string())
                     .collect();
                 let overlap = historical_upstream_outputs
                     .intersection(&missing_upstream_outputs)
@@ -1748,7 +1750,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         dag: &mut GraphType,
         strategy: &dyn PPGEvaluatorStrategy,
         jobs: &[NodeInfo],
-        history: &HashMap<String, String>,
+        history: &FxHashMap<String, String>,
         upstream_idx: NodeIndex,
         downstream_idx: NodeIndex,
     ) -> Result<bool, PPGEvaluatorError> {
@@ -1862,7 +1864,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         strategy: &dyn PPGEvaluatorStrategy,
         dag: &mut GraphType,
         jobs: &[NodeInfo],
-        history: &HashMap<String, String>,
+        history: &FxHashMap<String, String>,
         node_idx: NodeIndex,
     ) -> Result<ValidationStatus, PPGEvaluatorError> {
         let upstreams: Vec<_> = dag
@@ -2009,7 +2011,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         strategy: &dyn PPGEvaluatorStrategy,
         dag: &mut GraphType,
         jobs: &mut [NodeInfo],
-        history: &HashMap<String, String>,
+        history: &FxHashMap<String, String>,
         node_idx: NodeIndex,
         new_signals: &mut Vec<Signal>,
         gen: &mut Generation,
@@ -2170,14 +2172,14 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     jobs[node_idx as usize].job_id
                                 );
                                 Self::set_upstream_edges(dag, node_idx, Required::Yes);
-                                Self::reconsider_ephemeral_upstreams( // which is lazy.
+                                Self::reconsider_ephemeral_upstreams(
+                                    // which is lazy.
                                     dag,
                                     jobs,
                                     node_idx,
                                     new_signals,
                                     gen,
                                 );
-
                             }
                             Required::Unknown => {
                                 // let's try and update that in light of this node

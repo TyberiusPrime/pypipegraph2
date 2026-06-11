@@ -3,8 +3,9 @@
 use log::{debug, error, info, warn};
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::types::PyDict;
+use rustc_hash::FxHashMap;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
@@ -189,11 +190,11 @@ impl std::fmt::Debug for RunError {
 pub struct TestGraphRunner {
     #[allow(clippy::type_complexity)]
     pub setup_graph: Box<dyn Fn(&mut PPGEvaluator<StrategyForTesting>)>,
-    pub run_counters: HashMap<String, usize>,
-    pub history: HashMap<String, String>,
+    pub run_counters: FxHashMap<String, usize>,
+    pub history: FxHashMap<String, String>,
     pub already_done: HashSet<String>,
     pub allowed_nesting: u32,
-    pub outputs: HashMap<String, String>,
+    pub outputs: FxHashMap<String, String>,
     pub run_order: Vec<String>,
     pub cleaned_up: HashSet<String>,
 }
@@ -203,11 +204,11 @@ impl TestGraphRunner {
     pub fn new(setup_func: Box<dyn Fn(&mut PPGEvaluator<StrategyForTesting>)>) -> Self {
         TestGraphRunner {
             setup_graph: setup_func,
-            run_counters: HashMap::new(),
-            history: HashMap::new(),
+            run_counters: FxHashMap::default(),
+            history: FxHashMap::default(),
             already_done: HashSet::new(),
             allowed_nesting: 250,
-            outputs: HashMap::new(),
+            outputs: FxHashMap::default(),
             run_order: Vec::new(),
             cleaned_up: HashSet::new(),
         }
@@ -484,7 +485,7 @@ impl PyPPG2Evaluator {
         history_compare_callable: PyObject,
         get_job_inputs_str_callback: PyObject,
     ) -> Result<Self, PyErr> {
-        let mut history: HashMap<String, String> = HashMap::new();
+        let mut history: FxHashMap<String, String> = FxHashMap::default();
         for (k, v) in py_history.iter() {
             let ko: String = k.extract()?;
             let vo: String = v.extract()?;
@@ -545,7 +546,6 @@ impl PyPPG2Evaluator {
         self.evaluator.next_job_ready_to_run()
     }
 
-
     pub fn jobs_running(&self) -> Vec<String> {
         self.evaluator.query_jobs_running().into_iter().collect()
     }
@@ -565,7 +565,7 @@ impl PyPPG2Evaluator {
         self.evaluator.is_finished()
     }
 
-    pub fn new_history(&self) -> Result<HashMap<String, String>, PyErr> {
+    pub fn new_history(&self) -> Result<FxHashMap<String, String>, PyErr> {
         Ok(self.evaluator.new_history()?)
     }
 

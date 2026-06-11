@@ -69,7 +69,8 @@
 //!   PPG2_FUZZ_DUMP=1 ... to dump the decoded scenario.
 
 use pypipegraph2::{JobKind, PPGEvaluator, PPGEvaluatorError, StrategyForTesting};
-use std::collections::{HashMap, HashSet};
+use rustc_hash::FxHashMap;
+use std::collections::HashSet;
 
 struct Reader<'a> {
     d: &'a [u8],
@@ -211,7 +212,7 @@ struct RunOutcome {
 
 fn run_scenario(s: &Scenario) {
     let n = s.kinds.len();
-    let mut history: HashMap<String, String> = HashMap::new();
+    let mut history: FxHashMap<String, String> = FxHashMap::default();
     let mut done: HashSet<String> = HashSet::new(); // 'outputs on disk'
     let mut output_version = vec![0u8; n]; // toggled by 'code changed'
     let mut action_pos = 0usize;
@@ -230,7 +231,7 @@ fn run_scenario(s: &Scenario) {
         let names: Vec<String> = (0..n)
             .map(|idx| job_name(idx, s.multi[idx], run.flags[idx].name_variant))
             .collect();
-        let name_to_idx: HashMap<String, usize> = names
+        let name_to_idx: FxHashMap<String, usize> = names
             .iter()
             .enumerate()
             .map(|(idx, name)| (name.clone(), idx))
@@ -334,8 +335,7 @@ fn run_scenario(s: &Scenario) {
             loop {
                 match op {
                     Op::Start => {
-                        let mut ready: Vec<String> =
-                            g.query_ready_to_run().into_iter().collect();
+                        let mut ready: Vec<String> = g.query_ready_to_run().into_iter().collect();
                         // consistency oracle: next_job_ready_to_run must agree
                         // with query_ready_to_run
                         let nx = g.next_job_ready_to_run();
@@ -381,12 +381,7 @@ fn run_scenario(s: &Scenario) {
                         if run.flags[idx].fail {
                             any_failure = true;
                             if let Err(e) = g.event_job_finished_failure(&job_id) {
-                                panic!(
-                                    "failure event: {:?}\nscenario: {:?}\n{}",
-                                    e,
-                                    s,
-                                    g.debug_()
-                                );
+                                panic!("failure event: {:?}\nscenario: {:?}\n{}", e, s, g.debug_());
                             }
                         } else {
                             let output = format!("out_{}_v{}", job_id, output_version[idx]);
@@ -473,8 +468,7 @@ fn run_scenario(s: &Scenario) {
             // drain outstanding cleanups, like the runner's scheduler loop
             // does before it can observe 'finished'
             loop {
-                let mut pending: Vec<String> =
-                    g.query_ready_for_cleanup().into_iter().collect();
+                let mut pending: Vec<String> = g.query_ready_for_cleanup().into_iter().collect();
                 if pending.is_empty() {
                     break;
                 }

@@ -1,7 +1,8 @@
 #![allow(unused_variables)]
 /* ↓ ←➔ ↑ */
 #![allow(unused_macros)]
-use std::collections::{HashMap, HashSet};
+use rustc_hash::FxHashMap;
+use std::collections::HashSet;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::*;
@@ -80,7 +81,7 @@ pub fn test_simple_cycle() {
 
 #[test]
 pub fn test_failure() {
-    let mut his = HashMap::new();
+    let mut his = FxHashMap::default();
     his.insert("Job_not_present".to_string(), "hello".to_string());
     let mut g = PPGEvaluator::new_with_history(his, StrategyForTesting::new());
     g.add_node("out", JobKind::Output);
@@ -103,7 +104,7 @@ pub fn test_failure() {
 #[test]
 pub fn test_job_already_done() {
     let strat = StrategyForTesting::new();
-    let mut his = HashMap::new();
+    let mut his = FxHashMap::default();
     strat.already_done.borrow_mut().insert("out".to_string());
     his.insert("out".to_string(), "out".to_string());
     his.insert("out!!!".to_string(), "".to_string()); //the list of input jobs.
@@ -142,7 +143,7 @@ pub fn simplest_ephemeral() {
 
 #[test]
 pub fn ephemeral_output_already_done() {
-    let mut his = HashMap::new();
+    let mut his = FxHashMap::default();
     his.insert("in!!!out".to_string(), "".to_string());
     his.insert("in".to_string(), "".to_string());
     his.insert("in!!!".to_string(), "".to_string());
@@ -311,8 +312,8 @@ pub fn ephemeral_nested_last() {
     assert!(g.is_finished());
 }
 
-fn mk_history(input: &[((&str, &str), &str)]) -> HashMap<String, String> {
-    let mut res: HashMap<String, String> = input
+fn mk_history(input: &[((&str, &str), &str)]) -> FxHashMap<String, String> {
+    let mut res: FxHashMap<String, String> = input
         .iter()
         .map(|((downstream, upstream), c)| {
             (format!("{}!!!{}", upstream, downstream), c.to_string())
@@ -415,7 +416,7 @@ pub fn disjoint_and_twice() {
     };
 
     error!("part 1");
-    let mut g = init(HashMap::new());
+    let mut g = init(FxHashMap::default());
 
     let history = {
         g.event_startup().unwrap();
@@ -535,7 +536,7 @@ fn terminal_ephemeral_24() {
 fn run_graph(
     mut g: PPGEvaluator<StrategyForTesting>,
     done_log: Rc<RefCell<HashSet<String>>>,
-) -> HashMap<String, String> {
+) -> FxHashMap<String, String> {
     g.event_startup().unwrap();
     while !g.is_finished() {
         for job_id in g.query_ready_to_run().iter() {
@@ -557,7 +558,7 @@ fn test_run_then_add_jobs() {
         g.add_node("A", JobKind::Output);
         g
     };
-    let g = init(HashMap::new());
+    let g = init(FxHashMap::default());
     let history = run_graph(g, strat.already_done.clone());
 
     error!("part2");
@@ -2474,7 +2475,7 @@ fn test_aborting_between_ephemerals_1() {
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("N1".to_string());
     strat.already_done.borrow_mut().insert("N3".to_string());
-    let mut history = HashMap::new();
+    let mut history = FxHashMap::default();
     history.insert("N1".to_string(), "1_changed".to_string());
     history.insert("N1!!!".to_string(), "".to_string());
 
@@ -2533,7 +2534,7 @@ fn test_aborting_between_ephemerals_invalidation_triggers() {
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("N1".to_string());
     strat.already_done.borrow_mut().insert("N3".to_string());
-    let mut history = HashMap::new();
+    let mut history = FxHashMap::default();
     history.insert("N1".to_string(), "1_changed".to_string());
     history.insert("N1!!!".to_string(), "".to_string());
 
@@ -2579,7 +2580,7 @@ fn test_invalidation_case_20231120() {
     let strat = StrategyForTesting::new();
     strat.already_done.borrow_mut().insert("A".to_string());
 
-    let mut history = HashMap::new();
+    let mut history = FxHashMap::default();
     history.insert("C1".to_string(), "C1".to_string());
     history.insert("C2".to_string(), "C2".to_string());
     history.insert("B".to_string(), "B".to_string());
@@ -2638,7 +2639,8 @@ fn test_fail_panic_after_20231120_fix() {
 }
 
 #[test]
-fn test_fail_panic_after_20231120_fix2() { //and another one.
+fn test_fail_panic_after_20231120_fix2() {
+    //and another one.
     //bet it's another early return in downstream_requirement_status.
     //and indeed it was.
     fn create_graph(g: &mut PPGEvaluator<StrategyForTesting>) {
@@ -2753,7 +2755,7 @@ fn test_resume_with_ephemeral_edge_history_but_no_job_history() {
     strat.already_done.borrow_mut().insert("X".to_string());
     strat.already_done.borrow_mut().insert("D".to_string());
 
-    let mut history = HashMap::new();
+    let mut history = FxHashMap::default();
     history.insert("U".to_string(), "u".to_string());
     history.insert("U!!!".to_string(), "".to_string());
     history.insert("X".to_string(), "x".to_string());

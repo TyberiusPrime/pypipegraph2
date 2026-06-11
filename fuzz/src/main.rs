@@ -29,7 +29,8 @@
 //! (the binary reads stdin when run outside of AFL)
 
 use pypipegraph2::{JobKind, PPGEvaluator, PPGEvaluatorError, StrategyForTesting};
-use std::collections::{HashMap, HashSet};
+use rustc_hash::FxHashMap;
+use std::collections::HashSet;
 
 struct Reader<'a> {
     d: &'a [u8],
@@ -123,7 +124,7 @@ fn job_name(idx: usize) -> String {
 
 fn run_scenario(s: &Scenario) {
     let n = s.kinds.len();
-    let mut history: HashMap<String, String> = HashMap::new();
+    let mut history: FxHashMap<String, String> = FxHashMap::default();
     let mut done: HashSet<String> = HashSet::new(); // 'outputs on disk'
     let mut output_version = vec![0u8; n]; // toggled by 'code changed'
 
@@ -159,7 +160,12 @@ fn run_scenario(s: &Scenario) {
         }
 
         if let Err(e) = g.event_startup() {
-            panic!("event_startup failed: {:?}\nscenario: {:?}\n{}", e, s, g.debug_());
+            panic!(
+                "event_startup failed: {:?}\nscenario: {:?}\n{}",
+                e,
+                s,
+                g.debug_()
+            );
         }
 
         let mut executed = 0usize;

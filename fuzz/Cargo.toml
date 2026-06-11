@@ -19,6 +19,7 @@ path = "src/interleave.rs"
 # must match the cargo-afl version (currently 0.18.1 in the nix store wrapper)
 afl = "=0.18.1"
 pypipegraph2 = { path = ".." }
+rustc-hash = "2.1.2"
 
 [profile.release]
 debug = true
