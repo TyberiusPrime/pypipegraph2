@@ -2874,3 +2874,503 @@ fn test_multi_file_job_gaining_output() {
 
 }
 */
+
+
+
+
+// ============================================================================
+// fuzz_interleave deadlock family — campaign 2026-06-12 (fuzz/out_interleave).
+// 84 crashes, all the DEADLOCK oracle (engine not finished, query_ready_to_run
+// empty, nothing running). Root cause: set_upstream_edges flipped an edge to
+// Required::Yes without advancing the generation, so reconsider_job!'s dedup
+// guard dropped the ConsiderJob that would re-evaluate a ReadyButDelayed
+// ephemeral. FIXED 2026-06-12 (gen.advance() on a real edge-weight change).
+// These replay the captured multi-run history schedules and drive each run to
+// completion; drive_run_to_completion asserts the deadlock does not recur.
+// Raw inputs archived under fuzz/known_crashes/interleave_deadlock_*.
+// ============================================================================
+
+/// Drive one already-started run to completion, failing `fails` and emitting
+/// `outputs` (default `out_<job>`). Panics if the engine ever reports nothing
+/// ready, nothing running and not finished — the "no way forward" deadlock.
+fn drive_run_to_completion(
+    g: &mut PPGEvaluator<StrategyForTesting>,
+    on_disk: &Rc<RefCell<FxHashSet<String>>>,
+    fails: &[&str],
+    outputs: &[(&str, &str)],
+) {
+    let fails: FxHashSet<&str> = fails.iter().copied().collect();
+    let outputs: FxHashMap<&str, &str> = outputs.iter().copied().collect();
+    let mut guard = 0;
+    while !g.is_finished() {
+        let mut ready: Vec<String> = g.query_ready_to_run().into_iter().collect();
+        ready.sort();
+        assert!(
+            !ready.is_empty(),
+            "DEADLOCK: run not finished, nothing ready to run, nothing running"
+        );
+        for job in ready {
+            g.event_now_running(&job).unwrap();
+            if fails.contains(job.as_str()) {
+                g.event_job_finished_failure(&job).unwrap();
+            } else {
+                let out = outputs
+                    .get(job.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("out_{}", job));
+                match g.event_job_finished_success(&job, out) {
+                    Ok(()) => {
+                        on_disk.borrow_mut().insert(job.clone());
+                    }
+                    Err(PPGEvaluatorError::EphemeralChangedOutput { .. }) => {
+                        on_disk.borrow_mut().insert(job.clone());
+                    }
+                    Err(e) => panic!("unexpected success error: {:?}", e),
+                }
+            }
+        }
+        let mut cu: Vec<String> = g.query_ready_for_cleanup().into_iter().collect();
+        cu.sort();
+        for c in cu {
+            g.event_job_cleanup_done(&c).unwrap();
+            on_disk.borrow_mut().remove(&c);
+        }
+        guard += 1;
+        assert!(guard < 1000, "runaway loop");
+    }
+}
+
+#[test]
+fn test_interleave_deadlock_a_validated_eph_chain() {
+    // Regression for the fuzz_interleave deadlock family (cargo-afl, 2026-06-12),
+    // FIXED 2026-06-12 by advancing the generation in set_upstream_edges when an
+    // edge requirement actually changes. Without the fix this run wedges: head
+    // ephemeral N0 stays ReadyButDelayed because the Required::Yes propagated onto
+    // edge N0->N2 did not bump the generation, so the ConsiderJob that would
+    // re-evaluate N0 was dropped by reconsider_job!'s dedup guard -> nothing ready,
+    // nothing running, not finished. Drives every run to completion; the assert in
+    // drive_run_to_completion fires if the deadlock ever returns.
+    let mut history: FxHashMap<String, String> = FxHashMap::default();
+    let mut done: FxHashSet<String> = FxHashSet::default();
+    // run 0
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Always);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N6", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N3");
+        g.depends_on("N6", "N4");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[("N0", "out_N0_v0"), ("N1", "out_N1_v0"), ("N2", "out_N2_v0"), ("N3", "out_N3_v0"), ("N4", "out_N4_v0"), ("N5", "out_N5_v0"), ("N6", "out_N6_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 1
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Always);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N6", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N6", "N4");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[("N4", "out_N4_v0"), ("N5", "out_N5_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 2
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Always);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N6", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N3");
+        g.depends_on("N6", "N4");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &["N4"], &[("N0", "out_N0_v0"), ("N1", "out_N1_v0"), ("N2", "out_N2_v0"), ("N3", "out_N3_v0"), ("N5", "out_N5_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 3
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Always);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N6", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N3");
+        g.depends_on("N6", "N4");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[("N5", "out_N5_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    let _ = (&history, &done);
+}
+
+#[test]
+fn test_interleave_deadlock_b_with_skipped_eph() {
+    // Regression: same dropped-reconsider deadlock (FIXED 2026-06-12 via the
+    // set_upstream_edges generation bump), with an upstream ephemeral already
+    // FinishedSkipped this run.
+    let mut history: FxHashMap<String, String> = FxHashMap::default();
+    let mut done: FxHashSet<String> = FxHashSet::default();
+    // run 0
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Always);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N1");
+        g.depends_on("N4", "N1");
+        g.depends_on("N6", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N2");
+        g.depends_on("N6", "N2");
+        g.depends_on("N4", "N3");
+        g.depends_on("N6", "N3");
+        g.depends_on("N6", "N4");
+        g.depends_on("N6", "N5");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[("N0", "out_N0_v0"), ("N1", "out_N1_v0"), ("N2", "out_N2_v0"), ("N3", "out_N3_v0"), ("N4", "out_N4_v0"), ("N5", "out_N5_v0"), ("N6", "out_N6_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 1
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Always);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N6", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N5", "N2");
+        g.depends_on("N4", "N3");
+        g.depends_on("N5", "N3");
+        g.depends_on("N6", "N3");
+        g.depends_on("N6", "N4");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[("N0", "out_N0_v0"), ("N1", "out_N1_v0"), ("N2", "out_N2_v0"), ("N3", "out_N3_v0"), ("N4", "out_N4_v0"), ("N6", "out_N6_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 2
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N1");
+        g.depends_on("N4", "N1");
+        g.depends_on("N6", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N2");
+        g.depends_on("N6", "N2");
+        g.depends_on("N6", "N3");
+        g.depends_on("N6", "N4");
+        g.depends_on("N6", "N5");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &["N0"], &[("N5", "out_N5_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 3
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Always);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N6", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N5", "N2");
+        g.depends_on("N4", "N3");
+        g.depends_on("N5", "N3");
+        g.depends_on("N6", "N3");
+        g.depends_on("N6", "N4");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[("N0", "out_N0_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    let _ = (&history, &done);
+}
+
+#[test]
+fn test_interleave_deadlock_c_cleanup_pending() {
+    // Regression: cleanup-pending variant of the dropped-reconsider deadlock
+    // (FIXED 2026-06-12). A sibling ephemeral sits in
+    // FinishedSuccessNotReadyForCleanup while the head ephemeral is stuck
+    // ReadyButDelayed.
+    let mut history: FxHashMap<String, String> = FxHashMap::default();
+    let mut done: FxHashSet<String> = FxHashSet::default();
+    // run 0
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Always);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Always);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N2", "N0");
+        g.depends_on("N3", "N0");
+        g.depends_on("N4", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N6", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N3");
+        g.depends_on("N6", "N3");
+        g.depends_on("N6", "N4");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[("N0", "out_N0_v0"), ("N1", "out_N1_v0"), ("N2", "out_N2_v0"), ("N3", "out_N3_v0"), ("N4", "out_N4_v0"), ("N5", "out_N5_v0"), ("N6", "out_N6_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 1
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Always);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Always);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N2", "N0");
+        g.depends_on("N3", "N0");
+        g.depends_on("N4", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N6", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N6", "N3");
+        g.depends_on("N6", "N4");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &["N0"], &[("N5", "out_N5_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 2
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Ephemeral);
+        g.add_node("N5", JobKind::Always);
+        g.add_node("N6", JobKind::Output);
+        g.depends_on("N2", "N0");
+        g.depends_on("N3", "N0");
+        g.depends_on("N4", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N6", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N3");
+        g.depends_on("N6", "N3");
+        g.depends_on("N6", "N4");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[("N0", "out_N0_v0"), ("N5", "out_N5_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    let _ = (&history, &done);
+}
+
+#[test]
+fn test_interleave_deadlock_d_skipped_output_multi() {
+    // Regression: dropped-reconsider deadlock (FIXED 2026-06-12) with a downstream
+    // Output already FinishedSkipped and a multi-output ':::' terminal Output.
+    let mut history: FxHashMap<String, String> = FxHashMap::default();
+    let mut done: FxHashSet<String> = FxHashSet::default();
+    // run 0
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Output);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.add_node("N6_a:::N6_b:::N6_c", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N6_a:::N6_b:::N6_c", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N2");
+        g.depends_on("N5", "N3");
+        g.depends_on("N6_a:::N6_b:::N6_c", "N5");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[("N0", "out_N0_v0"), ("N1", "out_N1_v0"), ("N2", "out_N2_v0"), ("N3", "out_N3_v0"), ("N4", "out_N4_v0"), ("N5", "out_N5_v0"), ("N6_a:::N6_b:::N6_c", "out_N6_a:::N6_b:::N6_c_v0")]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 1
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Output);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.add_node("N6_a:::N6_b:::N6_c", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N6_a:::N6_b:::N6_c", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N2");
+        g.depends_on("N5", "N3");
+        g.depends_on("N6_a:::N6_b:::N6_c", "N5");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 2
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Output);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.depends_on("N1", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N4", "N2");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    // run 3
+    {
+        let strat = StrategyForTesting::new();
+        for k in done.iter() { strat.already_done.borrow_mut().insert(k.clone()); }
+        let on_disk = Rc::clone(&strat.already_done);
+        let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        g.add_node("N0", JobKind::Ephemeral);
+        g.add_node("N1", JobKind::Ephemeral);
+        g.add_node("N2", JobKind::Ephemeral);
+        g.add_node("N3", JobKind::Ephemeral);
+        g.add_node("N4", JobKind::Output);
+        g.add_node("N5", JobKind::Ephemeral);
+        g.add_node("N6_a:::N6_b:::N6_c", JobKind::Output);
+        g.depends_on("N1", "N0");
+        g.depends_on("N6_a:::N6_b:::N6_c", "N0");
+        g.depends_on("N2", "N1");
+        g.depends_on("N3", "N2");
+        g.depends_on("N4", "N2");
+        g.depends_on("N5", "N3");
+        g.depends_on("N6_a:::N6_b:::N6_c", "N5");
+        g.event_startup().unwrap();
+        drive_run_to_completion(&mut g, &on_disk, &[], &[]);
+        history = g.new_history().unwrap();
+        done = on_disk.take();
+    }
+    let _ = (&history, &done);
+}

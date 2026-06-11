@@ -66,7 +66,9 @@
 //!       target/release/fuzz_interleave
 //! Reproduce a crash (binary reads stdin outside of AFL):
 //!   target/release/fuzz_interleave < out_interleave/default/crashes/id...
-//!   PPG2_FUZZ_DUMP=1 ... to dump the decoded scenario.
+//!   PPG2_FUZZ_DUMP=1 ...  to dump the decoded scenario.
+//!   PPG2_FUZZ_TRACE=1 ... to emit the exact engine API call sequence as
+//!     copy-pasteable Rust (turn an interleaving crash into a unit test).
 
 use pypipegraph2::{JobKind, PPGEvaluator, PPGEvaluatorError, StrategyForTesting};
 use rustc_hash::FxHashMap;
@@ -211,6 +213,11 @@ struct RunOutcome {
 }
 
 fn run_scenario(s: &Scenario) {
+    // PPG2_FUZZ_TRACE=1 emits the exact engine API call sequence as
+    // copy-pasteable Rust, so an interleaving-sensitive crash can be turned
+    // into a self-contained regression test.
+    let trace = std::env::var_os("PPG2_FUZZ_TRACE").is_some();
+    macro_rules! tr { ($($a:tt)*) => { if trace { eprintln!($($a)*); } } }
     let n = s.kinds.len();
     let mut history: FxHashMap<String, String> = FxHashMap::default();
     let mut done: FxHashSet<String> = FxHashSet::default(); // 'outputs on disk'
@@ -223,7 +230,7 @@ fn run_scenario(s: &Scenario) {
     };
     let mut prev_outcome: Option<RunOutcome> = None;
 
-    for run in &s.runs {
+    for (_run_no, run) in s.runs.iter().enumerate() {
         let present: Vec<bool> = run.flags.iter().map(|f| !f.absent).collect();
         let kinds: Vec<JobKind> = (0..n)
             .map(|idx| run.flags[idx].kind_override.unwrap_or(s.kinds[idx]))
@@ -274,14 +281,28 @@ fn run_scenario(s: &Scenario) {
         }
         let on_disk = std::rc::Rc::clone(&strat.already_done);
         let mut g = PPGEvaluator::new_with_history(history.clone(), strat);
+        tr!("\n// ===== run {} =====", _run_no);
+        tr!("let strat = StrategyForTesting::new();");
+        {
+            let mut ds: Vec<&String> = done.iter().collect();
+            ds.sort();
+            for k in ds {
+                tr!("strat.already_done.borrow_mut().insert({:?}.to_string());", k);
+            }
+        }
+        tr!("let on_disk = Rc::clone(&strat.already_done);");
+        tr!("let mut g = PPGEvaluator::new_with_history(history.clone(), strat);");
         for idx in 0..n {
             if present[idx] {
                 g.add_node(&names[idx], kinds[idx]);
+                tr!("g.add_node({:?}, JobKind::{:?});", names[idx], kinds[idx]);
             }
         }
         for (up, down) in edges.iter() {
             g.depends_on(&names[*down], &names[*up]);
+            tr!("g.depends_on({:?}, {:?});", names[*down], names[*up]);
         }
+        tr!("g.event_startup().unwrap();");
 
         if let Err(e) = g.event_startup() {
             panic!(
@@ -352,6 +373,9 @@ fn run_scenario(s: &Scenario) {
                                 // nothing ready, nothing running, not finished:
                                 // exactly the state runner.py aborts on with
                                 // 'a bug in the state machine. No way forward'.
+                                tr!("// >>> DEADLOCK HERE: not finished, query_ready_to_run() empty, nothing running");
+                                tr!("assert!(g.query_ready_to_run().is_empty());");
+                                tr!("assert!(!g.is_finished()); // <-- the bug");
                                 panic!(
                                     "DEADLOCK: evaluator not finished, no jobs ready, none running.\nscenario: {:?}\n{}",
                                     s,
@@ -363,6 +387,8 @@ fn run_scenario(s: &Scenario) {
                         }
                         ready.sort(); // determinism (AFL stability)
                         let job_id = ready[sel % ready.len()].clone();
+                        tr!("assert_eq!(g.query_ready_to_run(), set!{:?});", { let mut v=ready.clone(); v.sort(); v });
+                        tr!("g.event_now_running({:?}).unwrap();", job_id);
                         g.event_now_running(&job_id).unwrap_or_else(|e| {
                             panic!("now_running: {:?}\n{:?}\n{}", e, s, g.debug_())
                         });
@@ -380,11 +406,13 @@ fn run_scenario(s: &Scenario) {
                         let idx = name_to_idx[&job_id];
                         if run.flags[idx].fail {
                             any_failure = true;
+                            tr!("g.event_job_finished_failure({:?}).unwrap();", job_id);
                             if let Err(e) = g.event_job_finished_failure(&job_id) {
                                 panic!("failure event: {:?}\nscenario: {:?}\n{}", e, s, g.debug_());
                             }
                         } else {
                             let output = format!("out_{}_v{}", job_id, output_version[idx]);
+                            tr!("if g.event_job_finished_success({:?}, {:?}.to_string()).is_ok() {{ on_disk.borrow_mut().insert({:?}.to_string()); }}", job_id, output, job_id);
                             match g.event_job_finished_success(&job_id, output) {
                                 Ok(()) => {
                                     on_disk.borrow_mut().insert(job_id.clone());
@@ -417,6 +445,7 @@ fn run_scenario(s: &Scenario) {
                         }
                         pending.sort();
                         let job_id = pending[sel % pending.len()].clone();
+                        tr!("g.event_job_cleanup_done({:?}).unwrap(); on_disk.borrow_mut().remove({:?});", job_id, job_id);
                         g.event_job_cleanup_done(&job_id).unwrap_or_else(|e| {
                             panic!("cleanup: {:?}\n{:?}\n{}", e, s, g.debug_())
                         });
@@ -430,6 +459,7 @@ fn run_scenario(s: &Scenario) {
                             continue;
                         }
                         reconsiders_left -= 1;
+                        tr!("g.reconsider_all_jobs().unwrap();");
                         if let Err(e) = g.reconsider_all_jobs() {
                             panic!(
                                 "reconsider_all_jobs: {:?}\nscenario: {:?}\n{}",
@@ -474,6 +504,7 @@ fn run_scenario(s: &Scenario) {
                 }
                 pending.sort();
                 for job_id in pending {
+                    tr!("g.event_job_cleanup_done({:?}).unwrap(); on_disk.borrow_mut().remove({:?});", job_id, job_id);
                     g.event_job_cleanup_done(&job_id)
                         .unwrap_or_else(|e| panic!("cleanup: {:?}\n{:?}", e, s));
                     on_disk.borrow_mut().remove(&job_id);
@@ -551,6 +582,7 @@ fn run_scenario(s: &Scenario) {
         }
 
         // mirrors runner.py: new_history() is taken after aborts as well
+        tr!("let history = g.new_history().unwrap(); let done = on_disk.take();");
         history = match g.new_history() {
             Ok(h) => h,
             Err(e) => panic!("new_history: {:?}\nscenario: {:?}\n{}", e, s, g.debug_()),

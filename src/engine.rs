@@ -2063,6 +2063,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                                 // ::Validated
                                                 Required::No
                                             },
+                                            gen,
                                         );
                                         Self::remove_consider_signals(new_signals, node_idx);
                                         ignore_consider_signals.insert(node_idx);
@@ -2171,7 +2172,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     "\tdownstream required {}, setting upstream edges to 'required'",
                                     jobs[node_idx as usize].job_id
                                 );
-                                Self::set_upstream_edges(dag, node_idx, Required::Yes);
+                                Self::set_upstream_edges(dag, node_idx, Required::Yes, gen);
                                 Self::reconsider_ephemeral_upstreams(
                                     // which is lazy.
                                     dag,
@@ -2192,7 +2193,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                     "\tNo downstream required {}, setting upstream edges to 'not required'",
                                     jobs[node_idx as usize].job_id
                                 );
-                                Self::set_upstream_edges(dag, node_idx, Required::No);
+                                Self::set_upstream_edges(dag, node_idx, Required::No, gen);
                                 //
                                 Self::reconsider_ephemeral_upstreams(
                                     dag,
@@ -2461,12 +2462,22 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         }
     }
 
-    fn set_upstream_edges(dag: &mut GraphType, node_idx: NodeIndex, weight: Required) {
+    fn set_upstream_edges(
+        dag: &mut GraphType,
+        node_idx: NodeIndex,
+        weight: Required,
+        gen: &mut Generation,
+    ) {
         let upstreams: Vec<_> = dag
             .neighbors_directed(node_idx, Direction::Incoming)
             .collect();
         for upstream_idx in upstreams {
-            (dag.edge_weight_mut(upstream_idx, node_idx).unwrap()).required = weight
+            let w = dag.edge_weight_mut(upstream_idx, node_idx).unwrap();
+            if w.required != weight {
+                w.required = weight;
+                gen.advance(); //genereation advances whenever we need to reevaluate
+                //Ephemeral(ReadyButDelayed)
+            }
         }
     }
 
@@ -2500,10 +2511,10 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
 
             if inputs_changed {
                 debug!("Input to job {} changed.", job.job_id);
-                Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
+                Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes, &mut self.gen);
                 match job.state {
                     JobState::Always(JobStateAlways::Undetermined) => {
-                        Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes)
+                        Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes, &mut self.gen)
                     }
                     JobState::Output(JobStateOutput::NotReady(ValidationStatus::Unknown)) => {
                         set_node_state!(
@@ -2533,18 +2544,18 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                 debug!("Input to job {} *un*changed.", job.job_id);
                 match job.state {
                     JobState::Always(_) => {
-                        Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes)
+                        Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes, &mut self.gen)
                     }
                     JobState::Output(_) => {
                         if self.strategy.output_already_present(&job.job_id) {
                             if self.history.contains_key(&job.job_id) {
-                                Self::set_upstream_edges(&mut self.dag, node_idx, Required::No)
+                                Self::set_upstream_edges(&mut self.dag, node_idx, Required::No, &mut self.gen)
                             } else {
                                 warn!(
                                     "output present, but we had no history for {}, redoing",
                                     &job.job_id
                                 );
-                                Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
+                                Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes, &mut self.gen);
                                 set_node_state!(
                                     job,
                                     JobState::Output(JobStateOutput::NotReady(
@@ -2554,7 +2565,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 );
                             }
                         } else {
-                            Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes);
+                            Self::set_upstream_edges(&mut self.dag, node_idx, Required::Yes, &mut self.gen);
                             debug!("output was missing {}", &job.job_id);
                             set_node_state!(
                                 job,
@@ -2603,7 +2614,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                                 Required::Yes
                             } else {
                                 Required::No
-                            },
+                            }, &mut self.gen,
                         )
                     }
                 }

@@ -86,3 +86,9 @@ python/localscope
 
 # afl output dirs (when fuzzing from the repo root)
 /out_*/
+default_*
+fuzz/default_*
+coverage-html-tests/
+coverage-html-fuzz/
+mutants.out*/
+core*

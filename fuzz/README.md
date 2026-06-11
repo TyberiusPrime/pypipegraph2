@@ -111,6 +111,51 @@ Before the fixes, a 4-minute AFL run (2.9M execs) found all three buckets
 (149 crashes); with both fixes in, all 227 historical crash inputs pass and
 fresh AFL runs find nothing.
 
+### interleave_deadlock_* (fuzz_interleave, campaign 2026-06-12) — **fixed 2026-06-12**
+
+A longer `fuzz_interleave` campaign (`out_interleave/`, ~250M execs/instance
+across 30 instances) turned up 84 crashes — **all** the `DEADLOCK` oracle
+(evaluator not finished, `query_ready_to_run()` empty, nothing running:
+runner.py's "no way forward" abort). They are one root-cause family with a
+few distinct surrounding states:
+
+* an ephemeral's go/no-go decision is never made — it stays
+  `Ephemeral(ReadyButDelayed)` while a `NotReady(Validated)` downstream waits
+  on its decision and a terminal Output is stranded `NotReady(Unknown)`.
+
+**Root cause / fix:** `set_upstream_edges` flipped an edge's `required`
+weight to `Yes` (the input that `any_downstream_required` reads for a
+`ReadyButDelayed` ephemeral) **without advancing the generation counter**, so
+the follow-up `reconsider_ephemeral_upstreams` `ConsiderJob` for that
+ephemeral was suppressed by `reconsider_job!`'s "already considered in this
+gen" dedup guard — the ephemeral never re-evaluated and never ran. Fixed by
+advancing the generation in `set_upstream_edges` whenever an edge weight
+actually changes (engine.rs).
+
+Six deduplicated, minimised representatives are archived here; each used to
+deadlock and now completes via the binary
+(`fuzz_interleave < known_crashes/interleave_…`):
+
+* `interleave_deadlock_a_validated_eph_chain` — the bare core: a validated
+  ephemeral chain stalls behind an undecided `ReadyButDelayed` head.
+* `interleave_deadlock_b_skipped_eph` — same, with an upstream ephemeral
+  already `FinishedSkipped`.
+* `interleave_deadlock_c_cleanup_pending` — a sibling ephemeral parked in
+  `FinishedSuccessNotReadyForCleanup` whose cleanup never unblocks.
+* `interleave_deadlock_d_skipped_output_multi` — a downstream Output already
+  `FinishedSkipped`, terminal Output is a multi-output `:::` job.
+* `interleave_deadlock_e_cleanup_multi` — multi-output validated chain.
+* `interleave_deadlock_f_skipped_output_multi` — multi-output skipped Output
+  plus a stranded `NotReady(Unknown)` Output.
+
+In-tree regression tests (direct engine API, no AFL needed) live in
+`src/tests.rs` as `test_interleave_deadlock_{a,b,c,d}_*`. They replay the
+captured multi-run history setup and drive each run to completion via
+`drive_run_to_completion`, which asserts the deadlock does not recur (it fires
+on the pre-fix engine, passes on the fixed one). `PPG2_FUZZ_TRACE=1
+fuzz_interleave < <input>` emits the captured engine call sequence as
+copy-pasteable Rust for turning any further crash into a test.
+
 # fuzz_interleave
 
 The advanced target. Where `fuzz_history` executes strictly serially

@@ -137,3 +137,71 @@ Open stuff
    - much better default log output... tell me what jobs spawned & finished
 
 - check the runtime log, I think it's sometimes missing newlines?
+
+
+Handlet he timeouts:
+
+
+Found 237 mutants to test
+ok       Unmutated baseline in 4s build + 0s test
+ INFO Auto-set test timeout to 20s
+MISSED   src/engine.rs:107:13: delete match arm JobState::Always(JobStateAlways::FinishedUpstreamFailure) in JobState::is_upstream_failure in 0s build + 0s test
+MISSED   src/engine.rs:109:13: delete match arm JobState::Ephemeral(JobStateEphemeral::FinishedUpstreamFailure) in JobState::is_upstream_failure in 0s build + 0s test
+MISSED   src/engine.rs:129:9: replace <impl JobQueries for JobStateAlways>::is_failed -> bool with true in 0s build + 0s test
+MISSED   src/engine.rs:188:9: replace <impl JobQueries for JobStateEphemeral>::is_failed -> bool with true in 0s build + 0s test
+MISSED   src/engine.rs:211:9: replace NodeInfo::clone_job_id -> String with String::new() in 0s build + 0s test
+MISSED   src/engine.rs:211:9: replace NodeInfo::clone_job_id -> String with "xyzzy".into() in 0s build + 0s test
+MISSED   src/engine.rs:273:9: replace Signal::job_id -> &'a str with "" in 0s build + 0s test
+MISSED   src/engine.rs:273:9: replace Signal::job_id -> &'a str with "xyzzy" in 0s build + 0s test
+MISSED   src/engine.rs:428:9: replace PPGEvaluator<T>::contains_node -> bool with false in 0s build + 0s test
+TIMEOUT  src/engine.rs:467:9: replace PPGEvaluator<T>::is_finished -> bool with false in 0s build + 20s test
+MISSED   src/engine.rs:484:9: replace PPGEvaluator<T>::debug_is_finished -> bool with true in 0s build + 0s test
+MISSED   src/engine.rs:484:9: replace PPGEvaluator<T>::debug_is_finished -> bool with false in 0s build + 0s test
+MISSED   src/engine.rs:485:16: delete ! in PPGEvaluator<T>::debug_is_finished in 0s build + 0s test
+MISSED   src/engine.rs:494:9: replace PPGEvaluator<T>::debug_ -> String with String::new() in 0s build + 0s test
+MISSED   src/engine.rs:494:9: replace PPGEvaluator<T>::debug_ -> String with "xyzzy".into() in 0s build + 0s test
+MISSED   src/engine.rs:499:9: replace PPGEvaluator<T>::reconsider_all_jobs -> Result<(), PPGEvaluatorError> with Ok(()) in 0s build + 0s test
+MISSED   src/engine.rs:501:16: delete ! in PPGEvaluator<T>::reconsider_all_jobs in 0s build + 0s test
+MISSED   src/engine.rs:510:9: replace PPGEvaluator<T>::debug -> String with String::new() in 0s build + 0s test
+MISSED   src/engine.rs:510:9: replace PPGEvaluator<T>::debug -> String with "xyzzy".into() in 0s build + 0s test
+MISSED   src/engine.rs:565:9: replace PPGEvaluator<T>::verify_order_was_topological -> bool with true in 0s build + 0s test
+MISSED   src/engine.rs:565:9: replace PPGEvaluator<T>::verify_order_was_topological -> bool with false in 0s build + 0s test
+MISSED   src/engine.rs:568:65: replace == with != in PPGEvaluator<T>::verify_order_was_topological in 0s build + 0s test
+MISSED   src/engine.rs:569:67: replace == with != in PPGEvaluator<T>::verify_order_was_topological in 0s build + 0s test
+MISSED   src/engine.rs:575:26: replace > with == in PPGEvaluator<T>::verify_order_was_topological in 0s build + 0s test
+MISSED   src/engine.rs:575:26: replace > with < in PPGEvaluator<T>::verify_order_was_topological in 0s build + 0s test
+MISSED   src/engine.rs:575:26: replace > with >= in PPGEvaluator<T>::verify_order_was_topological in 0s build + 0s test
+MISSED   src/engine.rs:589:9: replace PPGEvaluator<T>::next_job_ready_to_run -> Option<String> with None in 0s build + 0s test
+MISSED   src/engine.rs:589:9: replace PPGEvaluator<T>::next_job_ready_to_run -> Option<String> with Some(String::new()) in 0s build + 0s test
+MISSED   src/engine.rs:589:9: replace PPGEvaluator<T>::next_job_ready_to_run -> Option<String> with Some("xyzzy".into()) in 0s build + 0s test
+MISSED   src/engine.rs:597:17: delete match arm JobState::Always(JobStateAlways::Running) | JobState::Output(JobStateOutput::Running) | JobState::Ephemeral(JobStateEphemeral::Running(_)) in PPGEvaluator<T>::query_jobs_running in 0s build + 0s test
+MISSED   src/engine.rs:698:50: replace == with != in PPGEvaluator<T>::new_history in 0s build + 0s test
+MISSED   src/engine.rs:769:65: replace || with && in PPGEvaluator<T>::new_history in 0s build + 0s test
+MISSED   src/engine.rs:823:29: delete match arm JobState::Output(JobStateOutput::FinishedSkipped) | JobState::Ephemeral(JobStateEphemeral::FinishedSkipped) in PPGEvaluator<T>::new_history in 0s build + 0s test
+MISSED   src/engine.rs:834:49: delete match arm JobState::Ephemeral(_) in PPGEvaluator<T>::new_history in 0s build + 0s test
+TIMEOUT  src/engine.rs:891:9: replace PPGEvaluator<T>::event_startup -> Result<(), PPGEvaluatorError> with Ok(()) in 0s build + 20s test
+MISSED   src/engine.rs:925:29: delete match arm JobState::Ephemeral(_) in PPGEvaluator<T>::prune_leaf_ephemerals in 0s build + 0s test
+TIMEOUT  src/engine.rs:993:9: replace PPGEvaluator<T>::event_job_finished_success -> Result<(), PPGEvaluatorError> with Ok(()) in 0s build + 20s test
+TIMEOUT  src/engine.rs:1165:9: replace PPGEvaluator<T>::process_signals -> Result<(), PPGEvaluatorError> with Ok(()) in 0s build + 20s test
+TIMEOUT  src/engine.rs:1173:9: replace PPGEvaluator<T>::inner_process_signals -> Result<(), PPGEvaluatorError> with Ok(()) in 0s build + 20s test
+MISSED   src/engine.rs:1173:18: replace > with == in PPGEvaluator<T>::inner_process_signals in 0s build + 0s test
+MISSED   src/engine.rs:1173:18: replace > with >= in PPGEvaluator<T>::inner_process_signals in 0s build + 0s test
+MISSED   src/engine.rs:1295:29: delete match arm JobStateEphemeral::NotReady(ValidationStatus::Invalidated) in PPGEvaluator<T>::inner_process_signals in 0s build + 0s test
+MISSED   src/engine.rs:1477:25: delete match arm JobState::Ephemeral(JobStateEphemeral::FinishedSkipped) in PPGEvaluator<T>::inner_process_signals in 0s build + 0s test
+TIMEOUT  src/engine.rs:1588:12: delete ! in PPGEvaluator<T>::inner_process_signals in 0s build + 20s test
+MISSED   src/engine.rs:1597:40: replace + with * in PPGEvaluator<T>::inner_process_signals in 0s build + 0s test
+MISSED   src/engine.rs:1656:17: delete match arm JobState::Always(_) in PPGEvaluator<T>::all_downstreams_validated_or_upstream_failed in 0s build + 0s test
+TIMEOUT  src/engine.rs:1685:9: replace PPGEvaluator<T>::all_upstreams_done -> bool with false in 0s build + 20s test
+MISSED   src/engine.rs:1695:9: replace PPGEvaluator<T>::has_upstreams -> bool with true in 0s build + 0s test
+MISSED   src/engine.rs:1714:9: replace PPGEvaluator<T>::try_finding_renamed_multi_output_job -> Option<String> with None in 0s build + 0s test
+MISSED   src/engine.rs:1714:9: replace PPGEvaluator<T>::try_finding_renamed_multi_output_job -> Option<String> with Some(String::new()) in 0s build + 0s test
+MISSED   src/engine.rs:1714:9: replace PPGEvaluator<T>::try_finding_renamed_multi_output_job -> Option<String> with Some("xyzzy".into()) in 0s build + 0s test
+MISSED   src/engine.rs:1738:28: replace > with == in PPGEvaluator<T>::try_finding_renamed_multi_output_job in 0s build + 0s test
+MISSED   src/engine.rs:1738:28: replace > with < in PPGEvaluator<T>::try_finding_renamed_multi_output_job in 0s build + 0s test
+MISSED   src/engine.rs:1738:28: replace > with >= in PPGEvaluator<T>::try_finding_renamed_multi_output_job in 0s build + 0s test
+MISSED   src/engine.rs:1961:26: replace += with -= in PPGEvaluator<T>::update_validation_status in 0s build + 0s test
+MISSED   src/engine.rs:1996:9: replace PPGEvaluator<T>::propagate_job_required with () in 0s build + 0s test
+TIMEOUT  src/engine.rs:2025:9: replace PPGEvaluator<T>::signal_consider_job -> Result<(), PPGEvaluatorError> with Ok(()) in 0s build + 20s test
+MISSED   src/engine.rs:2140:29: replace && with || in PPGEvaluator<T>::signal_consider_job in 0s build + 0s test
+MISSED   src/engine.rs:2303:21: delete match arm JobState::Output(JobStateOutput::NotReady(ValidationStatus::Invalidated)) in PPGEvaluator<T>::downstream_requirement_status in 0s build + 0s test
+TIMEOUT  src/engine.rs:2616:9: replace PPGEvaluator<T>::start_on_roots with () in 0s build + 20s test
