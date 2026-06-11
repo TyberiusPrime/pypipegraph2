@@ -83,3 +83,6 @@ tests/**/run
 examples/run
 python/localscope
 .aider*
+
+# afl output dirs (when fuzzing from the repo root)
+/out_*/

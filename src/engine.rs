@@ -1,11 +1,8 @@
 #[allow(unused_imports)]
 use log::{debug, error, info, warn};
 use petgraph::{graphmap::GraphMap, Directed, Direction};
-use rustc_hash::FxHashMap;
-use std::{
-    borrow::Cow,
-    collections::{HashSet, VecDeque},
-};
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
+use std::{borrow::Cow, collections::VecDeque};
 
 use crate::{PPGEvaluatorError, PPGEvaluatorStrategy};
 
@@ -331,7 +328,10 @@ pub enum JobOutputResult {
 
 pub(crate) type NodeIndex = usize;
 
-pub(crate) type GraphType = GraphMap<NodeIndex, EdgeInfo, Directed>;
+// FxBuildHasher (deterministic) instead of the RandomState default: the
+// engine must behave identically across runs (fuzzing stability, and no
+// once-in-a-blue-moon ordering bugs in production).
+pub(crate) type GraphType = GraphMap<NodeIndex, EdgeInfo, Directed, FxBuildHasher>;
 
 struct Generation {
     gen: usize,
@@ -354,8 +354,8 @@ pub struct PPGEvaluator<T: PPGEvaluatorStrategy> {
     history: FxHashMap<String, String>,
     strategy: T,
     already_started: StartStatus,
-    jobs_ready_to_run: HashSet<String>,
-    jobs_ready_for_cleanup: HashSet<String>,
+    jobs_ready_to_run: FxHashSet<String>,
+    jobs_ready_for_cleanup: FxHashSet<String>,
     topo: Option<Vec<NodeIndex>>,
     signals: VecDeque<Signal>,
     gen: Generation,
@@ -377,8 +377,8 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             history,
             strategy,
             already_started: StartStatus::NotStarted,
-            jobs_ready_to_run: HashSet::new(),
-            jobs_ready_for_cleanup: HashSet::new(),
+            jobs_ready_to_run: FxHashSet::default(),
+            jobs_ready_for_cleanup: FxHashSet::default(),
             topo: None,
             signals: VecDeque::new(),
             gen: Generation { gen: 0 },
@@ -582,7 +582,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     }
 
     /// what jobs are ready to run *right now*
-    pub fn query_ready_to_run(&self) -> HashSet<String> {
+    pub fn query_ready_to_run(&self) -> FxHashSet<String> {
         self.jobs_ready_to_run.clone()
     }
     pub fn next_job_ready_to_run(&self) -> Option<String> {
@@ -590,7 +590,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         next_job.cloned()
     }
 
-    pub fn query_jobs_running(&self) -> HashSet<String> {
+    pub fn query_jobs_running(&self) -> FxHashSet<String> {
         self.jobs
             .iter()
             .filter_map(|job| match job.state {
@@ -602,12 +602,12 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             .collect()
     }
 
-    pub fn query_ready_for_cleanup(&self) -> HashSet<String> {
+    pub fn query_ready_for_cleanup(&self) -> FxHashSet<String> {
         self.jobs_ready_for_cleanup.clone()
     }
 
     #[allow(dead_code)] // used in testing
-    pub fn query_failed(&self) -> HashSet<String> {
+    pub fn query_failed(&self) -> FxHashSet<String> {
         // not worth keeping a list to prevent the scanning
         // called typically only once per graph
         self.jobs
@@ -623,7 +623,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             .collect()
     }
 
-    pub fn query_upstream_failed(&self) -> HashSet<String> {
+    pub fn query_upstream_failed(&self) -> FxHashSet<String> {
         // not worth keeping a list to prevent the scanning
         // called typically only once per graph
         self.jobs
@@ -914,7 +914,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     fn prune_leaf_ephemerals(&mut self) {
         //option: speed up by looking at the edges once,
         //finding those that have no non-ephemeral downstreams,
-        let mut ephemerals: HashSet<NodeIndex> = self
+        let mut ephemerals: FxHashSet<NodeIndex> = self
             .dag
             .nodes()
             .filter(|idx| match self.jobs[*idx as usize].state {
@@ -1174,7 +1174,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
             return Err(PPGEvaluatorError::InternalError("Depth ConsiderJob loop. Either pathological input, or bug. Aborting to avoid stack overflow".to_string()));
         }
         let mut new_signals = Vec::new();
-        let mut ignore_consider_signals = HashSet::new();
+        let mut ignore_consider_signals = FxHashSet::default();
         for signal in self.signals.drain(..) {
             debug!("");
             debug!(
@@ -1711,7 +1711,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         // we need to rematch them here.
         // upstream_id is the job we have 'lost' from our set of inputs
         //
-        let missing_upstream_outputs: HashSet<String> = missing_upstream_id
+        let missing_upstream_outputs: FxHashSet<String> = missing_upstream_id
             .split(":::")
             .map(|x| x.to_string())
             .collect();
@@ -1728,7 +1728,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
                     "hunting for old name for {} - considering {}",
                     missing_upstream_id, historical_upstream_id
                 );
-                let historical_upstream_outputs: HashSet<String> = historical_upstream_id
+                let historical_upstream_outputs: FxHashSet<String> = historical_upstream_id
                     .split(":::")
                     .map(|x: &str| x.to_string())
                     .collect();
@@ -2015,7 +2015,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
         node_idx: NodeIndex,
         new_signals: &mut Vec<Signal>,
         gen: &mut Generation,
-        ignore_consider_signals: &mut HashSet<NodeIndex>,
+        ignore_consider_signals: &mut FxHashSet<NodeIndex>,
     ) -> Result<(), PPGEvaluatorError> {
         //let j = &jobs[node_idx as usize];
         /* debug!(
@@ -2415,7 +2415,7 @@ impl<T: PPGEvaluatorStrategy> PPGEvaluator<T> {
     fn consider_upstreams_for_cleanup(
         dag: &GraphType,
         jobs: &mut [NodeInfo],
-        jobs_ready_for_cleanup: &mut HashSet<String>,
+        jobs_ready_for_cleanup: &mut FxHashSet<String>,
         node_idx: NodeIndex,
         gen: &mut Generation,
     ) {

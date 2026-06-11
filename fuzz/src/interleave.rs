@@ -70,7 +70,7 @@
 
 use pypipegraph2::{JobKind, PPGEvaluator, PPGEvaluatorError, StrategyForTesting};
 use rustc_hash::FxHashMap;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 struct Reader<'a> {
     d: &'a [u8],
@@ -213,7 +213,7 @@ struct RunOutcome {
 fn run_scenario(s: &Scenario) {
     let n = s.kinds.len();
     let mut history: FxHashMap<String, String> = FxHashMap::default();
-    let mut done: HashSet<String> = HashSet::new(); // 'outputs on disk'
+    let mut done: FxHashSet<String> = FxHashSet::default(); // 'outputs on disk'
     let mut output_version = vec![0u8; n]; // toggled by 'code changed'
     let mut action_pos = 0usize;
     let mut next_action = || {
@@ -294,7 +294,7 @@ fn run_scenario(s: &Scenario) {
 
         let mut running: Vec<String> = Vec::new();
         let mut run_order: Vec<String> = Vec::new();
-        let mut executed: HashSet<usize> = HashSet::new();
+        let mut executed: FxHashSet<usize> = FxHashSet::default();
         let mut any_failure = false;
         let mut aborted = false;
         let mut reconsiders_left = 8usize;

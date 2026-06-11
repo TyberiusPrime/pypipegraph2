@@ -1,8 +1,7 @@
 #![allow(unused_variables)]
 /* ↓ ←➔ ↑ */
 #![allow(unused_macros)]
-use rustc_hash::FxHashMap;
-use std::collections::HashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::*;
@@ -10,7 +9,7 @@ use crate::*;
 macro_rules! set {
     ( $( $x:expr ),* ) => {  // Match zero or more comma delimited items
         {
-            let mut temp_set = HashSet::new();  // Create a mutable HashSet
+            let mut temp_set = FxHashSet::default();  // Create a mutable FxHashSet
             $(
                 temp_set.insert($x.to_string()); // Insert each item matched into the HashSet
             )*
@@ -535,7 +534,7 @@ fn terminal_ephemeral_24() {
 
 fn run_graph(
     mut g: PPGEvaluator<StrategyForTesting>,
-    done_log: Rc<RefCell<HashSet<String>>>,
+    done_log: Rc<RefCell<FxHashSet<String>>>,
 ) -> FxHashMap<String, String> {
     g.event_startup().unwrap();
     while !g.is_finished() {

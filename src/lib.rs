@@ -3,9 +3,8 @@
 use log::{debug, error, info, warn};
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::types::PyDict;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
@@ -59,14 +58,14 @@ pub trait PPGEvaluatorStrategy {
 
 #[derive(Clone, Debug)]
 pub struct StrategyForTesting {
-    pub already_done: Rc<RefCell<HashSet<String>>>,
+    pub already_done: Rc<RefCell<FxHashSet<String>>>,
 }
 
 impl StrategyForTesting {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         StrategyForTesting {
-            already_done: Rc::new(RefCell::new(HashSet::new())),
+            already_done: Rc::new(RefCell::new(FxHashSet::default())),
         }
     }
 }
@@ -192,11 +191,11 @@ pub struct TestGraphRunner {
     pub setup_graph: Box<dyn Fn(&mut PPGEvaluator<StrategyForTesting>)>,
     pub run_counters: FxHashMap<String, usize>,
     pub history: FxHashMap<String, String>,
-    pub already_done: HashSet<String>,
+    pub already_done: FxHashSet<String>,
     pub allowed_nesting: u32,
     pub outputs: FxHashMap<String, String>,
     pub run_order: Vec<String>,
-    pub cleaned_up: HashSet<String>,
+    pub cleaned_up: FxHashSet<String>,
 }
 
 impl TestGraphRunner {
@@ -206,11 +205,11 @@ impl TestGraphRunner {
             setup_graph: setup_func,
             run_counters: FxHashMap::default(),
             history: FxHashMap::default(),
-            already_done: HashSet::new(),
+            already_done: FxHashSet::default(),
             allowed_nesting: 250,
             outputs: FxHashMap::default(),
             run_order: Vec::new(),
-            cleaned_up: HashSet::new(),
+            cleaned_up: FxHashSet::default(),
         }
     }
 
