@@ -50,7 +50,11 @@ def get_same_session_id_processes():
             proc_sid = os.getpgid(proc.pid)
             if proc_sid == watcher_session_id:
                 yield proc
-        except psutil.Error:
+        except (psutil.Error, OSError):
+            # os.getpgid raises a bare ProcessLookupError (OSError, *not* a
+            # psutil.Error) when the process vanishes between process_iter() and
+            # this call. If that escaped, it would crash the watcher's signal
+            # handler mid-reap, before os._exit() - leaking the watcher.
             continue
 
 
@@ -106,6 +110,13 @@ def spawn_watcher():
 
     The watcher also get's a sig_int when the graph execution ends,
     which also signals it to go and terminate all stragglers.
+
+    Victims are identified by the (session-wide) process group id, which is what
+    lets the watcher also catch subprocesses spawned by *in-process* jobs (e.g.
+    DataLoadingJob) that never fork. The per-run safety - a watcher must never
+    reap another run's stragglers - comes not from a private process group (that
+    would miss those in-process subprocesses) but from each run reaping its own
+    watcher before returning (see Runner.run), so two watchers never overlap.
 
     """
     global watcher_parent_pid, watcher_ignored_processes, watcher_session_id
@@ -479,15 +490,33 @@ class Runner:
             # log_info("interactive stop")
             self._interactive_stop()
             # unregister_reaper(reaper)
-            assert psutil.pid_exists(self.watcher_pid)
-            ljt("Sending sigusr2 to watcher")
-            os.kill(self.watcher_pid, signal.SIGUSR2)
-            gone, alive = psutil.wait_procs(
-                [psutil.Process(self.watcher_pid)], timeout=10
-            )
-            if alive:
-                log_error("Watcher was still hanging around?!")
-            # os.waitpid(self.watcher_pid, 1)
+            if psutil.pid_exists(self.watcher_pid):
+                ljt("Sending sigusr2 to watcher")
+                try:
+                    os.kill(self.watcher_pid, signal.SIGUSR2)
+                except ProcessLookupError:
+                    pass
+                gone, alive = psutil.wait_procs(
+                    [psutil.Process(self.watcher_pid)], timeout=10
+                )
+                if alive:
+                    # A watcher that outlives its run is poison: watchers target
+                    # the session-wide process group, so a leaked one will reap
+                    # the *next* run's job subprocesses (-> spurious
+                    # ProcessLookupError) and, being deaf to ctrl-c, wedges the
+                    # whole pytest session. Force it down so it can never leak.
+                    log_error("Watcher was still hanging around - killing it")
+                    for p in alive:
+                        try:
+                            p.kill()
+                        except psutil.NoSuchProcess:
+                            pass
+                    psutil.wait_procs(alive, timeout=5)
+            try:
+                # reap the zombie so it does not linger in the process table
+                os.waitpid(self.watcher_pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
             log_debug("finished waiting for watcher")
 
         for job_id in self.pruned:

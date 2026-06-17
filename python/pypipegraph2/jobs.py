@@ -36,12 +36,8 @@ from .util import (
 
 try:
     import pandas as pd
-    import deepdiff
-
-    deep_diff_too_old_for_dataframes = int(deepdiff.__version__.split(".")[0]) < 8
 except ImportError:
     pd = None
-    deep_diff_too_old_for_dataframes = False  # doesn't matter
 
 module_type = type(sys)
 is_hex_re = re.compile("^[a-fA-F0-9]+$")
@@ -182,10 +178,26 @@ def _verify_function_outside_variables(func, allowed_non_locals, job_id="Unknown
                     return True
                 return False
 
-            localscope.localscope(func, predicate=allowed, allowed=allowed_non_locals)
+            from . import global_pipegraph
+
+            # The disassembly performed by localscope is expensive and dominates job
+            # creation when many jobs are generated in a loop. Cache it on the graph so
+            # closures sharing a code object are only disassembled once; the cache is
+            # cleared between runs (tied to the graph object).
+            cache = (
+                global_pipegraph._localscope_disasm_cache
+                if global_pipegraph is not None
+                else None
+            )
+            localscope.localscope(
+                func, predicate=allowed, allowed=allowed_non_locals, cache=cache
+            )
             if hasattr(func, "wrapped_function"):
                 localscope.localscope(
-                    func.wrapped_function, predicate=allowed, allowed=allowed_non_locals
+                    func.wrapped_function,
+                    predicate=allowed,
+                    allowed=allowed_non_locals,
+                    cache=cache,
                 )
         except localscope.LocalscopeException as e:
             vars = sorted(e.vars)
@@ -2087,15 +2099,19 @@ def _hash_object(obj):
     elif isinstance(obj, ValuePlusHash):
         my_hash = obj.hexdigest
         obj = obj.value
-    elif (
-        pd is not None
-        and isinstance(obj, pd.DataFrame)
-        and deep_diff_too_old_for_dataframes
-    ):
-        # note that this, like deepdiff, is not involving the index.names
-        calc_obj = [("dtype", obj.dtypes), ("index", obj.index)] + [
-            x for x in obj.items()
-        ]
+    elif pd is not None and isinstance(obj, (pd.DataFrame, pd.Series)):
+        # deepdiff's hashing of pandas objects is unreliable - it produced
+        # spurious 'changes' for identical data, invalidating downstreams.
+        # There is no input-hash fallback here (a parameter *is* the input),
+        # so we refuse rather than hash it wrongly.
+        raise TypeError(
+            f"Cannot hash a pandas {type(obj).__name__} reliably. "
+            "Pass a stable derived value instead (e.g. a hash you compute "
+            "yourself, or df.to_csv()). Note that DataLoadingJob / "
+            "AttributeLoadingJob no longer hash returned objects - they "
+            "default to input-based hashing, so a DataFrame can be returned "
+            "from those directly."
+        )
     else:
         calc_obj = obj
     # if my hash was set
@@ -2168,8 +2184,16 @@ class DataLoadingJob(Job, _InputHashAwareJobMixin):
             )
         elif isinstance(load_res, UseInputHashesForOutput):
             my_hash = self._derive_output_name(runner)
+        elif isinstance(load_res, (str, bytes, ValuePlusHash)):
+            # we can hash these directly and cheaply (content-based dedup)
+            _, my_hash = _hash_object(load_res)
         else:
-            _, my_hash = _hash_object(load_res)  # could be a ValuePlusHash
+            # An arbitrary in-memory object (dict, DataFrame, ...). Its content
+            # is a deterministic function of this job's declared inputs, so use
+            # those as the output hash instead of trying to hash the object
+            # itself (deepdiff-on-arbitrary-objects was unreliable, notably for
+            # pandas). Return ValuePlusHash if you want content-based dedup.
+            my_hash = self._derive_output_name(runner)
         # log_trace( f"dl {self.job_id} run - new: {my_hash}")
         return {self.outputs[0]: my_hash}
 
@@ -2322,12 +2346,22 @@ class AttributeLoadingJob(
                 value = value.payload
                 self.store_hash(hash)
                 log_warning(f"{self.job_id} stored hash {hash}")
-            else:
+            elif isinstance(value, (str, bytes, ValuePlusHash)):
+                # hashable directly and cheaply (content-based dedup)
                 value, hash = _hash_object(value)
+            else:
+                # arbitrary in-memory object (dict, DataFrame, ...): default to
+                # input-based hashing instead of the unreliable deepdiff path.
+                # See DataLoadingJob.run for the rationale.
+                hash = current_hash
+                self.store_hash(hash)
         else:
             log_warning(f"Reused cached value for {self.job_id}")
             value = self.get_value()
-            hash = current_hash  # valid, since this only happens for UseInputHashesForOutput
+            # valid: the unchanged-input path only stores get_value() for jobs
+            # whose hash is the input hash (UseInputHashesForOutput or an
+            # arbitrary returned object), and current_hash == last_hash there.
+            hash = current_hash
         self.store(value)
         return {self.outputs[0]: hash}
 

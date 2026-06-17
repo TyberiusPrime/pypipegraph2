@@ -19,6 +19,7 @@ def localscope(
     predicate: Optional[Callable] = None,
     allowed: Optional[Union[Iterable[str], str]] = None,
     allow_closure: bool = False,
+    cache: Optional[Dict] = None,
 ):
     """
     Restrict the scope of a callable to local variables to avoid unintentional
@@ -30,6 +31,12 @@ def localscope(
             scope. Defaults to allow any module.
         allowed: Names of globals that are allowed to enter the scope.
         allow_closure: Allow access to non-local variables from the enclosing scope.
+        cache: Optional mapping used to memoise the (expensive) bytecode disassembly,
+            keyed by ``(code_object, allow_closure)``. Only the disassembly is cached;
+            validation against globals/``allowed``/``predicate`` still runs on every
+            call so changed globals are always honoured. Code objects are used as keys
+            directly (held by strong reference), so a function redefined at the same
+            ``file:line`` gets a fresh code object and can never alias a stale entry.
 
     Attributes:
         mfc: Decorator allowing *m*\\ odules, *f*\\ unctions, and *c*\\ lasses to enter
@@ -126,6 +133,7 @@ def localscope(
             allow_closure=allow_closure,
             allowed=allowed,
             predicate=predicate,
+            cache=cache,
         )
 
     return _localscope(
@@ -134,6 +142,7 @@ def localscope(
         allowed=allowed,
         predicate=predicate,
         _globals={},
+        cache=cache,
     )
 
 
@@ -200,6 +209,120 @@ class LocalscopeException(RuntimeError):
         self.vars = non_local_non_declared_vars
 
 
+class _DisasmNode:
+    """The result of disassembling a single code object (and its nested code
+    objects). This depends *only* on the code object and the ``allow_closure`` flag,
+    so it is safe to memoise and replay validation against arbitrary globals.
+
+    Attributes:
+        code: The code object this node describes (used in error entries).
+        argnames: Argument names that are implicitly allowed in this scope.
+        events: Ordered list of validation events as they appear in the bytecode.
+            ``("s", name)`` records a ``STORE_DEREF`` (adds an allowed name);
+            ``("f", name, instruction, lineno)`` records a forbidden global/closure
+            access that must be validated.
+        children: Disassembly nodes for nested code objects (closures, comprehensions).
+    """
+
+    __slots__ = ("code", "argnames", "events", "children")
+
+    def __init__(self, code, argnames, events, children):
+        self.code = code
+        self.argnames = argnames
+        self.events = events
+        self.children = children
+
+
+def _disassemble(code: types.CodeType, allow_closure: bool) -> _DisasmNode:
+    """Walk the bytecode of ``code`` (recursing into nested code objects) and collect
+    everything needed to validate it later. This is the expensive part (it calls
+    ``dis.get_instructions``) and is what the cache in :func:`localscope` memoises."""
+    # Function arguments are implicitly allowed. We only take
+    # `code.co_argcount + code.co_kwonlyargcount` variables because `code.co_varnames`
+    # contains all local variables.
+    has_varargs = 1 if code.co_flags & inspect.CO_VARARGS else 0
+    argnames = code.co_varnames[
+        : code.co_argcount + code.co_kwonlyargcount + has_varargs
+    ]
+
+    # Construct set of forbidden operations. The first accesses global variables. The
+    # second accesses variables from the outer scope.
+    forbidden_opnames = {"LOAD_GLOBAL"}
+    if not allow_closure:
+        forbidden_opnames.add("LOAD_DEREF")
+
+    LOGGER.debug("analysing instructions for %s...", code)
+    events: List[Any] = []
+    lineno: Any = None
+    for instruction in dis.get_instructions(code):
+        LOGGER.debug(instruction)
+        # TODO: Conditional coverage.
+        if PY_LT_3_13:  # pragma: no cover
+            if instruction.starts_line is not None:  # type: ignore[attr-defined]
+                lineno = instruction.starts_line  # type: ignore[attr-defined]
+        else:  # pragma: no cover
+            if instruction.line_number is not None:  # type: ignore[attr-defined]
+                lineno = instruction.line_number  # type: ignore[attr-defined]
+        name = instruction.argval
+        if instruction.opname in forbidden_opnames:
+            events.append(("f", name, instruction, lineno))
+        elif instruction.opname == "STORE_DEREF":
+            # A new allowed variable created in the scope of the function.
+            events.append(("s", name))
+
+    # Deal with nested code objects recursively. These always allow closure access
+    # (their enclosing-scope variables are legitimately defined in the parent).
+    children = [
+        _disassemble(const, True)
+        for const in code.co_consts
+        if isinstance(const, types.CodeType)
+    ]
+    return _DisasmNode(code, argnames, events, children)
+
+
+def _validate(
+    node: _DisasmNode,
+    allowed: Set[str],
+    _globals: Dict[str, Any],
+    predicate: Callable,
+    _errors: List[_LocalscopeExceptionEntry],
+) -> None:
+    """Replay a (possibly cached) disassembly against concrete globals, accumulating
+    `allowed` exactly as the original in-order walk did and recording any errors."""
+    allowed.update(node.argnames)
+    for event in node.events:
+        if event[0] == "s":
+            allowed.add(event[1])
+            continue
+        _, name, instruction, lineno = event
+        # Variable explicitly allowed by name or in `builtins`.
+        if name in allowed or hasattr(builtins, name):
+            continue
+        # Complain if the variable is not available.
+        if name not in _globals:
+            _errors.append(
+                (f"`{name}` is not in globals", name, node.code, instruction, lineno)
+            )
+            continue
+        # Check if variable is allowed by value.
+        value = _globals[name]
+        if not predicate(value):
+            _errors.append(
+                (
+                    f"`{name}` is not a permitted global",
+                    name,
+                    node.code,
+                    instruction,
+                    lineno,
+                )
+            )
+            continue
+    # Children are validated after the current scope, mutating the shared `allowed`
+    # set, mirroring the original recursion order.
+    for child in node.children:
+        _validate(child, allowed, _globals, predicate, _errors)
+
+
 def _localscope(
     func: Union[types.FunctionType, types.CodeType],
     *,
@@ -208,6 +331,7 @@ def _localscope(
     allow_closure: bool,
     _globals: Dict[str, Any],
     _errors: Optional[List[_LocalscopeExceptionEntry]] = None,
+    cache: Optional[Dict] = None,
 ):
     """
     Args:
@@ -230,77 +354,25 @@ def _localscope(
     else:
         code = func
 
-    # Add function arguments to the list of allowed exceptions. We only take
-    # `code.co_argcount + code.co_kwonlyargcount` variables because `code.co_varnames`
-    # contains all local variables.
-    has_varargs = 1 if code.co_flags & inspect.CO_VARARGS else 0
-    allowed.update(
-        code.co_varnames[: code.co_argcount + code.co_kwonlyargcount + has_varargs]
-    )
+    # The disassembly depends only on (code, allow_closure); memoise it when a cache is
+    # provided. Using the code object itself as part of the key keeps it alive (no
+    # `id()` reuse) and a redefined function yields a fresh code object → fresh entry.
+    node = None
+    key = (code, allow_closure)
+    if cache is not None:
+        node = cache.get(key)
+    if node is None:
+        node = _disassemble(code, allow_closure)
+        if cache is not None:
+            cache[key] = node
 
-    # Construct set of forbidden operations. The first accesses global variables. The
-    # second accesses variables from the outer scope.
-    forbidden_opnames = {"LOAD_GLOBAL"}
-    if not allow_closure:
-        forbidden_opnames.add("LOAD_DEREF")
-
-    LOGGER.debug("analysing instructions for %s...", func)
-    lineno: Any = None
     if _errors is None:
         _errors = []
         top_level = True
     else:
         top_level = False
-    for instruction in dis.get_instructions(code):
-        LOGGER.debug(instruction)
-        # TODO: Conditional coverage.
-        if PY_LT_3_13:  # pragma: no cover
-            if instruction.starts_line is not None:  # type: ignore[attr-defined]
-                lineno = instruction.starts_line  # type: ignore[attr-defined]
-        else:  # pragma: no cover
-            if instruction.line_number is not None:  # type: ignore[attr-defined]
-                lineno = instruction.line_number  # type: ignore[attr-defined]
-        name = instruction.argval
-        if instruction.opname in forbidden_opnames:
-            # Variable explicitly allowed by name or in `builtins`.
-            if name in allowed or hasattr(builtins, name):
-                continue
-            # Complain if the variable is not available.
-            if name not in _globals:
-                _errors.append(
-                    (f"`{name}` is not in globals", name, code, instruction, lineno)
-                )
-                continue
-            # Check if variable is allowed by value.
-            value = _globals[name]
-            if not predicate(value):
-                _errors.append(
-                    (
-                        f"`{name}` is not a permitted global",
-                        name,
-                        code,
-                        instruction,
-                        lineno,
-                    )
-                )
-                continue
-        elif instruction.opname == "STORE_DEREF":
-            # Store a new allowed variable which has been created in the scope of the
-            # function.
-            allowed.add(name)
 
-    # Deal with code objects recursively after adding the current arguments to the
-    # allowed exceptions
-    for const in code.co_consts:
-        if isinstance(const, types.CodeType):
-            _localscope(
-                const,
-                _globals=_globals,
-                allow_closure=True,
-                predicate=predicate,
-                allowed=allowed,
-                _errors=_errors,
-            )
+    _validate(node, allowed, _globals, predicate, _errors)
 
     if top_level and _errors:
         raise LocalscopeException(_errors)

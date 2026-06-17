@@ -1739,64 +1739,70 @@ class TestsFromTheField:
         assert ppg.global_pipegraph.find_job_from_file("c") is b
 
     def test_returning_dataframe_from_dataloading(self):
+        """A DataLoadingJob may return a (tuple of) pandas DataFrame(s).
+
+        We no longer content-hash the returned object - deepdiff's hashing of
+        pandas objects was unreliable and produced spurious 'changes'. Instead
+        the job's output hash is derived from its declared *inputs*. This test
+        pins that behaviour:
+          * bare pandas objects can no longer be hashed directly,
+          * changing the returned DataFrame's content *without* changing any
+            declared input does NOT invalidate downstreams,
+          * changing a declared input DOES, and the downstream then observes
+            the new content.
+        """
         import pandas as pd
 
-        a = (pd.DataFrame({"a": [1]}), pd.DataFrame({"b": [1, 3, 3]}))
-        b = (pd.DataFrame({"a": [1, 2]}), pd.DataFrame({"b": [1, 3, 3]}))
-        hash_a = ppg.jobs._hash_object(a)[1]
-        hash_b = ppg.jobs._hash_object(b)[1]
-        print(hash_a)
-        print(hash_b)
-        assert hash_a != hash_b
+        # bare pandas objects are explicitly refused now (no input-hash
+        # fallback exists for e.g. a ParameterInvariant)
+        with pytest.raises(TypeError):
+            ppg.jobs._hash_object(pd.DataFrame({"a": [1]}))
+        with pytest.raises(TypeError):
+            ppg.jobs._hash_object(pd.Series([1, 2, 3]))
 
-        ppg.new(log_level=5)
         storage = {}
 
-        def dl():
-            res = pd.DataFrame({"a": [1]})
-            storage["dl"] = res
-            storage["dl2"] = pd.DataFrame({"b": [1, 3, 3]})
-            return storage["dl"], storage["dl2"]
+        def build(actual_n, param_n):
+            # `actual_n` drives the DataFrame *content*; `param_n` is the only
+            # declared input. Decoupling them lets us show that content does
+            # not drive invalidation - only the input does.
+            def dl(storage=storage, actual_n=actual_n):
+                storage["df"] = pd.DataFrame({"a": list(range(actual_n))})
+                storage["df2"] = pd.DataFrame({"b": [1, 3, 3]})
+                return storage["df"], storage["df2"]
 
-        def doit(filename, storage=storage):
-            counter("doit")
-            filename.write_text(str(len(storage["dl"]) + len(storage["dl2"])))
+            def doit(filename, storage=storage):
+                counter("doit")
+                filename.write_text(str(len(storage["df"]) + len(storage["df2"])))
 
-        a = ppg.DataLoadingJob("a", dl)
-        b = ppg.FileGeneratingJob("b", doit)
-        b.depends_on(a)
-        ppg.run()
-        assert Path("doit").read_text() == "1"
-        assert Path("b").read_text() == "4"
-        ppg.new(log_level=5)
+            a = ppg.DataLoadingJob("a", dl, depend_on_function=False)
+            a.depends_on(ppg.ParameterInvariant("n", param_n))
+            b = ppg.FileGeneratingJob("b", doit, depend_on_function=False)
+            b.depends_on(a)
+            return a, b
 
-        def dl():  # same output
-            res = pd.DataFrame({"a": [1]})
-            storage["dl"] = res
-            storage["dl2"] = pd.DataFrame({"b": [1, 3, 3]})
-            return storage["dl"], storage["dl2"]
-
-        a = ppg.DataLoadingJob("a", dl)
-        b = ppg.FileGeneratingJob("b", doit)
-        b.depends_on(a)
-        ppg.run()
-        assert Path("doit").read_text() == "1"
-        assert Path("b").read_text() == "4"
-
+        # run 1: 1-row df, downstream runs -> 1 + 3 == 4
         ppg.new()
-
-        def dl():
-            res = pd.DataFrame({"a": [1, 2]})
-            storage["dl"] = res
-            storage["dl2"] = pd.DataFrame({"b": [1, 3, 3]})
-            return storage["dl"], storage["dl2"]
-
-        a = ppg.DataLoadingJob("a", dl)
-        b = ppg.FileGeneratingJob("b", doit)
-        b.depends_on(a)
+        build(actual_n=1, param_n=1)
         ppg.run()
-        assert Path("doit").read_text() == "2"
-        assert Path("b").read_text() == "5"
+        assert read("doit") == "1"
+        assert read("b") == "4"
+
+        # run 2: df content changes (5 rows) but the declared input (param_n)
+        # is unchanged -> a's output hash is unchanged -> b is NOT rerun.
+        # (Old content-hashing would have rerun b here.)
+        ppg.new()
+        build(actual_n=5, param_n=1)
+        ppg.run()
+        assert read("doit") == "1"  # doit not called again
+        assert read("b") == "4"  # stale-by-design: input didn't change
+
+        # run 3: the declared input changes -> b reruns and sees 5 rows -> 5 + 3 == 8
+        ppg.new()
+        build(actual_n=5, param_n=5)
+        ppg.run()
+        assert read("doit") == "2"
+        assert read("b") == "8"
 
 
 def gen_20211221(func):

@@ -156,6 +156,10 @@ class PyPipeGraph:
         self.next_job_number = 0
         self.next_job_number_lock = threading.Lock()
         self._path_cache = {}
+        # memoises localscope bytecode disassembly, keyed by (code object,
+        # allow_closure); tied to this graph so it is cleared between (interactive)
+        # runs and cannot leak/alias across graphs. See _verify_function_outside_variables.
+        self._localscope_disasm_cache = {}
         self.report_done_filter = report_done_filter
         self.func_cache = {}
         self.dir_absolute = Path(".").absolute()

@@ -1088,13 +1088,14 @@ class TestPypipegraph2:
             ppg.util.log_error("final run")
             ppg.run()
             assert len(self.store) == 1
-            # assert Path("b").read_text() == "3"
-            # assert Path("B").read_text() == "B"
+            assert Path("b").read_text() == "3"
+            assert Path("B").read_text() == "B"
             # with the rust based engine, we do not rerun
             # because ephemeral jobs must not change their output
             # if their input was unchanged (=Validated)
-            assert Path("b").read_text() == "2"
-            assert Path("B").read_text() == "A"
+            # this changed with the fix for dataloadingjobs to always repeat their inputs as outputs
+            # assert Path("b").read_text() == "2"
+            # assert Path("B").read_text() == "A"
 
         finally:
             del self.store
