@@ -20,9 +20,9 @@ classifiers = [
 ]
 urls = {"homepage"= "https://github.com/TyberiusPrime/pypipegraph2"}
 
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 dependencies = [
-	"deepdiff",
+	"deepdiff>=8.0.0",
 	"filelock",
 	"lib_programname",
 	"loguru",
@@ -37,19 +37,24 @@ dependencies = [
 ]
 
 
-[project.optional-dependencies]
-dev = [
-	"flake8",
+# Test/dev dependencies live in PEP 735 dependency-groups (not installable as
+# extras from PyPI; resolved + pinned by `uv lock` into uv.lock for reproducible CI).
+[dependency-groups]
+test = [
+	"dppd-plotnine>=0.2.9",  # <0.2.9 imports pkg_resources, removed in setuptools 80+
 	"pytest",
 	"pytest-cov",
+	"pytest-mock",
+	"pandas",
+	"cython",
+	"setuptools",  # build dependency for cython
+	"pypipegraph",
+	"flake8",
+]
+dev = [
+	{include-group = "test"},
 	"pre-commit",
 	"black",
-]
-
-test = [
-	"flake8",
-	"pytest",
-	"pytest-cov",
 ]
 
 [project.license]

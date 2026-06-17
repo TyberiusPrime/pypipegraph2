@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 import re
 
-files = ["python/pypipegraph2/__init__.py", "Cargo.toml", "setup.cfg", "pyproject.toml"]
+files = ["python/pypipegraph2/__init__.py", "Cargo.toml", "pyproject.toml"]
 
 old_version = tomllib.load(open("Cargo.toml", "rb"))["package"]["version"]
 
