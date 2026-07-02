@@ -436,6 +436,7 @@ class Runner:
 
         self.evaluator = self.build_evaluator(history)
         self.evaluator_lock = threading.Lock()
+        self.runtime_log_lock = threading.Lock()
         self.evaluator.event_startup()
         self.evaluation_done = False
         self.main_thread_event = threading.Event()
@@ -663,6 +664,20 @@ class Runner:
         self.threads.append(t)
         t.start()
 
+    def _log_job_runtime(self, job_id, runtime):
+        # called from multiple executing threads - serialize file access ourselves,
+        # fake_lock/core_lock only guard CPU-core accounting, not file IO
+        log_dir = self.job_graph.dir_config.log_dir
+        if not log_dir:
+            return
+        rt_file = log_dir / "runtimes.tsv"
+        with self.runtime_log_lock:
+            is_new = not rt_file.exists()
+            with open(rt_file, "a+") as op:
+                if is_new:
+                    op.write("jobid\trun_start_time\truntime_s\n")
+                op.write(f"{job_id}\t{int(self.job_graph.start_time)}\t{runtime:.2f}\n")
+
     def log_failed_job(self, job_id, error):
         if self.print_failures:
             log = log_error
@@ -781,7 +796,7 @@ class Runner:
         cwd = (
             os.getcwd()
         )  # so we can detect if the job cahnges the cwd (don't do that!)
-        fake_lock = FakeLock()
+        fake_lock = FakeLock() # we use this when a job failed previously, since we mark it fail without consuming cpu again?
         try:
             try:
                 while not (self.stopped or self.aborted):
@@ -1016,6 +1031,8 @@ class Runner:
                                     runtime = job.stop_time - job.start_time
                                     finish_msg = f"Job finished: '{job_id}'. Runtime: {runtime:.2f}s"
                                     log_info(finish_msg)
+                                    if runtime >= 1:
+                                        self._log_job_runtime(job_id, runtime)
                                 else:
                                     runtime = -1
                                 # log_debug(finish_msg)

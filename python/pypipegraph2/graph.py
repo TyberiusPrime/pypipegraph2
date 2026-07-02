@@ -219,6 +219,7 @@ class PyPipeGraph:
             # print(networkx.readwrite.json_graph.node_link_data(self.job_dag))
             pass
         start_time = time.time()
+        self.start_time = start_time
         self._resolve_dependency_callbacks()
         self.running = True  # must happen after dependency callbacks
         if self.dir_config.error_dir:
@@ -339,7 +340,6 @@ class PyPipeGraph:
                     except _RunAgain as e:
                         log_info("Jobs created - running again")
                         result, new_history = e.args[0]
-                    self._log_runtimes(result, start_time)
                     # assert len(result) == job_count # does not account for cleanup jobs...
                     # leave out the cleanup jobs added virtually by the run
                     jobs_already_run.update(
@@ -489,22 +489,6 @@ class PyPipeGraph:
 
     def _link_errors(self):
         self._link_latest(self.dir_config.error_dir, "*", "latest", True)
-
-    def _log_runtimes(self, job_results, run_start_time):
-        """Log the runtimes to a file (ever growing. But only runtimes over a threshold)"""
-        if self.dir_config.log_dir:
-            rt_file = self.dir_config.log_dir / "runtimes.tsv"
-            lines = []
-            if not rt_file.exists():
-                lines.append("jobid\trun_start_time\truntime_s")
-            for job_id, job_result in job_results.items():  # pragma: no branch
-                if job_result.outcome is JobOutcome.Success:
-                    if getattr(job_result, "run_time", 0) >= 1:
-                        lines.append(
-                            f"{job_id}\t{int(run_start_time)}\t{job_result.run_time:.2f}"
-                        )
-            with open(rt_file, "a+") as op:
-                op.write("\n".join(lines) + "\n")
 
     def get_history_filename(self):
         """where do we store the graph's history?"""
