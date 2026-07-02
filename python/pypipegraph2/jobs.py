@@ -55,12 +55,16 @@ PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
 def _normalize_path(path):
     from . import global_pipegraph
 
-    # this little bit of memoization here saves quite a bit of runtime.
+    # Cache is keyed by the plain str, not the Path/str `path` argument itself: a fresh
+    # Path's __hash__ has to parse/join drive+root+tail from scratch (no reuse across
+    # distinct-but-equal instances), which dominated runtime once caching made this a
+    # hot path. Hashing the plain string is far cheaper, and on a cache hit we avoid
+    # constructing a Path at all.
+    key = path if type(path) is str else str(path)
     if global_pipegraph is not None:
-        res = global_pipegraph._path_cache.get(path, None)
+        res = global_pipegraph._path_cache.get(key, None)
         if res is not None:
             return res
-    org_path = path
     path = Path(path)
     # Lexical normalization (no filesystem syscalls / symlink resolution). The
     # previous Path.resolve() did a realpath() per file, which dominated job
@@ -77,7 +81,7 @@ def _normalize_path(path):
         )
         res = Path(os.path.relpath(os.path.normpath(os.path.join(base, path)), base))
     if global_pipegraph is not None:
-        global_pipegraph._path_cache[org_path] = res
+        global_pipegraph._path_cache[key] = res
     return res
 
 
@@ -675,8 +679,14 @@ class MultiFileGeneratingJob(Job):
     eval_job_kind = "Output"
 
     def __new__(cls, files, *args, **kwargs):
-        valid_files = cls._validate_files_argument(files)[0]
-        return Job.__new__(cls, [str(x) for x in valid_files])
+        valid_files, lookup = cls._validate_files_argument(files)
+        self = Job.__new__(cls, [str(x) for x in valid_files])
+        # __init__ is about to be called with this exact same `files` argument (Python
+        # guarantees __new__ and __init__ see the same call arguments), so stash the
+        # result here instead of paying for `_validate_files_argument` - a full
+        # normalize+sort+lookup pass over every file - a second time.
+        self._new_validated_files = (valid_files, lookup)
+        return self
 
     def __init__(
         self,
@@ -689,7 +699,11 @@ class MultiFileGeneratingJob(Job):
         allowed_non_locals: List[str] = None,
     ):
         self.depend_on_function = depend_on_function
-        self.files, self._lookup = self._validate_files_argument(files)
+        try:
+            self.files, self._lookup = self._new_validated_files
+            del self._new_validated_files
+        except AttributeError:
+            self.files, self._lookup = self._validate_files_argument(files)
         self.generating_function = self._validate_func_argument(
             generating_function,
             allowed_non_locals,
@@ -763,20 +777,25 @@ class MultiFileGeneratingJob(Job):
                 raise TypeError(
                     f"Files for (Multi)FileGeneratingJob must be Path/str. Was {type(f)} - {files}"
                 )
+            # str(f)/os.path.isabs(f) instead of Path(f).is_absolute(): avoids
+            # constructing a throwaway Path (with its drive/root/tail parsing) per
+            # file just to answer a simple prefix check.
+            f_str = f if isinstance(f, str) else str(f)
             if (
                 global_pipegraph is not None
                 and global_pipegraph.prevent_absolute_paths
                 or allow_absolute
-            ) and Path(f).is_absolute():
+            ) and os.path.isabs(f_str):
                 raise ValueError(
                     f"Absolute file path as job_ids prevented by graph.prevent_absolute_paths. Was {f}"
                 )
-            if ":::" in str(f):
+            if ":::" in f_str:
                 raise ValueError(
                     "File names must not contain :::. Internally used by MultiFileGeneratingJob"
                 )
-        path_files = (Path(x) for x in files)
-        abs_files = [_normalize_path(x) for x in path_files]
+        # `_normalize_path` does its own `Path(x)` construction; wrapping here first
+        # would just build a throwaway Path per file for no benefit.
+        abs_files = [_normalize_path(x) for x in files]
         if lookup:
             lookup = {lookup[ii]: abs_files[ii] for ii in range(len(lookup))}
         else:
@@ -2830,11 +2849,16 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob, _InputHashAwareJobMix
 
     def __new__(cls, output_dir_prefix, files, *_args, **_kwargs):
         output_dir_prefix = Path(output_dir_prefix)
-        files = cls._validate_files_argument(files, allow_absolute=True)[0]
-        files = [output_dir_prefix / "__never_placed_here__" / f for f in files] + [
-            output_dir_prefix
-        ]
-        return Job.__new__(cls, [str(x) for x in files])
+        validated = cls._validate_files_argument(files, allow_absolute=True)
+        prefixed_files = [
+            output_dir_prefix / "__never_placed_here__" / f for f in validated[0]
+        ] + [output_dir_prefix]
+        self = Job.__new__(cls, [str(x) for x in prefixed_files])
+        # See MultiFileGeneratingJob.__new__: __init__ is about to be called with this
+        # same `files` argument and would otherwise redo this normalize+sort+lookup
+        # pass over every file.
+        self._new_validated_files = validated
+        return self
 
     def __init__(
         self,
@@ -2865,9 +2889,13 @@ class SharedMultiFileGeneratingJob(MultiFileGeneratingJob, _InputHashAwareJobMix
         )
         self.depend_on_function = depend_on_function
 
-        self.files, self._lookup = self._validate_files_argument(
-            files, allow_absolute=True
-        )
+        try:
+            self.files, self._lookup = self._new_validated_files
+            del self._new_validated_files
+        except AttributeError:
+            self.files, self._lookup = self._validate_files_argument(
+                files, allow_absolute=True
+            )
         self.org_files = [
             (self.output_dir_prefix / "__never_placed_here__" / f) for f in self.files
         ]
