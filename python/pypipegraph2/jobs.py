@@ -772,6 +772,7 @@ class MultiFileGeneratingJob(Job):
             files = org_files
         else:
             lookup = None
+        str_files = []
         for f in files:
             if not isinstance(f, (str, Path)):
                 raise TypeError(
@@ -779,8 +780,12 @@ class MultiFileGeneratingJob(Job):
                 )
             # str(f)/os.path.isabs(f) instead of Path(f).is_absolute(): avoids
             # constructing a throwaway Path (with its drive/root/tail parsing) per
-            # file just to answer a simple prefix check.
-            f_str = f if isinstance(f, str) else str(f)
+            # file just to answer a simple prefix check. Computed once and reused
+            # below for `_normalize_path` (which needs the same str as its cache key)
+            # - Path.__str__ is not free, and callers commonly pass Path objects
+            # (e.g. `out_dir / f"{name}.png"`), so avoiding a second conversion matters.
+            f_str = f if type(f) is str else str(f)
+            str_files.append(f_str)
             if (
                 global_pipegraph is not None
                 and global_pipegraph.prevent_absolute_paths
@@ -793,9 +798,7 @@ class MultiFileGeneratingJob(Job):
                 raise ValueError(
                     "File names must not contain :::. Internally used by MultiFileGeneratingJob"
                 )
-        # `_normalize_path` does its own `Path(x)` construction; wrapping here first
-        # would just build a throwaway Path per file for no benefit.
-        abs_files = [_normalize_path(x) for x in files]
+        abs_files = [_normalize_path(x) for x in str_files]
         if lookup:
             lookup = {lookup[ii]: abs_files[ii] for ii in range(len(lookup))}
         else:
