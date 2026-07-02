@@ -62,13 +62,20 @@ def _normalize_path(path):
             return res
     org_path = path
     path = Path(path)
+    # Lexical normalization (no filesystem syscalls / symlink resolution). The
+    # previous Path.resolve() did a realpath() per file, which dominated job
+    # creation when many (Multi)FileGeneratingJobs are built in a loop. ".." is
+    # already rejected for job ids, so the only behavioural difference is that
+    # symlinked path components are no longer canonicalized.
     if path.is_absolute():
-        res = path.resolve()
+        res = Path(os.path.normpath(path))
     else:
-        try:
-            res = path.resolve().relative_to(global_pipegraph.dir_absolute)
-        except (AttributeError, ValueError):
-            res = path.resolve().relative_to(Path(".").absolute())
+        base = (
+            global_pipegraph.dir_absolute
+            if global_pipegraph is not None
+            else Path(".").absolute()
+        )
+        res = Path(os.path.relpath(os.path.normpath(os.path.join(base, path)), base))
     if global_pipegraph is not None:
         global_pipegraph._path_cache[org_path] = res
     return res
