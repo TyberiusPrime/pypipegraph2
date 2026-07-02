@@ -6,6 +6,7 @@ import logging
 import sys
 import textwrap
 import types
+from collections import ChainMap
 from typing import Any, Callable, Dict, Iterable, Optional, Set, Union, List
 
 
@@ -350,7 +351,13 @@ def _localscope(
     # (https://docs.python.org/3/library/types.html#types.CodeType).
     if isinstance(func, (types.FunctionType, types.MethodType)):
         code = func.__code__
-        _globals = {**func.__globals__, **_safely_get_closure_vars(func).nonlocals}
+        nonlocals = _safely_get_closure_nonlocals(func)
+        # `ChainMap` avoids copying `func.__globals__` (a whole module's namespace) on
+        # every call - a plain `{**func.__globals__, **nonlocals}` merge did that and
+        # dominated runtime when localscope decorates many functions/closures. Freevar
+        # and global names are disjoint by construction (a compiled name is resolved to
+        # exactly one of them), so lookup precedence between the two maps never matters.
+        _globals = ChainMap(nonlocals, func.__globals__) if nonlocals else func.__globals__
     else:
         code = func
 
@@ -386,14 +393,18 @@ class EmptyCell:
     """
 
 
-@ft.wraps(inspect.getclosurevars)
-def _safely_get_closure_vars(func):  # pragma: no cover
-    # This function has the same functionality as `inspect.getclosurevars` but uses the
-    # special value `EmptyCell` instead of raising an error when cell contents are not
-    # available yet. This situation arises when using `super` because it implicitly
-    # creates a cell for `__class__` which is not filled. The same situation arises when
-    # localscope finds a global variable that has not yet been declared (cf.
+def _safely_get_closure_nonlocals(func) -> Dict[str, Any]:  # pragma: no cover
+    # Like `inspect.getclosurevars(func).nonlocals`, but uses the special value
+    # `EmptyCell` instead of raising an error when cell contents are not available yet.
+    # This situation arises when using `super` because it implicitly creates a cell for
+    # `__class__` which is not filled. The same situation arises when localscope finds a
+    # global variable that has not yet been declared (cf.
     # https://github.com/tillahoffmann/localscope/pull/21).
+    #
+    # Unlike `inspect.getclosurevars`, this does NOT also resolve `func.__code__.co_names`
+    # against globals/builtins: `_localscope` only ever needs the nonlocal (closure)
+    # bindings (globals are looked up lazily, on demand, in `_validate`), and that
+    # co_names walk was pure wasted work performed on every call.
 
     if inspect.ismethod(func):
         func = func.__func__
@@ -405,47 +416,20 @@ def _safely_get_closure_vars(func):  # pragma: no cover
     # Nonlocal references are named in co_freevars and resolved
     # by looking them up in __closure__ by positional index
     if func.__closure__ is None:
-        nonlocal_vars = {}
-    else:
-        # nonlocal_vars = {
-        #     var: cell.cell_contents
-        #     for var, cell in zip(code.co_freevars, func.__closure__)
-        # }
-        nonlocal_vars = {}
-        for var, cell in zip(code.co_freevars, func.__closure__):
-            try:
-                nonlocal_vars[var] = cell.cell_contents
-            except ValueError as ex:
-                if str(ex) == "Cell is empty":
-                    nonlocal_vars[var] = EmptyCell
-                else:
-                    raise LocalscopeException(
-                        f"Failed to retrieve `{var}` from closure."
-                    ) from ex
+        return {}
 
-    # Global and builtin references are named in co_names and resolved
-    # by looking them up in __globals__ or __builtins__
-    global_ns = func.__globals__
-    builtin_ns = global_ns.get("__builtins__", builtins.__dict__)
-    if inspect.ismodule(builtin_ns):
-        builtin_ns = builtin_ns.__dict__
-    global_vars = {}
-    builtin_vars = {}
-    unbound_names = set()
-    for name in code.co_names:
-        if name in ("None", "True", "False"):
-            # Because these used to be builtins instead of keywords, they
-            # may still show up as name references. We ignore them.
-            continue
+    nonlocal_vars = {}
+    for var, cell in zip(code.co_freevars, func.__closure__):
         try:
-            global_vars[name] = global_ns[name]
-        except KeyError:
-            try:
-                builtin_vars[name] = builtin_ns[name]
-            except KeyError:
-                unbound_names.add(name)
-
-    return inspect.ClosureVars(nonlocal_vars, global_vars, builtin_vars, unbound_names)
+            nonlocal_vars[var] = cell.cell_contents
+        except ValueError as ex:
+            if str(ex) == "Cell is empty":
+                nonlocal_vars[var] = EmptyCell
+            else:
+                raise LocalscopeException(
+                    f"Failed to retrieve `{var}` from closure."
+                ) from ex
+    return nonlocal_vars
 
 
 def _allow_mfc(x):
