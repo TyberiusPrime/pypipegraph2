@@ -32,7 +32,7 @@ dependencies = [
 	"pyzstd",
 	"rich",
 	"textual",
-	"wrapt",
+	"wrapt<2",  # dppd's lazy proxy breaks under wrapt 2.x's eager __wrapped__ introspection
 	"xxhash",
 ]
 
@@ -56,6 +56,16 @@ dev = [
 	"pre-commit",
 	"black",
 ]
+
+# dppd, dppd-plotnine and pypipegraph only ship an sdist on PyPI and don't
+# declare setuptools in their own build-system requirements. cachebox (a
+# deepdiff dependency) is in the same situation but needs maturin (it's a
+# Rust extension).
+[tool.uv.extra-build-dependencies]
+dppd = ["setuptools"]
+"dppd-plotnine" = ["setuptools"]
+pypipegraph = ["setuptools"]
+cachebox = ["maturin"]
 
 [project.license]
 text = """

@@ -1,26 +1,47 @@
 {
-  description = "Wraps mbf-bam into an mach-nix importable builder";
+  description = "pypipegraph2 dev shell and test matrix";
 
   inputs = {
-    import-cargo.url = "github:edolstra/import-cargo";
-
     nixpkgs.url = "github:NixOS/nixpkgs/26.05";
     naersk.url = "github:nmattia/naersk";
     naersk.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+
+    # Used to build the Python test/dev environments straight from uv.lock,
+    # preferring prebuilt PyPI wheels. This sidesteps nixpkgs' own
+    # pythonXXXPackages sets, whose from-source builds can lag badly behind
+    # freshly-released interpreters (e.g. nixpkgs 26.05's python315Packages
+    # has a broken pydantic-core: PyO3 doesn't support the 3.15 C API yet).
+    # PyPI already has working cp315 wheels for everything we need.
+    pyproject-nix = {
+      url = "github:pyproject-nix/pyproject.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    uv2nix = {
+      url = "github:pyproject-nix/uv2nix";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    pyproject-build-systems = {
+      url = "github:pyproject-nix/build-system-pkgs";
+      inputs.pyproject-nix.follows = "pyproject-nix";
+      inputs.uv2nix.follows = "uv2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
     {
       self,
-      import-cargo,
       nixpkgs,
       naersk,
       rust-overlay,
+      pyproject-nix,
+      uv2nix,
+      pyproject-build-systems,
     }:
     let
-      inherit (import-cargo.builders) importCargo;
       system = "x86_64-linux";
       overlays = [ (import rust-overlay) ];
       pkgs = import nixpkgs { inherit system overlays; };
@@ -47,53 +68,6 @@
 
     in
     let
-      build_mbf_bam =
-        pkgs: pythonpkgs: outside_version:
-        let
-          cargo_in = importCargo {
-            lockFile = ./Cargo.lock;
-            inherit pkgs;
-          };
-        in
-        pythonpkgs.buildPythonPackage {
-          src = ./.;
-          pname = "pypipegraph2";
-          version = outside_version;
-
-          nativeBuildInputs = [
-            cargo_in.cargoHome
-
-            # Build-time dependencies
-            pkgs.rustc
-            pkgs.cargo
-            pkgs.openssl.dev
-            pkgs.perl
-            pkgs.maturin
-          ];
-          requirementsExtra = ''
-            maturin
-          '';
-          requirements = ''
-            pytest
-            pytest-cov
-             pytest-mock
-             loguru
-             rich
-             xxhash
-             wrapt
-             deepdiff
-             psutil
-             networkx
-             cython
-             setuptools
-             filelock
-             pyzstd
-             watchfiles
-             lib_programname
-
-          '';
-          format = "pyproject";
-        };
       palettable =
         let
           p = pkgs.python314Packages;
@@ -129,178 +103,79 @@
       # };
       #
 
-      ppg1 =
-        let
-          p = pkgs.python314Packages;
-        in
-        p.buildPythonPackage rec {
-          pname = "pypipegraph";
-          version = "0.197";
-          #format = "setuptools";
-          pyproject = true;
-          build-system = [ p.setuptools ];
-          buildInputs = [ p.pandas ];
-          propagatedBuildInputs = [ p.pandas ];
-          patchPhase = ''
-            substituteInPlace setup.cfg --replace "extras = True" ""
-          '';
-          src = p.fetchPypi {
-            inherit pname version;
-            sha256 = "sha256-x7UiibWXcCsLwJNKcYWMXHsqt3pCIbv5NoQdx6iD+2o=";
-          };
-        };
-      dppd =
-        let
-          p = pkgs.python314Packages;
-        in
-        p.buildPythonPackage rec {
-          pname = "dppd";
-          version = "0.31";
+      # uv.lock-driven workspace: resolves the exact same package set `uv
+      # sync --group test --locked` would, but installs prebuilt PyPI
+      # wheels via nix instead of nixpkgs' own (often stale-for-new-
+      # interpreters) pythonXXXPackages builds.
+      workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = ./.; };
 
-          pyproject = true;
-          build-system = [ p.setuptools ];
-          #buildInputs = [mizani];
-          propagatedBuildInputs = [
-            p.pandas
-            p.wrapt
-            p.natsort
-          ];
-          src = p.fetchPypi {
-            inherit pname version;
-            sha256 = "sha256-/TRRtP5pbBjMPzwVYE405oT02HpYntTRc0rH/Zl6iwU=";
-          };
-          doCheck = false;
+      pyprojectOverlay = workspace.mkPyprojectOverlay {
+        sourcePreference = "wheel";
+        # Only resolve what the `test` group needs (skips `dev`-only tools
+        # like black/pre-commit, which we don't need for running pytest).
+        dependencies = {
+          pypipegraph2 = [ "test" ];
         };
-      dppd_plotnine =
-        let
-          p = pkgs.python314Packages;
-        in
-        p.buildPythonPackage rec {
-          pname = "dppd_plotnine";
-          version = "0.2.9";
+      };
 
-          pyproject = true;
-          build-system = [ p.setuptools ];
+      mkPythonSet =
+        python:
+        (pkgs.callPackage pyproject-nix.build.packages { inherit python; }).overrideScope (
+          pkgs.lib.composeManyExtensions [
+            # `.default` (not `.wheel`): a few deps (e.g. dppd, dppd-plotnine)
+            # only publish an sdist on PyPI, so we need real build-system
+            # (setuptools etc.) support, not just wheel-install hooks.
+            pyproject-build-systems.overlays.default
+            pyprojectOverlay
+          ]
+        );
 
-          buildInputs = [ p.plotnine ];
-          propagatedBuildInputs = [
-            p.pandas
-            p.plotnine
-            dppd
-          ];
-          src = p.fetchPypi {
-            inherit pname version;
-            sha256 = "sha256-Uo/eBzxLfLe4Kv/oZKwChwnBLZM7VY/1GGEzZqmFeU0=";
-          };
-          doCheck = false;
-        };
-      lib-detect-testenv =
-        let
-          p = pkgs.python314Packages;
-        in
-        p.buildPythonPackage rec {
-          pname = "lib-detect-testenv";
-          version = "2.0.8";
-          buildInputs = [
-            p.setuptools
-            p.setuptools-scm
-          ];
-          propagatedBuildInputs = [ ];
-          format = "pyproject";
-          src = p.fetchPypi {
-            inherit version;
-            pname = "lib_detect_testenv";
-            sha256 = "sha256-llJ7MRRyfnDoD2ccIEoiWuaqrxF5g/j6T1blQrI2jUM=";
-          };
-          doCheck = false;
-        };
+      # Third-party deps only (pyproject.toml's `test` dependency-group +
+      # main `dependencies`), keyed by their uv.lock package names. The
+      # local `pypipegraph2` package is deliberately NOT listed here: its
+      # Rust extension is built once via naersk below (see `pypipegraph2-so`)
+      # and injected via PYTHONPATH, so uv2nix never needs to invoke
+      # maturin. `textual` is also omitted: it's only imported lazily
+      # inside cli.py and no test touches it.
+      testDepsSpec = {
+        "dppd-plotnine" = [ ];
+        pytest = [ ];
+        "pytest-cov" = [ ];
+        "pytest-mock" = [ ];
+        pandas = [ ];
+        cython = [ ];
+        setuptools = [ ];
+        pypipegraph = [ ];
+        flake8 = [ ];
+        deepdiff = [ ];
+        filelock = [ ];
+        "lib-programname" = [ ];
+        loguru = [ ];
+        networkx = [ ];
+        psutil = [ ];
+        pyzstd = [ ];
+        rich = [ ];
+        wrapt = [ ];
+        xxhash = [ ];
+      };
 
-      cli-exit-tools =
-        let
-          p = pkgs.python314Packages;
-        in
-        p.buildPythonPackage rec {
-          pname = "cli-exit-tools";
-          version = "1.2.7";
-          buildInputs = [
-            p.setuptools
-            p.setuptools-scm
-          ];
-          propagatedBuildInputs = [
-            p.click
-            lib-detect-testenv
-          ];
-          format = "pyproject";
-          src = p.fetchPypi {
-            inherit version;
-            pname = "cli_exit_tools";
-            sha256 = "sha256-51JCekqp2x8YNwyNwR6+9uJFzFiR7C+nnnFpvlg8JCM=";
-          };
-          doCheck = false;
-        };
+      # Python versions covered by the (former) GitHub Actions test matrix.
+      # 3.15 is deliberately excluded: it's still beta and PyPI doesn't have
+      # cp315 wheels yet for matplotlib (pulled in transitively via
+      # dppd-plotnine -> plotnine -> mizani), which would require hand-
+      # porting nixpkgs' native matplotlib buildInputs (freetype/libpng/
+      # qhull/meson-python) to build from sdist. Re-add once upstream
+      # publishes cp315 wheels.
+      pythonTestVersions = [
+        "312"
+        "313"
+        "314"
+      ];
 
-      lib_programname =
-        let
-          p = pkgs.python314Packages;
-        in
-        p.buildPythonPackage rec {
-          pname = "lib_programname";
-          version = "2.0.9";
-          buildInputs = [
-            p.setuptools
-            p.setuptools-scm
-          ];
-          propagatedBuildInputs = [
-            p.click
-            cli-exit-tools
-            lib-detect-testenv
-          ];
-          format = "pyproject";
-          src = p.fetchPypi {
-            inherit pname version;
-            sha256 = "sha256-3eAMcs9bea7fl4HVoO5DGCVeFMD1T+9NNL2xFVzEwrw=";
-          };
-          doCheck = false;
-        };
-      # localscope = let
-      #      p = pkgs.python314Packages;
-      #    in
-      #      p.buildPythonPackage rec {
-      #        pname = "localscope";
-      #        version = "0.2.5";
-      #        buildInputs = [p.setuptools];
-      #        propagatedBuildInputs = [];
-      #        format = "pyproject";
-      #        src = p.fetchPypi {
-      #          inherit pname version;
-      #          sha256 = "sha256-rmjx77cegkvXjM02e7Mly8hGR8LOUfKejEoKFXNmYzo=";
-      #        };
-      #        doCheck = false;
-      #      };
+      mkTestVenv =
+        ver: (mkPythonSet pkgs.${"python" + ver}).mkVirtualEnv "pytest-python${ver}-env" testDepsSpec;
 
-      mypython = pkgs.python314.withPackages (p: [
-        #todo: figure out how to derive this from pyproject.toml
-        p.pytest
-        p.pytest-mock
-        p.loguru
-        p.rich
-        p.xxhash
-        p.wrapt
-        p.deepdiff
-        p.psutil
-        p.networkx
-        p.cython
-        p.setproctitle
-        p.setuptools
-        dppd
-        dppd_plotnine
-        # for testing...
-        ppg1
-        p.filelock
-        p.pyzstd
-        lib_programname
-        #localscope
-      ]);
+      mypython = mkTestVenv "314";
 
       # cargo-afl is not in nixpkgs, so we build it from the crates.io tarball.
       # The build produces just the `cargo-afl` binary — it does NOT compile
@@ -362,10 +237,65 @@
               }
           '';
 
+      # The compiled extension is built against pyo3's stable ABI
+      # (abi3-py38, see Cargo.toml), so one build serves every Python
+      # version in the test matrix below.
+      pypipegraph2-so = naersk-lib.buildPackage {
+        pname = "pypipegraph2";
+        version = "3.4.3";
+        src = ./.;
+        copyLibs = true;
+        copyBins = false;
+        cargoBuildOptions = x: x ++ [ "--lib" ];
+      };
+
+      # tests/run and tests/__pycache__ are gitignored scratch/output dirs
+      # from local test runs; keep them out of the derivation input so
+      # rebuilds stay reproducible.
+      testsSrc = pkgs.lib.cleanSourceWith {
+        src = ./tests;
+        filter =
+          path: _type:
+          let
+            base = baseNameOf path;
+          in
+          base != "run" && base != "__pycache__";
+      };
+
+      mkPytestCheck =
+        ver:
+        let
+          venv = mkTestVenv ver;
+        in
+        pkgs.runCommand "pytest-python${ver}" {
+          nativeBuildInputs = [
+            venv
+            pkgs.procps # tests/test_external_jobs.py shells out to `ps`
+          ];
+        } ''
+          mkdir -p work
+          cp -r ${./python} work/python
+          cp -r ${testsSrc} work/tests
+          cp ${./pyproject.toml} work/pyproject.toml
+          cp ${./Cargo.toml} work/Cargo.toml # tests/test_version.py reads the crate version from here
+          chmod -R u+w work
+          cp ${pypipegraph2-so}/lib/libpypipegraph2.so work/python/pypipegraph2/pypipegraph2.abi3.so
+          cd work
+          export HOME=$TMPDIR
+          pytest tests
+          touch $out
+        '';
+
+      pytestChecks = builtins.listToAttrs (
+        map (ver: {
+          name = "pytest-python${ver}";
+          value = mkPytestCheck ver;
+        }) pythonTestVersions
+      );
+
     in
     {
-      # pass in nixpkgs, mach-nix and what you want it to report back as a version
-      mach-nix-build-python-package = build_mbf_bam;
+      checks.x86_64-linux = pytestChecks;
       devShell.x86_64-linux = pkgs.mkShell {
         # supplx the specific rust version
         # be sure to set this back in your build scripts,
