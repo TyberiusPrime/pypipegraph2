@@ -867,6 +867,27 @@ class Runner:
                             else:
                                 # ljt(f"to run {rr}") # nice accidential O(n^2) there...
                                 job_id = rr
+                                if job_id in self.jobs_in_flight:
+                                    # next_job_ready_to_run() must never return a
+                                    # job that's already running. If it does, the
+                                    # rust state machine let a Running job back
+                                    # into the ready set -> the same job gets
+                                    # dispatched to two worker threads, which race
+                                    # on job.pid and blow up in os.waitpid(None).
+                                    # We're under evaluator_lock here, so dump the
+                                    # evaluator state now - it reflects the exact
+                                    # misfiring transition, before anything forks.
+                                    Path("ppg_double_dispatch_debug.txt").write_text(
+                                        self.evaluator.debug()
+                                    )
+                                    log_error(
+                                        f"Evaluator returned {job_id} as "
+                                        f"ready-to-run while already in flight "
+                                        f"(in_flight={self.jobs_in_flight}, "
+                                        f"evaluator_running={self.evaluator.jobs_running()}). "
+                                        f"State machine double-dispatch. State "
+                                        f"dumped to ppg_double_dispatch_debug.txt"
+                                    )
                                 self.jobs_in_flight.append(job_id)
                                 # ljt(f"added {job_id} {self.jobs_in_flight}")
                                 self.evaluator.event_now_running(job_id)

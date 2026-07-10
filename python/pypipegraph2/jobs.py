@@ -938,6 +938,23 @@ class MultiFileGeneratingJob(Job):
             )  # note the binary!
 
             try:
+                if self.pid is not None:
+                    # self.pid is per-run private state, cleared in this method's
+                    # finally (see below). If it's already set when we get here,
+                    # this job's run() is being entered a second time while a
+                    # previous invocation is still live - i.e. the evaluator
+                    # dispatched the same job to two worker threads. That's a
+                    # state-machine double-dispatch bug (surfaces under the
+                    # interactive runner, where job objects are long-lived and
+                    # abort injects async KeyboardInterrupts). The other thread's
+                    # finally will null self.pid out from under our poll loop ->
+                    # os.waitpid(None) -> TypeError. Log it so the real cause is
+                    # visible; the pid snapshot below keeps us from crashing.
+                    log_error(
+                        f"{self.job_id} entered run() while pid={self.pid} was "
+                        f"still set - job dispatched twice (state-machine "
+                        f"double-dispatch). Outputs may be generated twice."
+                    )
                 fork_signal = Event()
 
                 def fork_callback():
@@ -954,9 +971,17 @@ class MultiFileGeneratingJob(Job):
 
                 fork_signal.wait()
 
+                # Snapshot the pid: self.pid may be nulled by another pass
+                # through this method's finally (double-dispatch, see above), and
+                # os.waitpid(None) raises TypeError. Poll on the local so the
+                # reaper stays correct even if self.pid is mutated concurrently.
+                # (self.pid itself is left in place for kill_if_running / the
+                # KeyboardInterrupt handler below.)
+                pid = self.pid
+
                 sleep_time = 0.01  # which is the minimum time a job can take...
                 # time.sleep(sleep_time)
-                wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
+                wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
                 try:
                     while wp1 == 0 and waitstatus == 0:
                         sleep_time *= 2
@@ -965,22 +990,22 @@ class MultiFileGeneratingJob(Job):
                         if sleep_time > 1:
                             sleep_time = 1
                         time.sleep(sleep_time)
-                        wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
+                        wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
                 except KeyboardInterrupt:  # pragma: no cover  todo: interactive testing
                     log_trace(
                         f"Keyboard interrupt in {self.job_id} - sigbreak spawned process"
                     )
-                    os.kill(self.pid, signal.SIGUSR1)
+                    os.kill(pid, signal.SIGUSR1)
                     time.sleep(1)
                     log_trace(
                         f"Keyboard interrupt in {self.job_id} - checking spawned process"
                     )
-                    wp1, waitstatus = os.waitpid(self.pid, os.WNOHANG)
+                    wp1, waitstatus = os.waitpid(pid, os.WNOHANG)
                     if wp1 == 0 and waitstatus == 0:
                         log_trace(
                             f"Keyboard interrupt in {self.job_id} - sigkill spawned process"
                         )
-                        os.kill(self.pid, signal.SIGKILL)
+                        os.kill(pid, signal.SIGKILL)
                     raise
                 if os.WIFEXITED(waitstatus):
                     # normal termination.
