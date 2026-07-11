@@ -145,6 +145,9 @@ ppg3.new(stores=[
   "job_recipe": "<recipe hash>",
   "inputs": {"<input name>": "<parent output hash or leaf hash>", ...},
   "tools": {"<tool name>": "<tool hash>", ...},
+  "runtime": {"python_env": "<PyEnv tool hash>",
+              "preload": ["numpy", "pandas"],
+              "shim": "<worker-shim version>"},
   "env": {"<var>": "<value>", ...},
   "outputs_declared": ["relative/path", ...]
 }
@@ -248,6 +251,70 @@ shm-backed pickles) in v1. Mmap-able formats plus the page cache cover the
 common case with a fraction of the machinery; revisit only with profiling
 evidence.
 
+### 6.4 Forkserver executor (warm starts, divergent pythons)
+
+Exec-ing a cold interpreter per job pays import cost every time — seconds to
+tens of seconds for scientific stacks, which is exactly what ppg2's
+fork model amortized. ppg3 recovers that via per-environment **template
+processes**, and gains something ppg2 never had: different jobs in one
+graph running under *different* python environments.
+
+**DECISION — one template per `(PyEnv, preload-list)` pair.**
+
+- Lazily started on first demand; killed at run end; restarted on death.
+- The template is launched **inside the same hygiene as jobs** (read-only
+  nix store mounts, scrubbed env per §6.1, no network, `HOME=/tmp`): its
+  fork-time state must be a pure function of `(PyEnv, preload, shim
+  version)` — which is precisely the `runtime` field of the key document
+  (§5). A template whose state depended on host config files would poison
+  every key derived under it.
+- The template is **guaranteed single-threaded**: it imports the preload
+  list, then blocks on its control socket. It never runs user code
+  directly and never starts threads. All forking in ppg3 happens here —
+  the multi-threaded coordinator never forks. This eliminates ppg2's
+  fork-under-threads hazard class by construction rather than mitigation.
+- Templates hold **code only** (imports). Data goes through the DataJob
+  mmap plane (§6.3); loading data into a template would make its state
+  depend on store content and contaminate keys.
+
+Dispatch protocol: scheduler sends the job spec over a socketpair; the
+template `fork()`s (cheap, COW of the warmed import state); the child
+enters the job sandbox **without exec** — `os.unshare(user|mount|net)`,
+then a second fork for the PID namespace, bind-mount the §6.1 layout,
+`pivot_root`, drop to `/ppg/out` — and runs the callback. The template
+reaps its children and reports exit status + captured stdio back to the
+scheduler.
+
+**DECISION — sandbox mechanisms by job type**: `CommandJob` keeps bwrap
+(it execs anyway; nothing to preserve). Python `FileJob`/`DataJob` use the
+forkserver with unshare-based self-sandboxing. The no-exec sandbox entry is
+the riskiest implementation item in this document; WP3 prototypes it first
+and the `sandbox="none"` fallback applies until it lands.
+
+### 6.5 Callback transport across interpreters
+
+The coordinator's python and a job's PyEnv may be *divergent* (3.10 lab
+legacy env next to 3.13). cloudpickle serializes functions as bytecode,
+which does not cross interpreter versions.
+
+**DECISION — two transports, selected at definition time:**
+
+- **Same-env fast path**: if the coordinator interpreter is byte-identical
+  to the job's PyEnv (same nix store path), callbacks ship via cloudpickle.
+- **Cross-env source mode**: otherwise the callback ships as *source*
+  (file content + qualname — the same extraction the recipe hash already
+  performs), is imported by the template's child, and must satisfy: no
+  closures, no free variables beyond the localscope-allowed set, all data
+  flowing in through `JobIO` (declared inputs/params) or default parameter
+  values from the §5 closed canonicalizable type set. ppg2's localscope
+  discipline was designed for exactly this shape; the check runs at
+  definition time and names the offending variables, so a job that cannot
+  cross interpreters fails before the run starts, not inside a worker.
+
+Source mode is also the more hermetic of the two (what runs is exactly the
+hashed text), so `paranoid=True` (§9) forces source mode even for same-env
+jobs to keep the verified path hot.
+
 ## 7. Job API (user-facing)
 
 Constructors keep ppg2's flavor; semantics change underneath.
@@ -306,11 +373,32 @@ samtools = ppg3.ToolSpec.nix("github:nixos/nixpkgs/<rev>#samtools")
 # resolved once per run: nix build --no-link --print-out-paths; tool hash =
 # the nix store path string (it already encodes the input closure).
 mytool  = ppg3.ToolSpec.binary("/opt/mytool/bin/mytool")   # hash of file
-pyenv   = ppg3.ToolSpec.nix("...#python312")               # interpreters too
 ```
 
 **DECISION**: `ToolSpec.nix` requires the flake ref to be pinned (rev or
 lock); a bare branch ref is a definition-time error.
+
+Python environments are a specialization that additionally drives the
+forkserver (§6.4) and callback transport (§6.5):
+
+```python
+py310_legacy = ppg3.PyEnv.nix(
+    "github:nixos/nixpkgs/<rev>#python310.withPackages(p: [p.scanpy ...])",
+    preload=["numpy", "scanpy"],           # imported once in the template
+)
+py313 = ppg3.PyEnv.nix("...#python313.withPackages(...)", preload=["polars"])
+
+job_a = ppg3.FileJob(..., python=py310_legacy, ...)   # divergent pythons
+job_b = ppg3.FileJob(..., python=py313, ...)          # in one graph
+
+ppg3.new(default_python=py313, ...)  # required; no implicit host python
+```
+
+**DECISION**: every python job runs under a declared `PyEnv`; there is no
+implicit "whatever interpreter launched the script". `PyEnv.current()`
+exists for non-Nix environments (tool hash = realpath + version + a hash of
+`sys.path` entries' fingerprints) and is marked weakly-hermetic in
+manifests, like `sandbox="none"`.
 
 ### 7.6 Fixed-output jobs
 
@@ -453,9 +541,15 @@ Interfaces are the contract; each WP lists what it may import.
   (port `extract_strict_hash` semantics from ppg2), key derivation from a
   resolved job description. No I/O except reading function sources.
   Acceptance: §12.2 golden tests.
-- **WP3 sandbox executor**: given (entry mounts, tool mounts, env, argv or
-  pickled callable) run under bwrap, return exit/stdout/stderr, populate a
-  staging dir. Includes the `sandbox="none"` fallback. Acceptance: §12.4.
+- **WP3 sandbox executors**: (a) bwrap runner for CommandJobs; (b) the
+  forkserver — template lifecycle, dispatch protocol, and the no-exec
+  unshare/pivot_root sandbox entry (§6.4). The no-exec entry is the
+  highest-risk item in this document: build it as a standalone prototype
+  ("fork, unshare, mount fixture layout, prove ENOENT on undeclared path,
+  prove no network") before integrating. Includes the `sandbox="none"`
+  fallback. Acceptance: §12.4 plus template-hermeticity tests (two
+  templates for the same (PyEnv, preload) on different fake-HOME hosts
+  produce byte-identical job outputs).
 - **WP4 engine/scheduler**: `Engine` protocol, single scheduler thread,
   named resource pools (rewrite ppg2's `CoreLock` with a single Condition —
   see audit B2), cooperative abort. Depends on WP1/WP2 interfaces
@@ -467,9 +561,12 @@ Interfaces are the contract; each WP lists what it may import.
 - **WP7 user API**: job classes (§7 — FileJob, CommandJob, DataJob,
   UnsandboxedJob, FetchJob, GraphJob), `ppg3.new`, view assembly, the
   loader layer with per-process memoization + localscope port, `io.load`
-  with mmap-aware deserializers. Depends on WP2/WP4.
-- **WP8 ToolSpec**: nix flake resolution (subprocess `nix build`), binary
-  hashing, PATH assembly. Depends on nothing internal.
+  with mmap-aware deserializers, and the §6.5 transport selection with its
+  definition-time closure check. Depends on WP2/WP4.
+- **WP8 ToolSpec/PyEnv**: nix flake resolution (subprocess `nix build`),
+  binary hashing, PATH assembly, `PyEnv.current()` fingerprinting, preload
+  validation (imports must exist in the env — checked at template start).
+  Depends on nothing internal.
 - **WP9 explain/verify/diff CLI**: §9, §10.2. Depends on WP1/WP2.
 - **WP10 determinism corpus & CI harness**: §12.5, nightly `verify
   --sample`.
@@ -501,6 +598,11 @@ WP5/WP6/WP8/WP9/WP10.
 - Fork-COW as the default data plane. Shared data is a serialized store
   artifact; memory sharing happens via the page cache (mmap), and the
   residual COW use case is an explicit, marked `UnsandboxedJob` (§6.3).
+  Warm *code* (imports) is COW-shared again via per-PyEnv forkserver
+  templates (§6.4) — but code only, never data, never coordinator state.
+- A single python for the whole pipeline. Jobs declare their `PyEnv`;
+  divergent interpreter versions coexist in one graph, at the price of the
+  cross-env source-transport restrictions (§6.5).
 - Jobs mutating files in place, appending, or writing outside declared
   outputs.
 - Nondeterministic jobs "working anyway".
