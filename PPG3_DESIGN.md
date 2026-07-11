@@ -463,18 +463,56 @@ airtight because the result is content-verified.
 
 ## 8. Engine
 
-**DECISION — the engine is a memoized topological walk, implemented in
-Python.** Rationale: ppg2's Rust engine earned its keep by taming
-invalidation-propagation complexity that ppg3 deletes. What remains
-(toposort, key computation, hit/miss, a work queue) is not where bugs will
-live; the sandbox/publish/GC protocols are, and those are I/O code. The
-engine sits behind a narrow `Engine` protocol so a Rust port remains
-possible if profiling ever demands it. Property tests with `hypothesis`
-replace the enumeration rigs; the determinism harness (§12) replaces the
-interleave fuzzer's oracle role.
+**DECISION — the core is a Rust crate (`ppg3-core`); Python is the
+definition front-end and the worker shim.** This reverses an earlier draft
+("engine in Python") after re-weighing the ppg2 audit evidence: the Rust
+engine was ppg2's most reliable component, the Python runner its bug farm,
+and everything that remains hard in ppg3 — the publish/lease/GC protocols,
+scheduler concurrency, the forkserver control plane, the no-exec sandbox
+entry — is systems code, Rust's home turf. What ppg2 got wrong was not the
+language but the boundary; ppg3 draws it differently (§8.1).
 
-Scheduling loop (single scheduler thread owns all state — adopting the
-audit's recommendation; workers are dumb):
+`ppg3-core` contains: store (lookup/staging/publish/verify/leases/GC),
+key hashing (over canonical-JSON documents it receives — it never inspects
+Python objects), the scheduler with named resource pools, multi-store
+substitution, the forkserver control protocol, and the sandbox-entry
+helper. It is consumed two ways:
+
+- as a **PyO3 extension** hosted in the coordinator process, and
+- as a **standalone `ppg3` CLI binary** — store operations (`gc`,
+  `verify`, `push`, `explain`, `rollback`) work on any machine with no
+  Python environment at all. Operationally significant: you can GC a
+  shared lab store from a cron job without the pipeline's env existing
+  there.
+
+### 8.1 The language boundary (three rules)
+
+Rule 1 — **Python calls Rust; Rust does not call back into Python on hot
+paths.** The two exceptions are coarse-grained and scheduler-initiated:
+"expand this GraphJob" and "run this loader-layer job", both executed on
+the Python side while the scheduler continues. This kills ppg2's
+per-edge-callback design (GIL round-trips inside the engine, comparison
+semantics invisible to the Rust test rigs).
+
+Rule 2 — **All concurrency lives in Rust.** The scheduler owns its
+threads; the Python front-end is single-threaded from the user's point of
+view. No `evaluator_lock`, no async-exception aborts, no Python-side
+worker pool. Abort is a flag the scheduler polls plus SIGTERM to sandbox
+process groups.
+
+Rule 3 — **Everything crossing the boundary is canonical JSON (or raw
+bytes).** Python canonicalizes parameters and extracts function sources —
+semantics that require Python — and hands finished key documents (§5) to
+Rust. Rust hashes, stores, schedules. No Python object ever enters
+`ppg3-core`; no store path semantics ever live in Python.
+
+The forkserver template children (§6.4) enter the sandbox via a thin PyO3
+binding over the same Rust sandbox-entry code the CLI uses — the
+unshare/pivot_root logic is written once, in Rust, and merely *hosted* by
+the Python child.
+
+Scheduling loop (single logical owner of all state — adopting the audit's
+recommendation; workers are dumb):
 
 ```
 ready = jobs whose parents all have store entries (or are done in-process)
@@ -570,11 +608,15 @@ New suite, in order of construction:
    (staging→rename→symlink) and concurrent publisher+GC via two processes.
 2. **Key derivation golden tests**: canonical JSON fixtures; any change to a
    key document version-bumps `ppg3_key_version` or fails CI.
-3. **Hypothesis property tests on the engine**: random DAGs + random
-   subsets of pre-populated store entries ⇒ oracle: every miss built exactly
-   once, every hit built zero times, resulting view complete, build order
-   topological. Random parameter flip sequences ⇒ oracle: k-th distinct
-   configuration builds nothing the (k-2)-th already built.
+3. **Property tests on the engine** (Rust: `proptest`/`cargo-afl`,
+   continuing ppg2's fuzz-with-oracles methodology and reusing its AFL
+   harness patterns): random DAGs + random subsets of pre-populated store
+   entries ⇒ oracle: every miss built exactly once, every hit built zero
+   times, resulting view complete, build order topological. Random
+   parameter flip sequences ⇒ oracle: k-th distinct configuration builds
+   nothing the (k-2)-th already built. Concurrent-interleaving fuzzing of
+   publish+GC+substitution against a single store (the `fuzz_interleave`
+   role, retargeted at the store protocols where the risk now lives).
 4. **Sandbox integration tests**: undeclared input ⇒ ENOENT; network
    blocked; env empty; store paths never visible; nix tool runs.
 5. **Determinism harness**: a corpus of deliberately-nasty jobs (timestamp
@@ -585,43 +627,53 @@ New suite, in order of construction:
 
 Interfaces are the contract; each WP lists what it may import.
 
-- **WP1 store**: `Store` class — `lookup(ik)`, `publish(staging, ik)`,
-  `open_staging()`, `gc(policy)`, `verify(oh)`, lease API. Pure
-  stdlib + blake3. Acceptance: §12.1 tests.
-- **WP2 keys**: canonical JSON, parameter canonicalizer, recipe hashing
-  (port `extract_strict_hash` semantics from ppg2), key derivation from a
-  resolved job description. No I/O except reading function sources.
-  Acceptance: §12.2 golden tests.
-- **WP3 sandbox executors**: (a) bwrap runner for CommandJobs; (b) the
-  forkserver — template lifecycle, dispatch protocol, and the no-exec
-  unshare/pivot_root sandbox entry (§6.4). The no-exec entry is the
-  highest-risk item in this document: build it as a standalone prototype
-  ("fork, unshare, mount fixture layout, prove ENOENT on undeclared path,
-  prove no network") before integrating. Includes the `sandbox="none"`
-  fallback. Acceptance: §12.4 plus template-hermeticity tests (two
-  templates for the same (PyEnv, preload) on different fake-HOME hosts
-  produce byte-identical job outputs).
-- **WP4 engine/scheduler**: `Engine` protocol, single scheduler thread,
-  named resource pools (rewrite ppg2's `CoreLock` with a single Condition —
-  see audit B2), cooperative abort. Depends on WP1/WP2 interfaces
-  (mockable). Acceptance: §12.3.
-- **WP5 views/generations/GC policy + CLI**: `ppg3 rollback|generations|
-  store gc|store push`. Depends on WP1.
-- **WP6 multi-store substitution**: ordered lookup, integrity-verified
-  copy-in, s3/http readonly backends. Depends on WP1.
-- **WP7 user API**: job classes (§7 — FileJob, CommandJob, DataJob,
+Language per WP: **Rust** = part of `ppg3-core`; **Python** = the
+front-end package. Mixed WPs name their split.
+
+- **WP1 store (Rust)**: `Store` — `lookup(ik)`, `publish(staging, ik)`,
+  `open_staging()`, `gc(policy)`, `verify(oh)`, lease API; blake3.
+  Acceptance: §12.1 tests, including the crash-injection and
+  concurrent-process suites, in Rust.
+- **WP2 keys (mixed)**: Python side — parameter canonicalizer, function
+  source / recipe extraction (port `extract_strict_hash` semantics from
+  ppg2), emitting canonical-JSON key documents. Rust side — canonical-JSON
+  validation + hashing (rejects floats, non-sorted keys: the validator is
+  the spec). Acceptance: §12.2 golden tests run against *both* sides.
+- **WP3 sandbox executors (Rust core + thin Python hosting)**: (a) bwrap
+  runner for CommandJobs; (b) the forkserver — template lifecycle and
+  dispatch protocol in `ppg3-core`; the no-exec unshare/pivot_root sandbox
+  entry as a Rust function with a PyO3 binding, called by the Python
+  template child (§6.4, §8.1). The no-exec entry is the highest-risk item
+  in this document: build it as a standalone prototype ("fork, unshare,
+  mount fixture layout, prove ENOENT on undeclared path, prove no
+  network") before integrating. Includes the `sandbox="none"` fallback.
+  Acceptance: §12.4 plus template-hermeticity tests (two templates for the
+  same (PyEnv, preload) on different fake-HOME hosts produce
+  byte-identical job outputs).
+- **WP4 engine/scheduler (Rust)**: scheduler owning all threads, named
+  resource pools (a real Condvar-based multi-unit semaphore — ppg2's
+  Python `CoreLock` race, audit B2, must not be ported), cooperative
+  abort, the two coarse Python callbacks of §8.1 rule 1. Depends on
+  WP1/WP2 interfaces (mockable). Acceptance: §12.3.
+- **WP5 views/generations/GC policy + CLI (Rust)**: the standalone `ppg3`
+  binary — `rollback|generations|store gc|store push|verify|explain`.
+  Works with no Python present. Depends on WP1.
+- **WP6 multi-store substitution (Rust)**: ordered lookup,
+  integrity-verified copy-in, s3/http readonly backends. Depends on WP1.
+- **WP7 user API (Python)**: job classes (§7 — FileJob, CommandJob, DataJob,
   UnsandboxedJob, FetchJob, GraphJob), `ppg3.new`, view assembly, the
   loader layer with per-process memoization + localscope port, `io.load`
   with mmap-aware deserializers, the §6.5 transport selection with its
   definition-time closure check, and the §6.6 `Source` opaque-file form
   (worker-shim-side localscope check). Depends on WP2/WP4.
-- **WP8 ToolSpec/PyEnv**: nix flake resolution (subprocess `nix build`),
-  binary hashing, PATH assembly, `PyEnv.current()` fingerprinting, preload
-  validation (imports must exist in the env — checked at template start).
-  Depends on nothing internal.
-- **WP9 explain/verify/diff CLI**: §9, §10.2. Depends on WP1/WP2.
-- **WP10 determinism corpus & CI harness**: §12.5, nightly `verify
-  --sample`.
+- **WP8 ToolSpec/PyEnv (Python)**: nix flake resolution (subprocess `nix
+  build`), binary hashing, PATH assembly, `PyEnv.current()`
+  fingerprinting, preload validation (imports must exist in the env —
+  checked at template start). Depends on nothing internal.
+- **WP9 explain/diff (Rust, in the WP5 CLI)**: §9, §10.2 — key-document
+  diffing needs only manifests, no Python. Depends on WP1/WP2.
+- **WP10 determinism corpus & CI harness (Python + CI config)**: §12.5,
+  nightly `verify --sample`.
 
 Suggested integration order: WP1+WP2 → WP4 (mocked executor) → WP3 → WP7 →
 WP5/WP6/WP8/WP9/WP10.
@@ -643,6 +695,11 @@ WP5/WP6/WP8/WP9/WP10.
 5. **ppg2 interop**: a shim exposing ppg2's constructor API on ppg3
    semantics would ease migration but drags overwrite-era expectations
    along. Proposal: don't; ship a migration guide instead.
+6. **Standalone coordinator daemon.** With `ppg3-core` in Rust, a
+   long-running daemon (watch mode, remote execution, one coordinator per
+   lab store) becomes the same crate behind an IPC front instead of PyO3.
+   Deliberately *not* v1 — the PyO3-hosted coordinator must prove the
+   crate's API first; nothing in v1 may assume it is the only host.
 
 ## 15. What we deliberately gave up (vs ppg2)
 
@@ -660,6 +717,12 @@ WP5/WP6/WP8/WP9/WP10.
 - Nondeterministic jobs "working anyway".
 - The interactive redefinition dance around a mutable output tree (views
   replace it).
-- The Rust invalidation engine and its test rigs (the problem it solved no
-  longer exists; its hashing discipline and fuzz-with-oracles *methodology*
-  carry forward into §12).
+- The Rust *invalidation* engine and its test rigs (the problem it solved
+  no longer exists). Rust itself returns at a better boundary: `ppg3-core`
+  owns store, scheduler, and sandbox entry (§8), and the fuzz-with-oracles
+  methodology carries forward into §12 — retargeted at the protocols where
+  the risk now lives.
+- Per-edge Python callbacks from inside the engine (ppg2's
+  `is_history_altered`/`get_input_list` design). The boundary now passes
+  canonical JSON downward and coarse job-execution requests upward,
+  nothing else (§8.1).
