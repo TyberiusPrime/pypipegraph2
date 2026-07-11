@@ -315,6 +315,57 @@ Source mode is also the more hermetic of the two (what runs is exactly the
 hashed text), so `paranoid=True` (§9) forces source mode even for same-env
 jobs to keep the verified path hot.
 
+### 6.6 Declaring jobs without importing their dependencies
+
+The coordinator executes the pipeline script, but it must never need the
+*job's* python environment to declare a job. Three callback declaration
+forms, in increasing order of decoupling:
+
+1. **Inline function, body-local imports** (the recommended idiom):
+
+   ```python
+   def normalize(io):
+       import scanpy as sc          # resolves inside the job's PyEnv,
+       ...                          # never in the coordinator
+   ppg3.FileJob(..., run=normalize, python=py310_legacy)
+   ```
+
+   The coordinator only parses the function; `import scanpy` executes in
+   the template's child. Top-level imports of job-only packages in the
+   *pipeline script itself* are a definition-time footgun the docs warn
+   about; the linter (`ppg3 lint`) flags callbacks whose free variables
+   resolve to modules absent from their declared PyEnv.
+
+2. **Function object from a coordinator-importable module** — standard
+   source extraction, as in §6.5.
+
+3. **Opaque file reference — the coordinator never imports (or even
+   parses) the job code**:
+
+   ```python
+   ppg3.FileJob(..., run=ppg3.Source("steps/legacy_norm.py::normalize"),
+                python=py310_legacy)
+   ```
+
+   The file participates as content: recipe hash = blake3 of the file
+   bytes + the qualname. It is shipped read-only into the sandbox at
+   `/ppg/src/` and imported there by the worker shim. This is the only
+   form that works when the module has top-level imports unavailable in
+   the coordinator env, or syntax the coordinator's parser rejects
+   (older- or newer-python-only code). `Source` files may declare sibling
+   imports (`ppg3.Source(..., includes=["steps/lib.py"])`); each include
+   is hashed into the recipe and shipped alongside.
+
+**DECISION**: `Source` form implies source-mode transport regardless of
+env match, and localscope checking for it happens *inside the worker shim*
+at import time (the coordinator cannot analyze what it does not parse) —
+a violation fails the job before the callback runs, with the same named-
+variables report as definition-time checks.
+
+`CommandJob` remains the zero-python-coupling alternative: driving a
+script with the env's own interpreter (`[Tool("python"), In("script")]`)
+never involves callback transport at all.
+
 ## 7. Job API (user-facing)
 
 Constructors keep ppg2's flavor; semantics change underneath.
@@ -561,8 +612,9 @@ Interfaces are the contract; each WP lists what it may import.
 - **WP7 user API**: job classes (§7 — FileJob, CommandJob, DataJob,
   UnsandboxedJob, FetchJob, GraphJob), `ppg3.new`, view assembly, the
   loader layer with per-process memoization + localscope port, `io.load`
-  with mmap-aware deserializers, and the §6.5 transport selection with its
-  definition-time closure check. Depends on WP2/WP4.
+  with mmap-aware deserializers, the §6.5 transport selection with its
+  definition-time closure check, and the §6.6 `Source` opaque-file form
+  (worker-shim-side localscope check). Depends on WP2/WP4.
 - **WP8 ToolSpec/PyEnv**: nix flake resolution (subprocess `nix build`),
   binary hashing, PATH assembly, `PyEnv.current()` fingerprinting, preload
   validation (imports must exist in the env — checked at template start).
