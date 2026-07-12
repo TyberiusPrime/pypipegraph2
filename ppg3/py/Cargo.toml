@@ -1,0 +1,14 @@
+[package]
+name = "ppg3-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ppg3_core_ext"
+crate-type = ["cdylib"]
+
+[dependencies]
+ppg3-core = { path = "../core" }
+serde_json.workspace = true
+pyo3 = { version = "0.23", features = ["extension-module", "abi3", "abi3-py39"] }

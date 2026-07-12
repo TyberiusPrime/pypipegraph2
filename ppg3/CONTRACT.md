@@ -1,0 +1,319 @@
+# ppg3 implementation contract
+
+Read `../PPG3_DESIGN.md` first. Every **DECISION** there is settled. This file
+adds the concrete layout, module boundaries, and cross-WP interfaces so work
+packages can proceed independently. Do not change an interface here without
+updating this file and every consumer.
+
+## Scope deviations for v1-in-this-repo (agreed)
+
+- No `bwrap`/user-namespaces in the dev container: the `sandbox="none"`
+  staged-directory executor is the tested path. bwrap argv construction is
+  implemented and unit-tested as *command construction only*; the unshare
+  no-exec entry is left as a documented stub behind feature `linux-sandbox`.
+- Forkserver templates (§6.4) are deferred: python jobs run via cold
+  `python -I -m ppg3._shim` exec. The shim reads a JSON job spec on stdin.
+  The scheduler/executor boundary below is forkserver-ready (ExecSpec is
+  argv-based; a future forkserver replaces the exec, not the interfaces).
+- Remote stores (s3/http) deferred; `StoreSet` supports N POSIX stores with
+  ordered lookup and in-place consumption (§4.1).
+- `ppg3 watch`, session mode, TOFU source patching, R shim: deferred.
+- Record deviations you add in `ppg3/STATUS.md`.
+
+## Layout
+
+```
+ppg3/
+  Cargo.toml            # workspace; default-members = ["core", "cli"]
+  core/                 # crate ppg3-core (lib)
+    src/lib.rs          # module wiring only — already written, do not rewrite
+    src/error.rs        # shared error enum (thiserror)
+    src/hash.rs         # blake3 helpers
+    src/canon.rs        # WP2-Rust: canonical JSON validator + input_key()
+    src/manifest.rs     # WP1: manifest types + output_hash()
+    src/store.rs        # WP1: Store
+    src/storeset.rs     # WP1: ordered multi-store
+    src/lease.rs        # WP1: leases + intents
+    src/gc.rs           # WP1: mark/sweep; policy knobs used by WP5
+    src/executor.rs     # WP3: Executor trait, NoneExecutor, bwrap argv builder
+    src/sandbox.rs      # WP3: stub, feature "linux-sandbox"
+    src/resources.rs    # WP4: named multi-unit semaphore pools
+    src/scheduler.rs    # WP4: scheduler
+    src/views.rs        # WP5: generations, atomic swap, roots registration
+    src/explain.rs      # WP9: key-document diff
+    tests/              # integration tests (crash injection, 2-process)
+  cli/                  # crate ppg3-cli, binary name "ppg3"  (WP5)
+  py/                   # crate ppg3-py, cdylib pyo3 module "ppg3._core" (WP7)
+  python/               # python package (WP7)
+    pyproject.toml      # maturin backend, manifest-path = "../py/Cargo.toml"
+    ppg3/               # __init__.py, jobs.py, canon.py, recipe.py, tools.py,
+                        # io.py, transport.py, localscope.py, _shim.py, run.py
+    tests/
+  tests/golden/         # key-document fixtures shared by Rust & Python tests
+  STATUS.md             # living log of what is done / deviated
+```
+
+Rust edition 2021. Deps allowed in core: blake3, serde, serde_json,
+thiserror, fs2 (fcntl locks), tempfile (dev), libc. cli adds clap. py adds
+pyo3 (abi3-py39). Keep the tree `cargo fmt`-clean and warning-free.
+
+## Shared vocabulary
+
+- `ik`: input key, 64-char lowercase blake3 hex of the canonical key document.
+- `oh`: output hash, 64-char hex, blake3 of canonical-JSON of the manifest
+  `content` map.
+- All hashes lowercase hex, no prefixes.
+
+## Canonical JSON (canon.rs — the validator IS the spec, §5)
+
+UTF-8, object keys strictly sorted (byte order), no whitespace, no floats
+anywhere (integer JSON numbers allowed within i64/u64; a number with `.`,
+`e`, `E` is rejected), no duplicate keys. Strings NFC-normalized is NOT
+required (document this). API:
+
+```rust
+pub fn validate(bytes: &[u8]) -> Result<(), Error>;
+pub fn canonicalize(v: &serde_json::Value) -> Result<Vec<u8>, Error>; // sorts keys, rejects floats
+pub fn input_key(canonical_key_doc: &[u8]) -> Result<String, Error>;  // validate + blake3
+```
+
+Key document shape: exactly §5. `ppg3_key_version: 1`.
+
+## Store (store.rs, §4)
+
+```rust
+pub struct Store { /* name, root, readonly */ }
+pub enum PublishOutcome { Published { oh: String }, DedupHit { oh: String } }
+
+impl Store {
+    pub fn open(name: &str, root: &Path, readonly: bool) -> Result<Store>; // creates v1/ layout if writable
+    pub fn lookup(&self, ik: &str) -> Result<Option<Manifest>>;
+    pub fn entry_dir(&self, oh: &str) -> PathBuf;        // .../v1/entries/<oh>
+    pub fn data_dir(&self, oh: &str) -> PathBuf;         // .../entries/<oh>/data
+    pub fn open_staging(&self) -> Result<Staging>;       // v1/staging/<host>-<pid>-<rand>/, has .path() -> &Path (the future data/)
+    pub fn publish(&self, staging: Staging, ik: &str, key_document: &serde_json::Value, built: BuiltInfo, job_view_name: Option<&str>) -> Result<PublishOutcome>;
+    pub fn verify_entry(&self, oh: &str) -> Result<VerifyReport>; // rehash content vs manifest
+    pub fn lease(&self, run_id: &str) -> Result<Lease>;  // lease.heartbeat(), Drop releases
+    pub fn write_intent(&self, ik: &str) -> Result<Intent>;      // advisory, §11.1
+    pub fn add_root(&self, project_id: &str, generation: u64, ohs: &[String]) -> Result<()>;
+    pub fn remove_root(&self, project_id: &str, generation: u64) -> Result<()>;
+    pub fn pin(&self, name: &str, oh: &str) -> Result<()>;
+    pub fn log_dir_for(&self, ik: &str) -> Result<PathBuf>;      // logs/<ik>/<ts>-<host>/, creates
+    pub fn gc(&self, policy: &GcPolicy) -> Result<GcReport>;
+}
+```
+
+Publish protocol exactly §4: hash files in staging (streaming blake3; reject
+symlinks; record mode as 4-digit octal of permission bits, size), compute
+`oh`, take `gc.lock` SHARED (fs2), then:
+- `entries/<oh>` exists → compare content manifests byte-identically:
+  identical ⇒ remove staging, DedupHit; different ⇒ `Error::CorruptStore`.
+- else write `manifest.json` into staging's parent-to-be layout
+  (`entries/<oh>/{data,manifest.json}`), `rename()` into place, chmod -R a-w.
+- `inputs/<ik>` symlink: create atomically (symlink to tmp name + rename).
+  Exists pointing to different oh ⇒ `Error::DeterminismViolation { report }`
+  with per-file added/removed/changed diff (§9), quarantine staging under
+  `staging/violations/`.
+- Publish must be resumable/crash-safe at every step boundary (tests inject
+  crashes between steps by calling internal step functions directly —
+  expose `#[doc(hidden)] pub` step functions or a `publish_steps` test API).
+
+GC (§11): exclusive `gc.lock`; roots = all `roots/**`, `pins/*`, entries
+referenced by leases fresher than 30min, plus everything reachable...
+(entries do not reference each other — reachability is just the root set).
+Sweep unrooted: `retain=Evict`-marked first (marker file
+`entries/<oh>/.ppg3-evict-ok` written at publish when requested — add
+`retain_evict: bool` to BuiltInfo), then LRU by `entries/<oh>/.atime` file
+touched on every lookup hit; delete until under `max_size` budget. Dangling
+`inputs/*` symlinks removed. `logs/` evicted before entries.
+
+## StoreSet (storeset.rs, §4.1)
+
+```rust
+pub struct StoreSet { pub stores: Vec<Store> }
+impl StoreSet {
+    pub fn lookup(&self, ik: &str) -> Result<Option<(usize, Manifest)>>; // first hit
+    pub fn write_store(&self, job_target: Option<&str>) -> Result<&Store>; // named or first writable
+}
+```
+Hits are consumed in place (data_dir of the owning store).
+
+## Manifest (manifest.rs, §10.1)
+
+Serde types mirroring §10.1 exactly; `output_hash(content) -> String` =
+blake3 of canonical-JSON of the content map. `BuiltInfo { start_ms, end_ms,
+host, sandboxed: bool, ppg3_version, retain_evict: bool }` (extra field ok —
+serialize as `"built"` object; key doc version guards compat).
+
+## Executor (executor.rs)
+
+```rust
+pub struct PreparedJob {
+    pub ik: String,
+    pub argv: Vec<String>,               // already lowered; no python semantics here
+    pub env: BTreeMap<String, String>,   // full final env (§6.1 scrub done by caller/py side)
+    pub inputs: Vec<Mount>,              // Mount { virtual_path: "/ppg/in/<name>", source: PathBuf } — read-only
+    pub tools: Vec<Mount>,               // "/ppg/tools/<name>"
+    pub out_dir: PathBuf,                // staging data dir (becomes entry data/)
+    pub log_dir: PathBuf,
+    pub allow_network: bool,             // fixed-output only
+    pub cwd_out: bool,                   // cwd = /ppg/out
+}
+pub struct ExecResult { pub exit_code: i32, pub stdout: Vec<u8>, pub stderr: Vec<u8> }
+pub trait Executor: Send + Sync { fn run(&self, job: &PreparedJob) -> Result<ExecResult>; }
+pub struct NoneExecutor;   // staged dir: build <work>/ppg/{in,out,tools,log,tmp} with SYMLINKS
+                           // for inputs/tools, out -> real out_dir; run argv with env + PPG_ROOT
+                           // env var pointing at the staged root; argv/env strings containing
+                           // "/ppg/" are rewritten to "<work>/ppg/" before exec. Warns once.
+pub fn bwrap_argv(job: &PreparedJob, bwrap: &Path) -> Vec<String>;  // pure function, unit-tested
+```
+
+Paths inside argv/env always use virtual `/ppg/...` form (§6.2); executors
+translate. NoneExecutor sets `TMPDIR=<work>/ppg/tmp` etc.
+
+## Scheduler (scheduler.rs, resources.rs, §8.1)
+
+All threads live here. Input graph:
+
+```rust
+pub struct JobDef {
+    pub id: String,
+    pub recipe: String,                       // recipe hash (py side computes)
+    pub inputs: BTreeMap<String, InputRef>,   // name -> ref
+    pub tools: BTreeMap<String, String>,      // name -> tool hash
+    pub runtime: serde_json::Value,           // §5 runtime object (no floats)
+    pub env: BTreeMap<String, String>,
+    pub outputs_declared: Vec<String>,
+    pub resources: BTreeMap<String, u64>,     // pool name -> units, e.g. {"cores": 4}
+    pub store_target: Option<String>,
+    pub retain: Retain,                       // Default | Evict | Pin(name)
+    pub exec_template: ExecTemplate,          // how to lower to PreparedJob
+    pub view: BTreeMap<String, String>,       // output name -> view-relative path
+    pub fixed_output: Option<String>,         // declared oh for FetchJob-style
+}
+pub enum InputRef { Job { id: String }, JobSubset { id: String, names: Vec<String> }, Leaf { hash: String } }
+pub enum ExecTemplate { Argv { argv: Vec<String>, allow_network: bool }, InProcess }  // InProcess => host callback
+```
+
+Key derivation at dispatch time: parents' `oh` (or subset hash: blake3 of
+canonical JSON `{name: file-content-hash-from-parent-manifest, ...}`)
+fill `inputs`; assemble the §5 document with canon::canonicalize; ik =
+input_key. Lookup StoreSet: hit ⇒ done (touch .atime); miss ⇒ acquire
+pools, lower ExecTemplate (argv `{in:NAME}`/`{out}`/`{tool:NAME}`
+placeholders → virtual paths), run Executor, publish, wake dependents.
+
+```rust
+pub trait HostCallbacks: Send + Sync {
+    fn expand_graph_job(&self, job_id: &str) -> Result<Vec<JobDef>>;    // §7.4
+    fn run_in_process(&self, job_id: &str, key_doc: &serde_json::Value) -> Result<()>; // loader layer
+}
+pub struct RunReport { pub built: Vec<String>, pub hits: Vec<String>, pub failed: BTreeMap<String, String>, pub job_entries: BTreeMap<String, (String, String)> } // id -> (ik, oh)
+pub fn run(storeset: &StoreSet, executor: &dyn Executor, jobs: Vec<JobDef>, callbacks: &dyn HostCallbacks, parallelism: &BTreeMap<String, u64>, abort: &AtomicBool) -> Result<RunReport>;
+```
+
+Failure policy: a failed job fails its transitive dependents
+(reported, not run); independent subgraph continues. Cycle ⇒ error before
+any dispatch. Resource pools: Condvar-based multi-unit semaphore; a request
+larger than pool capacity is a definition error; acquisition order must not
+deadlock (single lock over all pools or sorted acquisition).
+
+## Views (views.rs, §11)
+
+```rust
+pub struct ViewSpec { pub entries: Vec<(String, String, String)> } // (view-rel path, oh, store-root path or index)
+pub fn write_generation(project_dir: &Path /* .ppg3/ */, project_id: &str, stores: &StoreSet, spec: &ViewSpec, ephemeral: bool) -> Result<u64>; // registers roots in every store linked into, then symlink tree views/<n>/, repoint current
+pub fn rollback(project_dir: &Path, generation: u64) -> Result<()>;
+pub fn list_generations(project_dir: &Path) -> Result<Vec<GenInfo>>;
+pub fn drop_generation(project_dir: &Path, stores: &StoreSet, generation: u64) -> Result<()>; // unregister roots
+```
+`outputs` symlink → `.ppg3/views/current` → `views/<n>` (atomic swap via
+symlink+rename).
+
+## CLI (cli/, WP5)
+
+`ppg3 <cmd>` with clap: `store gc [--max-size BYTES] [--keep-generations N]
+--store PATH`, `store verify [--sample PCT|--entry OH] --store PATH`,
+`generations list|rm N|keep N`, `rollback [N]`, `explain <view-path>`,
+`diff-entries <oh1> <oh2> --store PATH`. Project commands find `.ppg3/` by
+walking up from cwd. Human-readable output + `--json`.
+
+## explain/diff (explain.rs, §9/§10.2)
+
+```rust
+pub fn diff_key_documents(a: &serde_json::Value, b: &serde_json::Value) -> KeyDocDiff; // structured: changed inputs/tools/env/recipe...
+pub fn diff_entries(store: &Store, oh_a: &str, oh_b: &str) -> EntryDiff;              // files added/removed/changed(size, first differing offset, hashes)
+```
+
+## PyO3 boundary (py/, §8.1 rules)
+
+Module `ppg3._core`. Functions (all JSON-string or bytes in/out — no rich
+objects): `input_key(canonical: &[u8]) -> String`, `canonicalize(json:
+&str) -> String`, `blake3_file(path) -> String`, `open_stores(json config)
+-> StoreSetHandle`, `run(handle, jobs_json, parallelism_json, py_callbacks)
+-> report_json` (callbacks object with `expand_graph_job(id) -> jobs_json`,
+`run_in_process(id, key_doc_json)`), `write_generation(...) -> u64`,
+`lookup(handle, ik) -> Option<manifest_json>`. Python never sees store
+entry paths except via manifest/report JSON (view assembly happens in Rust).
+
+## Python package (python/, WP7)
+
+- `ppg3.new(stores=[Store(name, path, readonly=False)], default_python=None, project_dir=".ppg3", parallelism={"cores": N}) -> Graph` (module-level current graph like ppg2).
+- Job classes per §7 building `JobDef` dicts. `FileJob(view=, run=|Source,
+  tools=[], inputs={}, env={}, resources=, retain=, python=, store=)`,
+  `CommandJob(view=, argv=[...placeholders...])`, `DataJob`, `FetchJob(view=,
+  url=, blake3=)` (frozen mode: blake3 required), `GraphJob(fn)`,
+  `UnsandboxedJob` (runs via InProcess host callback; warned).
+- Parameter canonicalizer: closed type set §5; floats via
+  `struct.pack('<d')` hex under `{"__ppg3_float__": "<hex>"}`; set/frozenset
+  sorted by canonical encoding; Enum as module.qualname.name; dataclass as
+  dict with `__ppg3_dataclass__` = qualname; reject everything else with a
+  loud TypeError naming the path. Opt-in `__ppg3_hash__` protocol.
+- Recipe extraction (`recipe.py`): source-derived strict hash — port the
+  *semantics* of ppg2 `extract_strict_hash` (dis-based, bytecode-noise-free)
+  or dedent-source + consts; must be stable across equivalent definitions;
+  golden-tested.
+- Transport (§6.5): same-env ⇒ cloudpickle if importable else source-mode;
+  source-mode = extracted source + qualname, localscope check at definition
+  time (port `python/pypipegraph2/` localscope usage or a minimal
+  free-variable check via `inspect`/`ast`: free variables beyond builtins/
+  params ⇒ error naming them).
+- `_shim.py`: stdin JSON `{transport: {...}, io: {inputs: {name: path},
+  outputs: {name: path}, tools: {}, log_dir, params}}`; reconstruct callback,
+  build `JobIO` (`io.input(name)`, `io.path(name)`/`out.path`, `io.tool`,
+  `io.load(name)`, `io.log_dir`, `io.params`), run, exit code.
+- ToolSpec/PyEnv (`tools.py`, WP8): `ToolSpec.nix(ref)` (pinned-ref check;
+  subprocess `nix build --no-link --print-out-paths`; skip-if-no-nix),
+  `ToolSpec.binary(path)` (blake3 of file), `PyEnv.current(preload=[])`
+  (realpath + version + sys.path fingerprint; weakly-hermetic flag),
+  `PyEnv.nix(...)`.
+- `run()`: lower jobs to JobDef JSON, call `_core.run`, then assemble
+  ViewSpec from report + view maps, `_core.write_generation`.
+
+## Golden fixtures (tests/golden/)
+
+`keydoc_NN.json` = `{"doc": <key document>, "canonical": "<exact canonical
+string>", "ik": "<blake3 hex>"}`. WP1/2-Rust agent creates ≥6 covering:
+sorting, unicode, nested params, subset inputs, env, no-floats rejection
+(`keydoc_reject_NN.json` with `{"doc":..., "error": true}`). Rust tests and
+Python tests both consume the same files.
+
+## Testing bar
+
+- `cargo test` green at `ppg3/` root (default members), `cargo clippy`
+  no warnings, on this machine (no bwrap, no nix — skip, don't fail).
+- Python: `cd ppg3/python && uv run --with maturin,pytest maturin develop
+  && pytest` (or an equivalent documented one-liner) green.
+- End-to-end smoke test (python): two-job pipeline (CommandJob producing a
+  file, FileJob python callback consuming it) runs, produces a view; second
+  run = all hits, zero builds; parameter flip back = hits (§12.3 oracle).
+
+## Rules for implementing agents
+
+1. Do not modify anything outside `ppg3/` (and never `PPG3_DESIGN.md`).
+2. Do not rewrite `core/src/lib.rs` module wiring; fill the module files.
+3. Interfaces above are the contract; extend, don't break. If a signature
+   must change, update CONTRACT.md and note it in STATUS.md.
+4. Keep every DECISION of the design doc; deviations only via STATUS.md
+   with a one-line rationale.
+5. Leave the tree compiling and tests green; note anything unfinished in
+   STATUS.md under "TODO".
