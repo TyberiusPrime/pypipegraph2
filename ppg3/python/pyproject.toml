@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "ppg3"
+version = "0.1.0"
+description = "ppg3 — constructive-trace build system, Python front-end"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest", "cloudpickle", "blake3"]
+
+[tool.maturin]
+manifest-path = "../py/Cargo.toml"
+python-source = "."
+module-name = "ppg3._core"
+features = ["pyo3/extension-module"]
