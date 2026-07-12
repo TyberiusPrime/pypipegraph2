@@ -568,3 +568,31 @@ today.
   scheduler.rs` work has released the shared `target/` build lock —
   `cargo check --workspace` is clean but that's not a substitute for the
   full suite.
+
+## Forkserver templates (§6.4, sandbox=none children) — done
+
+`core/src/forkserver.rs` + `python/ppg3/_template.py` + wiring
+(`executor.rs` staging extracted for reuse; `PreparedJob.runtime` added;
+`py/src/lib.rs` run() takes optional `template_argv`; `ppg3.new(...,
+forkserver=True)` default-on with off-switch).
+
+- One warm template per (interpreter, canonical preload list); JSON-lines
+  protocol ready/run/started/exited; one reader thread per template; lazy
+  start, respawn-on-death, kill-on-Drop at run end (§6.7 cross-run
+  persistence not in scope).
+- Template is single-threaded, imports preloads, forks per job; the child
+  redirects stdio to the job log dir, enters the staged sandbox=none
+  layout, and runs the shim entry inside the warm interpreter (no exec).
+  It never runs user code at top level and never starts threads.
+- The unshare/pivot_root child sandbox entry remains the feature-gated
+  stub — forkserver and sandbox entry are decoupled; only the latter
+  needs user namespaces.
+- Warts: the template inherits PYTHONPATH/VIRTUAL_ENV/PATH from the
+  coordinator so `ppg3` is importable — weakly hermetic until the shim
+  ships as a tool input; enforced-by-review, not by namespace.
+- Proof tests (python e2e): same-template reuse via parent pid equality,
+  preload warm at callback start, env scrubbed (planted secret absent),
+  forkserver on/off produce identical iks/ohs (templates do not poison
+  keys). Core integration tests drive the protocol with a self-contained
+  fake template (no ppg3 python dependency in ppg3-core tests).
+- Totals after this WP: 180 Rust + 101 Python tests, clippy clean.
