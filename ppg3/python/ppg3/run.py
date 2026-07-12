@@ -9,6 +9,7 @@ extension (via :mod:`ppg3._bridge`).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -147,6 +148,67 @@ def _write_project_config(graph: Graph) -> None:
         fh.write("\n")
 
 
+# --------------------------------------------------------------------------
+# §6.7 watch mode support
+# --------------------------------------------------------------------------
+
+# Module-level flag consulted by `run()` to decide whether the generation it
+# writes is ephemeral, *in addition to* an explicit `ephemeral=True` kwarg
+# (CONTRACT.md/PPG3_DESIGN.md §6.7 "watch-mode generations are flagged
+# ephemeral"). A plain bool (not a contextvar) is enough: `python -m ppg3
+# watch`'s loop (python/ppg3/watch.py) drives `runpy.run_path()` on a single
+# thread, synchronously, so there is never a concurrent non-watch `run()`
+# call while this is set.
+_watch_active = False
+
+
+@contextlib.contextmanager
+def watch_mode():
+    """Mark every ``run()`` call made while the pipeline script's definition
+    pass executes underneath this context as producing an ephemeral view
+    generation (§6.7), regardless of the ``ephemeral=`` argument the script
+    itself passes (or omits) — the script is written for normal,
+    non-watch use and should not need to know it is being watched. Used by
+    ``python -m ppg3 watch`` (``python/ppg3/watch.py``); not part of the
+    normal user-facing API."""
+    global _watch_active
+    previous = _watch_active
+    _watch_active = True
+    try:
+        yield
+    finally:
+        _watch_active = previous
+
+
+# The "last run info" slot (CONTRACT.md "Python package" watch addendum):
+# `run()` is called from *inside* the pipeline script executed by
+# `runpy.run_path()`, so once that call returns the script's own local
+# `graph` variable is gone along with the temporary module namespace
+# `runpy` built it in. `run()` stashes what the watcher needs here on every
+# call (even one that ends up raising `PPGRunError` — see below), so
+# `python -m ppg3 watch` can read it back via `get_last_run_info()`
+# immediately after `runpy.run_path()` returns (or raises). ``report`` is
+# the raw decoded RunReport dict (``built``/``hits``/``failed``/
+# ``job_entries``), stashed unconditionally (success or failure) so the
+# watcher can print counts either way.
+_last_run_info: Dict[str, Any] = {
+    "graph": None,
+    "watched_paths": [],
+    "generation": None,
+    "report": None,
+}
+
+
+def get_last_run_info() -> Dict[str, Any]:
+    """Snapshot of the most recent :func:`run` call's graph / watched-path
+    set / generation number. Never cleared: a pipeline pass whose
+    definition raises *before* ever calling :func:`run` (or a script that
+    never calls it at all) leaves this holding whatever the previous
+    successful call recorded, which is exactly what watch mode's "keep
+    watching the last-known watch set" failure policy (§6.7) wants."""
+    return dict(_last_run_info)
+
+
 def run(
     graph: Optional[Graph] = None,
     project_id: str = "default",
@@ -211,6 +273,15 @@ def run(
     )
     report = json.loads(report_json)
 
+    # §6.7 watch mode: snapshot graph + watched-path set *before* the
+    # failure check below, so a failed run still updates the "last run
+    # info" slot a watcher reads (watched_paths() reflects everything
+    # recorded during job_defs()/GraphJob expansion up to this point, even
+    # if the run itself then fails).
+    _last_run_info["graph"] = graph
+    _last_run_info["watched_paths"] = graph.watched_paths()
+    _last_run_info["report"] = report
+
     if report.get("failed"):
         raise PPGRunError(RunResult(report, generation=None))
 
@@ -246,7 +317,11 @@ def run(
             )
     view_spec_json = json.dumps({"entries": view_entries})
 
+    # §6.7: an explicit `ephemeral=True` kwarg *or* an active watch-mode
+    # context both mark the generation ephemeral; either alone is enough.
+    effective_ephemeral = ephemeral or _watch_active
     generation = core.write_generation(
-        handle, graph.project_dir, project_id, view_spec_json, ephemeral
+        handle, graph.project_dir, project_id, view_spec_json, effective_ephemeral
     )
+    _last_run_info["generation"] = generation
     return RunResult(report, generation=generation)

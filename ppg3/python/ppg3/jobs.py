@@ -221,6 +221,25 @@ class Graph:
         self.jobs: Dict[str, "Job"] = {}
         self.data_job_ids: Set[str] = set()
         self._statcache: Optional[StatCache] = None
+        # §6.7 watch mode: paths that should trigger a re-run of the
+        # definition pass on change. Populated during job definition
+        # (`Source` callback file + includes, recorded at __init__ time) and
+        # during lowering (`ppg3.File(...)` leaf inputs, recorded from
+        # `_lower_input` when `job_defs()`/`job_def()` runs — see
+        # CONTRACT.md "Python package" watch addendum). Never includes the
+        # pipeline script itself; `python -m ppg3 watch` adds that.
+        self._watched_paths: Set[str] = set()
+
+    def record_watched_path(self, path: Union[str, "os.PathLike"]) -> None:
+        """Record a path that watch mode (§6.7) should poll for changes."""
+        self._watched_paths.add(str(path))
+
+    def watched_paths(self) -> List[str]:
+        """Sorted, de-duplicated snapshot of every path recorded so far via
+        :meth:`record_watched_path` (leaf ``File`` inputs + ``Source``
+        callback files/includes). Does not include the pipeline script
+        itself — the caller (``python -m ppg3 watch``) adds that."""
+        return sorted(self._watched_paths)
 
     def add(self, job: "Job") -> "Job":
         existing = self.jobs.get(job.id)
@@ -333,6 +352,9 @@ def _lower_input(input_name: str, value: Any, graph: Graph) -> Dict[str, Any]:
     if isinstance(value, Job):
         return {"Job": {"id": value.id}}
     if isinstance(value, File):
+        # §6.7 watch mode: leaf File inputs are watched paths, recorded here
+        # at lowering time (job_defs()/job_def(), called from run()).
+        graph.record_watched_path(value.path)
         h = graph.statcache().hash_file(value.path)
         return {"Leaf": {"hash": h}}
     if isinstance(value, Params):
@@ -484,6 +506,13 @@ class FileJob(Job):
         job_id = name or _derive_id(view, "FileJob")
         super().__init__(graph, job_id, view)
         self.run = run
+        if isinstance(run, Source):
+            # §6.7 watch mode: Source callback files are watched paths,
+            # recorded at definition time (as opposed to leaf File inputs,
+            # recorded at lowering time in `_lower_input`).
+            graph.record_watched_path(run.path)
+            for inc in run.includes:
+                graph.record_watched_path(inc)
         self.tools = list(tools)
         self.inputs = dict(inputs or {})
         self.env = dict(env or {})

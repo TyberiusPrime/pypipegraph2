@@ -596,3 +596,81 @@ forkserver=True)` default-on with off-switch).
   keys). Core integration tests drive the protocol with a self-contained
   fake template (no ppg3 python dependency in ppg3-core tests).
 - Totals after this WP: 180 Rust + 101 Python tests, clippy clean.
+
+## Watch mode (§6.7 "watch" bullet) — done
+
+Python-only, no Rust changes (`core/src/views.rs`'s existing
+`write_generation(..., ephemeral: bool)` already covered what the Rust
+side needed). New: `python/ppg3/__main__.py`, `python/ppg3/watch.py`,
+`python/tests/test_watch.py`. Additive: `python/ppg3/run.py` (`watch_mode()`
+context manager, `_watch_active` flag, `_last_run_info` slot +
+`get_last_run_info()`), `python/ppg3/jobs.py` (`Graph.record_watched_path`/
+`.watched_paths()`, wired into `_lower_input`'s `File` branch and
+`FileJob.__init__`'s `Source` branch). Full rationale for every piece is in
+CONTRACT.md's new "Additive addendum: `python -m ppg3 watch`" section
+(cross-referenced from a rewritten "Scope deviations" bullet); this entry
+only records the headline deviation and totals.
+
+**Deviation (the one that matters): polling instead of inotify.** §6.7 says
+the coordinator watches leaf inputs/script/`Source` files "via inotify".
+This dev container has no inotify Python binding, and the project takes no
+new third-party dependencies (CONTRACT.md's own rule) — implemented
+`PollingWatcher` instead: polls `(mtime_ns, size)` per tracked path,
+default interval 0.5s (`--interval` flag). Same semantics (a definition
+pass re-runs exactly when a watched path's content or existence changes,
+including appear/disappear), strictly worse latency/efficiency (bounded by
+the poll interval instead of kernel-immediate). `PollingWatcher` exposes
+only a narrow `poll() -> List[str]` (+ `set_paths()`) interface so a future
+inotify-backed implementation is a drop-in replacement for the loop in
+`watch.run_watch` — nothing else in the loop, in `run.py`, or in `jobs.py`
+would need to change.
+
+Other notable decisions (all detailed in CONTRACT.md):
+
+- `python -m ppg3 watch <script> [--interval SECONDS] [args...]` argv is
+  parsed by hand, not via `argparse`'s `REMAINDER` — `REMAINDER` greedily
+  swallows every token once it starts consuming at the first positional,
+  which silently ate a later `--interval` (confirmed by hand before
+  settling on the manual parser: `watch script.py --interval 0.1` — the
+  exact required CLI shape — parsed with `args.interval` still at its
+  default and `--interval`/`0.1` dumped into `script_args` instead).
+- Discovered and worked around a real footgun while wiring `watch.py` to
+  `run.py`: `ppg3/__init__.py` does `from .run import run`, which rebinds
+  the *package* attribute `ppg3.run` to that function, shadowing the
+  submodule of the same name. `from . import run as x` (and even `import
+  ppg3.run as x`, confirmed by hand — both resolve via attribute access on
+  the already-imported parent, not via `sys.modules['ppg3.run']`) silently
+  bind to the *function*, not the module, so `x.watch_mode()`/
+  `x.get_last_run_info()` raise `AttributeError`. Fixed by importing the
+  specific names needed (`from .run import PPGRunError, get_last_run_info,
+  watch_mode`) — `from module import name` resolves `name` against the
+  freshly-imported submodule object itself, not through the parent
+  package's (overwritten) attribute. Left an explicit comment in
+  `watch.py` and a matching one in `test_watch.py` (which hits the same
+  trap reaching for `_watch_active` in one test) so nobody "fixes" it back
+  to the natural-looking `from . import run`.
+- E2E tests (`test_watch.py`) drive a real `python -m ppg3 watch`
+  subprocess, poll `.ppg3/views/<n>` on disk with a 30s deadline / 50ms
+  poll (never a bare `sleep`-and-hope), and always `proc.kill()` in a
+  `finally` — a hang here would otherwise hang the whole suite. Covers:
+  first generation + `outputs/` content, a leaf-file change producing
+  generation 2 (content updated, `.ephemeral` marker present per
+  `views.rs`'s `EPHEMERAL_MARKER`), clean exit 0 on `SIGINT`; and,
+  separately, a syntax error introduced mid-watch (subprocess stays alive,
+  traceback lands on real stderr — see the "traceback to stderr, not the
+  status stream" note in CONTRACT.md) followed by fixing the file and
+  observing generation 2 appear.
+- Manually verified end-to-end outside pytest too (scratch pipeline,
+  `python -m ppg3 watch pipeline.py --interval 0.2`): confirmed `.ephemeral`
+  markers on both generations' `meta.json` (`"ephemeral": true`) and on
+  disk (`views/<n>/.ephemeral`), debounced batching, and the syntax-error
+  survive/resume path, before writing the automated tests above.
+- `Graph.watched_paths()` never includes the pipeline script itself — a
+  `Graph` has no notion of "the script that defined it"; `watch.run_watch`
+  adds the script path itself to the tracked set on every iteration.
+
+Totals after this WP: 180 Rust tests unchanged (no Rust touched;
+`cargo test -p ppg3-core --lib` reconfirmed green: 121 passed, 1 ignored —
+`--lib` only, the rest of the 180 lives in `core/tests/*` integration
+suites not run by that command) + 122 Python tests (101 prior + 21 new in
+`test_watch.py`), all green.

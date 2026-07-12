@@ -17,7 +17,13 @@ updating this file and every consumer.
   argv-based; a future forkserver replaces the exec, not the interfaces).
 - Remote stores (s3/http) deferred; `StoreSet` supports N POSIX stores with
   ordered lookup and in-place consumption (§4.1).
-- `ppg3 watch`, session mode, TOFU source patching, R shim: deferred.
+- `ppg3 watch`: implemented (`python -m ppg3 watch`, Python-only coordinator
+  loop — see "Additive addendum: `python -m ppg3 watch`" below), but
+  **polling** instead of §6.7's inotify (no inotify Python binding in this
+  container, no new third-party deps) — see STATUS.md. Session mode
+  (templates persisting across `run()` calls inside one coordinator
+  process, §6.7's other bullet), TOFU source patching, R shim: still
+  deferred.
 - Record deviations you add in `ppg3/STATUS.md`.
 
 ## Layout
@@ -472,3 +478,93 @@ This supersedes the originally-imagined fix (a `PPG_ROOT` env var for the
 shim to translate embedded `/ppg/...` paths itself): unnecessary, since
 paths never travel inside the opaque blob in the first place. **No
 `core/src/executor.rs` change was needed.**
+
+## Additive addendum: `python -m ppg3 watch` (§6.7 "watch" bullet)
+
+Python-only, no Rust changes; `core/src/views.rs`'s existing
+`write_generation(..., ephemeral: bool)` (see "Views" above) already
+covered everything the Rust side needs to know. New/changed files:
+`python/ppg3/{__main__.py, watch.py}` (new), `python/ppg3/{run.py,
+jobs.py}` (additive), `python/tests/test_watch.py` (new).
+
+- **Entry point**: `python -m ppg3 watch <pipeline.py> [--interval
+  SECONDS] [args...]` (default interval 0.5s). `python/ppg3/__main__.py`
+  parses this by hand rather than via `argparse`'s `REMAINDER` for
+  `script_args`: the required CLI shape puts the pipeline script *before*
+  `--interval` (`watch script.py --interval 0.1`), and `REMAINDER`
+  greedily swallows every token — including a later `--interval` — once it
+  starts consuming at the first positional, silently dropping the flag.
+  `_parse_watch_argv` instead scans the whole argv for
+  `--interval`/`--interval=VALUE` wherever it appears and strips it out;
+  the first remaining token is the script, the rest is forwarded verbatim
+  (as `sys.argv[1:]`) to the pipeline script. The Rust `ppg3` CLI binary
+  (`cli/`) is a separate, unrelated entry point (store-level ops); this
+  command never shells out to it.
+- **`ppg3.run()`'s existing `ephemeral: bool = False` parameter** (already
+  present in `run.py` from an earlier pass — CONTRACT.md never previously
+  documented it, noted here for completeness) is left unchanged for normal
+  callers. Watch mode does *not* require the pipeline script to pass
+  `ephemeral=True` itself: `python/ppg3/run.py` adds a module-level
+  `watch_mode()` context manager + a plain `_watch_active` bool flag it
+  toggles (not a `contextvar` — the watch loop drives `runpy.run_path()`
+  synchronously on one thread, so there is never a concurrent non-watch
+  `run()` call while it's set). `run()`'s effective ephemeral flag passed
+  to `_core.write_generation` is `ephemeral or _watch_active`. `watch.py`'s
+  `_run_definition_pass` wraps every `runpy.run_path()` call in `with
+  run.watch_mode():`.
+- **"Last run info" slot**: `run.py` adds a module-level dict,
+  `_last_run_info` (`graph`, `watched_paths`, `generation`, `report`),
+  updated by every `run()` call (success *or* `PPGRunError` — updated
+  before the failure check, so a failed run's watch-set is still
+  captured) and read back via `run.get_last_run_info()`. Needed because
+  `runpy.run_path()`'s temporary module namespace — and the pipeline
+  script's own local `graph` variable inside it — is gone once
+  `run_path()` returns; this is the only channel back to the watcher.
+  Never cleared, so a pass that raises *before* ever calling `run()` (e.g.
+  a syntax error) leaves it holding the previous successful pass's info —
+  exactly the "keep watching the last-known watch set" failure policy
+  below.
+- **Watch-set collection**: `jobs.py`'s `Graph` gains
+  `record_watched_path(path)` / `watched_paths() -> List[str]` (sorted,
+  deduplicated). Two recording sites, matching how each is actually known:
+  `_lower_input`'s `File` branch records the leaf path at **lowering**
+  time (`job_defs()`/`job_def()`, i.e. whenever `run()` calls them —
+  includes paths added later via `GraphJob` expansion, since
+  `RunCallbacks.expand_graph_job` also calls `job_def()` on the newly
+  added jobs mid-`run()`); `FileJob.__init__` records a `Source` callback's
+  `.path` + every `.includes` entry at **definition** time (no lowering
+  needed — the path is already known from the constructor argument). The
+  pipeline script's own path is *not* part of `Graph.watched_paths()` —
+  `watch.py`'s loop adds it itself (it's not a Graph concept).
+- **`PollingWatcher` (`watch.py`)** — the deviation from §6.7's "inotify":
+  no inotify Python binding in this container and the project takes no
+  new third-party dependencies, so this polls `(mtime_ns, size)` per
+  tracked path (same non-authoritative stat signal §10.3's stat-cache
+  already uses, for the same reason). Same semantics as inotify would give
+  (re-run exactly when a watched path's content/existence changes),
+  strictly worse latency/efficiency, bounded by `--interval`. Exposes only
+  `poll() -> List[str]` (plus `set_paths()` to change the tracked set
+  between iterations without manufacturing spurious changes) so a future
+  inotify-backed watcher is a drop-in replacement for the loop in
+  `run_watch`; see STATUS.md.
+- **Debounce**: `wait_for_change(watcher, interval)` blocks until
+  `poll()` reports a change, then sleeps one more `interval` and polls
+  once more, merging in anything caught during that settle window, so
+  multi-file saves batch into a single re-run trigger.
+- **Failure policy**: a definition-pass exception (including
+  `ppg3.run.PPGRunError`, on job failure — the view is left untouched per
+  §11) is reported (summary + counts to the configurable output stream;
+  the actual traceback to real `sys.stderr`, not that stream, so it's
+  distinguishable from ordinary iteration status) and the loop keeps
+  running, watching the last-known watch set — just the script on the very
+  first iteration, since no `run()` call has happened yet to populate one.
+  `KeyboardInterrupt` (SIGINT) exits the loop with exit code 0 and a
+  `n runs, n failures` summary; it is never caught anywhere else in the
+  loop, so it always propagates out cleanly.
+- **Graph-state reset**: `_run_definition_pass` sets
+  `ppg3.jobs._current_graph = None` before every `runpy.run_path()` call —
+  defensive belt-and-suspenders on top of the pipeline script calling
+  `ppg3.new(...)` itself each pass (which already replaces the module
+  global with a fresh `Graph`); guards against a script that skips or
+  conditionally skips that call from silently reusing a stale graph and
+  accumulating jobs across passes.
