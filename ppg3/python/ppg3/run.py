@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
 from ._bridge import get_core
@@ -190,7 +191,24 @@ def run(
 
     handle = core.open_stores(stores_config_json)
     callbacks = RunCallbacks(graph)
-    report_json = core.run(handle, jobs_json, parallelism_json, callbacks, work_dir)
+    # §6.4 / CONTRACT.md "PyO3 boundary" addendum: `template_argv` is the
+    # template start command handed to `ForkserverExecutor::new` on the
+    # Rust side. `run()`'s own interpreter (`sys.executable`) is used as
+    # the *default* interpreter — `ForkserverExecutor` substitutes each
+    # job's own resolved `PyEnv` interpreter (`job.argv[0]`) for this at
+    # spawn time (see `core/src/forkserver.rs`'s `ForkserverExecutor::new`
+    # doc comment), so this only matters as "some real interpreter" to
+    # satisfy the constructor — it is not actually what ends up running a
+    # template for a job under a *different* `PyEnv`.
+    # `graph.forkserver=False` disables this entirely: an empty list here
+    # makes the Rust side skip template dispatch unconditionally for every
+    # job, falling back to the pre-forkserver behavior.
+    template_argv = (
+        [sys.executable, "-I", "-m", "ppg3._template"] if graph.forkserver else []
+    )
+    report_json = core.run(
+        handle, jobs_json, parallelism_json, callbacks, work_dir, template_argv
+    )
     report = json.loads(report_json)
 
     if report.get("failed"):

@@ -204,6 +204,7 @@ class Graph:
         parallelism: Dict[str, int],
         frozen: bool,
         paranoid: bool,
+        forkserver: bool = True,
     ):
         self.stores = list(stores)
         self.default_python = default_python
@@ -211,6 +212,12 @@ class Graph:
         self.parallelism = dict(parallelism)
         self.frozen = frozen
         self.paranoid = paranoid
+        # §6.4: warm template processes for python FileJob/DataJob/FetchJob
+        # dispatch. `False` disables it (`run.py` then passes an empty
+        # `template_argv` to `ppg3._core.run`, which makes the Rust
+        # `ForkserverExecutor` behave exactly like the pre-forkserver bare
+        # `NoneExecutor` for every job — see STATUS.md).
+        self.forkserver = forkserver
         self.jobs: Dict[str, "Job"] = {}
         self.data_job_ids: Set[str] = set()
         self._statcache: Optional[StatCache] = None
@@ -250,9 +257,18 @@ def new(
     parallelism: Optional[Dict[str, int]] = None,
     frozen: Optional[bool] = None,
     paranoid: bool = False,
+    forkserver: bool = True,
 ) -> Graph:
     """Create (and make current) a new ``Graph``. Module-level "current
-    graph" like ppg2 — job constructors look it up implicitly."""
+    graph" like ppg2 — job constructors look it up implicitly.
+
+    ``forkserver=True`` (the default, §6.4): python `FileJob`/`DataJob`/
+    `FetchJob` dispatch runs through warm per-``(PyEnv, preload)`` template
+    processes instead of a cold ``python -I -m ppg3._shim`` exec per job.
+    Pass ``forkserver=False`` to opt out and get the old cold-exec-per-job
+    behavior unconditionally (e.g. for isolating whether a bug is
+    forkserver-related).
+    """
     global _current_graph
     if frozen is None:
         try:
@@ -269,6 +285,7 @@ def new(
         parallelism=parallelism,
         frozen=frozen,
         paranoid=paranoid,
+        forkserver=forkserver,
     )
     _current_graph = graph
     return graph

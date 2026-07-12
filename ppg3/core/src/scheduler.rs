@@ -621,6 +621,7 @@ fn dispatch_argv_job(
         log_dir,
         allow_network,
         cwd_out: true,
+        runtime: Some(job.runtime.clone()),
     };
 
     let start_ms = now_ms();

@@ -63,6 +63,16 @@ pub struct PreparedJob {
     pub allow_network: bool,
     /// cwd = `/ppg/out` when true.
     pub cwd_out: bool,
+    /// The §5 `runtime` object (`{"python_env":..., "preload":[...],
+    /// "shim":...}`), copied verbatim from `JobDef.runtime` by the
+    /// scheduler. Additive field (forkserver work package, see
+    /// STATUS.md): `NoneExecutor`/`BwrapExecutor` ignore it entirely;
+    /// `ForkserverExecutor` (`forkserver.rs`) uses it (together with an
+    /// argv shape check) to decide whether a job is eligible for template
+    /// dispatch. `None` for any caller that predates this field (e.g. the
+    /// unit tests in this module) — always `Some` for jobs built by
+    /// `scheduler::dispatch_argv_job`.
+    pub runtime: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +123,105 @@ fn unique_name(prefix: &str) -> String {
     format!("{prefix}-{nanos:x}-{c:x}")
 }
 
+/// The result of staging a `PreparedJob` into a work directory (shared by
+/// `NoneExecutor` and `ForkserverExecutor` — see `stage`/`finish` below).
+pub(crate) struct StagedJob {
+    /// The per-job staged root (`<work_parent>/<ik>-...`); removed by
+    /// `finish` on success.
+    pub work_dir: PathBuf,
+    /// `job.argv` with every `/ppg/` occurrence rewritten to
+    /// `<work_dir>/ppg/`.
+    pub argv: Vec<String>,
+    /// `job.env` plus `TMPDIR`/`HOME` defaults, same rewrite applied.
+    pub env: BTreeMap<String, String>,
+    /// `<work_dir>/ppg/out` if `job.cwd_out`, else `work_dir`.
+    pub cwd: PathBuf,
+    /// Unchanged from `job.log_dir` (never staged/rewritten — §6.1a, the
+    /// non-reproducible log channel already lives at its real path).
+    pub log_dir: PathBuf,
+}
+
+fn build_layout(job: &PreparedJob, work: &Path) -> Result<()> {
+    let ppg = work.join("ppg");
+    for sub in ["in", "tools", "tmp"] {
+        let dir = ppg.join(sub);
+        std::fs::create_dir_all(&dir).map_err(|e| Error::io(&dir, e))?;
+    }
+    for m in &job.inputs {
+        let name = ppg_name(&m.virtual_path)?;
+        let link = ppg.join("in").join(name);
+        std::os::unix::fs::symlink(&m.source, &link).map_err(|e| Error::io(&link, e))?;
+    }
+    for m in &job.tools {
+        let name = ppg_name(&m.virtual_path)?;
+        let link = ppg.join("tools").join(name);
+        std::os::unix::fs::symlink(&m.source, &link).map_err(|e| Error::io(&link, e))?;
+    }
+    std::fs::create_dir_all(&job.out_dir).map_err(|e| Error::io(&job.out_dir, e))?;
+    std::fs::create_dir_all(&job.log_dir).map_err(|e| Error::io(&job.log_dir, e))?;
+    let out_link = ppg.join("out");
+    std::os::unix::fs::symlink(&job.out_dir, &out_link).map_err(|e| Error::io(&out_link, e))?;
+    let log_link = ppg.join("log");
+    std::os::unix::fs::symlink(&job.log_dir, &log_link).map_err(|e| Error::io(&log_link, e))?;
+    Ok(())
+}
+
+fn rewrite_ppg_path(s: &str, work: &Path) -> String {
+    let replacement = format!("{}/ppg/", work.display());
+    s.replace("/ppg/", &replacement)
+}
+
+/// Stage `job` into a fresh directory under `work_parent`: builds the
+/// `<work>/ppg/{in,tools,out,log,tmp}` symlink layout (standing in for bind
+/// mounts, §6.1 — no enforcement), then rewrites every `/ppg/...`
+/// occurrence in `argv`/`env` to the real staged path. Shared by
+/// `NoneExecutor` and `forkserver::ForkserverExecutor` (both run children
+/// in the same unenforced staged layout, per the forkserver work package's
+/// scope constraint — see STATUS.md). Does not spawn anything.
+pub(crate) fn stage(job: &PreparedJob, work_parent: &Path) -> Result<StagedJob> {
+    let work = work_parent.join(unique_name(&job.ik));
+    build_layout(job, &work)?;
+
+    let argv: Vec<String> = job
+        .argv
+        .iter()
+        .map(|s| rewrite_ppg_path(s, &work))
+        .collect();
+
+    let mut env = job.env.clone();
+    env.entry("TMPDIR".to_string())
+        .or_insert_with(|| "/ppg/tmp".to_string());
+    env.entry("HOME".to_string())
+        .or_insert_with(|| "/ppg/tmp".to_string());
+    let env: BTreeMap<String, String> = env
+        .into_iter()
+        .map(|(k, v)| (k, rewrite_ppg_path(&v, &work)))
+        .collect();
+
+    let cwd = if job.cwd_out {
+        work.join("ppg").join("out")
+    } else {
+        work.clone()
+    };
+
+    Ok(StagedJob {
+        work_dir: work,
+        argv,
+        env,
+        cwd,
+        log_dir: job.log_dir.clone(),
+    })
+}
+
+/// Post-run cleanup: remove the staged work dir on success, keep it (for
+/// postmortem) on failure. Mirrors `NoneExecutor`'s original behavior
+/// exactly.
+pub(crate) fn finish(staged: &StagedJob, success: bool) {
+    if success {
+        let _ = std::fs::remove_dir_all(&staged.work_dir);
+    }
+}
+
 /// Staged-directory fallback executor (no user namespaces). Tested path in
 /// this dev container per CONTRACT.md's "Scope deviations".
 pub struct NoneExecutor {
@@ -127,84 +236,32 @@ impl NoneExecutor {
             work_parent: work_parent.into(),
         }
     }
-
-    fn build_layout(&self, job: &PreparedJob) -> Result<PathBuf> {
-        let work = self.work_parent.join(unique_name(&job.ik));
-        let ppg = work.join("ppg");
-        for sub in ["in", "tools", "tmp"] {
-            let dir = ppg.join(sub);
-            std::fs::create_dir_all(&dir).map_err(|e| Error::io(&dir, e))?;
-        }
-        for m in &job.inputs {
-            let name = ppg_name(&m.virtual_path)?;
-            let link = ppg.join("in").join(name);
-            std::os::unix::fs::symlink(&m.source, &link).map_err(|e| Error::io(&link, e))?;
-        }
-        for m in &job.tools {
-            let name = ppg_name(&m.virtual_path)?;
-            let link = ppg.join("tools").join(name);
-            std::os::unix::fs::symlink(&m.source, &link).map_err(|e| Error::io(&link, e))?;
-        }
-        std::fs::create_dir_all(&job.out_dir).map_err(|e| Error::io(&job.out_dir, e))?;
-        std::fs::create_dir_all(&job.log_dir).map_err(|e| Error::io(&job.log_dir, e))?;
-        let out_link = ppg.join("out");
-        std::os::unix::fs::symlink(&job.out_dir, &out_link).map_err(|e| Error::io(&out_link, e))?;
-        let log_link = ppg.join("log");
-        std::os::unix::fs::symlink(&job.log_dir, &log_link).map_err(|e| Error::io(&log_link, e))?;
-        Ok(work)
-    }
-
-    fn rewrite(s: &str, work: &Path) -> String {
-        let replacement = format!("{}/ppg/", work.display());
-        s.replace("/ppg/", &replacement)
-    }
 }
 
 impl Executor for NoneExecutor {
     fn run(&self, job: &PreparedJob) -> Result<ExecResult> {
         warn_once();
-        let work = self.build_layout(job)?;
+        let staged = stage(job, &self.work_parent)?;
 
-        if job.argv.is_empty() {
+        if staged.argv.is_empty() {
             return Err(Error::Other("PreparedJob.argv is empty".to_string()));
         }
-        let argv: Vec<String> = job
-            .argv
-            .iter()
-            .map(|s| Self::rewrite(s, &work))
-            .collect();
 
-        let mut env = job.env.clone();
-        env.entry("TMPDIR".to_string())
-            .or_insert_with(|| "/ppg/tmp".to_string());
-        env.entry("HOME".to_string())
-            .or_insert_with(|| "/ppg/tmp".to_string());
-        let env: BTreeMap<String, String> = env
-            .into_iter()
-            .map(|(k, v)| (k, Self::rewrite(&v, &work)))
-            .collect();
-
-        let cwd = if job.cwd_out {
-            work.join("ppg").join("out")
-        } else {
-            work.clone()
-        };
-
-        let mut cmd = Command::new(&argv[0]);
-        cmd.args(&argv[1..])
-            .current_dir(&cwd)
+        let mut cmd = Command::new(&staged.argv[0]);
+        cmd.args(&staged.argv[1..])
+            .current_dir(&staged.cwd)
             .env_clear()
-            .envs(&env)
+            .envs(&staged.env)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         let output = cmd
             .output()
-            .map_err(|e| Error::Other(format!("spawning {:?} failed: {e}", argv[0])))?;
+            .map_err(|e| Error::Other(format!("spawning {:?} failed: {e}", staged.argv[0])))?;
 
-        let stdout_path = job.log_dir.join("stdout.txt");
-        let stderr_path = job.log_dir.join("stderr.txt");
+        let stdout_path = staged.log_dir.join("stdout.txt");
+        let stderr_path = staged.log_dir.join("stderr.txt");
         write_log_file(&stdout_path, &output.stdout)?;
         write_log_file(&stderr_path, &output.stderr)?;
 
@@ -224,9 +281,7 @@ impl Executor for NoneExecutor {
             }
         });
 
-        if exit_code == 0 {
-            let _ = std::fs::remove_dir_all(&work);
-        }
+        finish(&staged, exit_code == 0);
 
         Ok(ExecResult {
             exit_code,
@@ -384,6 +439,7 @@ mod tests {
             log_dir: PathBuf::from("/store/logs/ik1/ts-host"),
             allow_network: false,
             cwd_out: true,
+            runtime: None,
         }
     }
 
@@ -529,6 +585,7 @@ mod tests {
             log_dir: work_log.to_path_buf(),
             allow_network: false,
             cwd_out: true,
+            runtime: None,
         }
     }
 
@@ -667,6 +724,7 @@ mod bwrap_integration {
             log_dir: log.path().to_path_buf(),
             allow_network: false,
             cwd_out: true,
+            runtime: None,
         };
         let exec = BwrapExecutor::new("bwrap");
         let result = exec.run(&job).unwrap();

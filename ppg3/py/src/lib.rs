@@ -11,6 +11,17 @@
 //! - `run(...)` takes an extra `work_dir: &str` fifth argument (the
 //!   [`NoneExecutor`] staging root) — not in CONTRACT.md's one-line
 //!   function list, needed to construct the executor.
+//! - `run(...)` takes a further additive, optional (`#[pyo3(signature =
+//!   (..., template_argv = Vec::new()))]`) sixth argument, `template_argv:
+//!   Vec<String>` (forkserver work package, see STATUS.md) — the template
+//!   start command (e.g. `[sys.executable, "-I", "-m", "ppg3._template"]`)
+//!   handed to [`ForkserverExecutor::new`]. `run()` now always constructs a
+//!   `ForkserverExecutor` (wrapping a plain `NoneExecutor` as its
+//!   `fallback`) instead of a bare `NoneExecutor`; an empty `template_argv`
+//!   (the default, and what `run.py` passes for `forkserver=False`) makes
+//!   `ForkserverExecutor` behave exactly like the old bare `NoneExecutor`
+//!   for every job — this is a behavior-preserving superset, not a
+//!   breaking change, for any caller that omits the new argument.
 //! - `lookup(...)` returns the manifest JSON with an extra top-level
 //!   `store_index` field spliced in (`#[serde(flatten)]` of the `Manifest`
 //!   plus `"store_index"`). CONTRACT.md's `ViewSpec`/`write_generation`
@@ -40,6 +51,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use ppg3_core::executor::NoneExecutor;
+use ppg3_core::forkserver::ForkserverExecutor;
 use ppg3_core::manifest::Manifest;
 use ppg3_core::scheduler::{self, HostCallbacks, JobDef};
 use ppg3_core::store::Store;
@@ -181,6 +193,7 @@ impl HostCallbacks for PyHostCallbacks {
 }
 
 #[pyfunction]
+#[pyo3(signature = (handle, jobs_json, parallelism_json, callbacks, work_dir, template_argv = Vec::new()))]
 fn run(
     py: Python<'_>,
     handle: &StoreSetHandle,
@@ -188,11 +201,21 @@ fn run(
     parallelism_json: &str,
     callbacks: PyObject,
     work_dir: &str,
+    template_argv: Vec<String>,
 ) -> PyResult<String> {
     let jobs: Vec<JobDef> = serde_json::from_str(jobs_json).map_err(to_pyerr)?;
     let parallelism: BTreeMap<String, u64> =
         serde_json::from_str(parallelism_json).map_err(to_pyerr)?;
-    let executor = NoneExecutor::new(PathBuf::from(work_dir));
+    let fallback = NoneExecutor::new(PathBuf::from(work_dir));
+    // Additive 6th argument (forkserver work package, see STATUS.md):
+    // `template_argv` — empty (the default, and what `run.py` passes when
+    // the caller opts out via `forkserver=False`) disables the forkserver
+    // entirely, so every job takes exactly the pre-existing `NoneExecutor`
+    // path; non-empty routes shim-shaped python jobs through warm template
+    // processes (`ppg3_core::forkserver::ForkserverExecutor`) while
+    // `CommandJob`s and non-shim argv still fall back to `NoneExecutor`
+    // unchanged.
+    let executor = ForkserverExecutor::new(PathBuf::from(work_dir), template_argv, fallback);
     let host_callbacks = PyHostCallbacks { callbacks };
     let abort = AtomicBool::new(false);
 

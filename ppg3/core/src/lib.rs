@@ -7,6 +7,7 @@ pub mod canon;
 pub mod error;
 pub mod executor;
 pub mod explain;
+pub mod forkserver;
 pub mod gc;
 pub mod hash;
 pub mod lease;
