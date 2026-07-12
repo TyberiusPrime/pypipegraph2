@@ -285,6 +285,17 @@ def run(
     if report.get("failed"):
         raise PPGRunError(RunResult(report, generation=None))
 
+    # §7.6 TOFU: after a successful run, patch (or table-print) the real
+    # hash for every FetchJob defined with blake3=None. Purely a
+    # post-run/reporting side effect — the run itself is already done and
+    # its store entry already published; patching only changes what the
+    # *next* definition pass reads (see tofu.py's module docstring). Import
+    # kept local to avoid `tofu` (which imports `libcst` lazily anyway)
+    # being on the hot import path for every `import ppg3`.
+    from . import tofu
+
+    tofu.run_tofu_pass(graph, report, core, handle)
+
     job_entries = report.get("job_entries", {})
     view_entries = []
     for job_id, job in graph.jobs.items():

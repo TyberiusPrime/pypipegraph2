@@ -31,10 +31,11 @@ things *did* need reconciling once `scheduler.rs` landed for real:
 from __future__ import annotations
 
 import base64
+import inspect
 import json
 import os
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from . import canon, recipe
 from .localscope import DefinitionError
@@ -662,8 +663,38 @@ class DataJob(FileJob):
 
 
 # --------------------------------------------------------------------------
-# FetchJob
+# FetchJob + TOFU call-site recording (§7.6)
 # --------------------------------------------------------------------------
+
+# Absolute directory of the `ppg3` package itself — used by `_record_call_site`
+# below to find the first stack frame *outside* the package, i.e. the user's
+# own call site, per §7.6's TOFU DECISION ("at definition time each FetchJob
+# records its call site (`inspect` — file, line)").
+_PKG_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _record_call_site() -> Optional[Tuple[str, int]]:
+    """Best-effort ``(file, lineno)`` of the first stack frame outside the
+    ``ppg3`` package, walking up from this function's caller (``FetchJob.
+    __init__``). Returns ``None`` if no such frame exists (e.g. called from
+    an interactive ``-c``/REPL frame with no real file, or the stack was
+    exhausted) — the TOFU pass (``tofu.py``) treats that as "cannot patch,
+    goes to the table" rather than erroring."""
+    frame = inspect.currentframe()
+    try:
+        if frame is None:  # pragma: no cover - not all Python impls have frames
+            return None
+        frame = frame.f_back  # the caller of _record_call_site (FetchJob.__init__)
+        while frame is not None:
+            filename = os.path.abspath(frame.f_code.co_filename)
+            if filename != _PKG_DIR and not filename.startswith(_PKG_DIR + os.sep):
+                if not os.path.isfile(filename):
+                    return None
+                return (filename, frame.f_lineno)
+            frame = frame.f_back
+        return None
+    finally:
+        del frame
 
 
 class FetchJob(Job):
@@ -687,13 +718,18 @@ class FetchJob(Job):
                 f"FetchJob(view={view!r}, url={url!r}): blake3=None is rejected "
                 "in --frozen mode (the default outside an interactive terminal, "
                 "or under CI). TOFU (trust-on-first-use, §7.6) is an interactive-"
-                "only escape hatch; the source-patching side of TOFU is not "
-                "implemented in this v1 (see STATUS.md) — pin the hash by hand."
+                "only escape hatch; --frozen never TOFUs — pin the hash by hand "
+                "or run interactively once to let ppg3 patch it in for you."
             )
         job_id = name or view
         super().__init__(graph, job_id, {self.OUTPUT_NAME: view})
         self.url = url
         self.blake3 = blake3
+        # §7.6 TOFU: recorded unconditionally (cheap), consumed only for
+        # jobs actually defined with blake3=None (see tofu.py). Multiple
+        # FetchJobs may share one call site (a loop over URLs) — detected
+        # later by `tofu.run_tofu_pass`'s grouping, not here.
+        self._call_site = _record_call_site()
         self.retain = retain if retain is not None else Retain.Default
         self.store = store
         python_env = graph.default_python

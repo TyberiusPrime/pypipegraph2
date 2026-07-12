@@ -10,7 +10,8 @@ requires-python = ">=3.9"
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest", "cloudpickle", "blake3"]
+tofu = ["libcst"]
+test = ["pytest", "cloudpickle", "blake3", "libcst"]
 
 [tool.maturin]
 manifest-path = "../py/Cargo.toml"

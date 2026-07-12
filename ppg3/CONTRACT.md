@@ -568,3 +568,56 @@ jobs.py}` (additive), `python/tests/test_watch.py` (new).
   global with a fresh `Graph`); guards against a script that skips or
   conditionally skips that call from silently reusing a stale graph and
   accumulating jobs across passes.
+
+## Additive addendum: TOFU source patcher (§7.6)
+
+Python-only, no Rust changes (`core/src/scheduler.rs`'s `derive_key` was
+read, not changed, to confirm it never consults `job.fixed_output` — the
+fact this WP's "second run is an all-hits re-run" guarantee depends on).
+New: `python/ppg3/tofu.py`, `python/tests/test_tofu.py`. Additive:
+`python/ppg3/jobs.py` (`FetchJob._call_site` + `_record_call_site()`),
+`python/ppg3/run.py` (one `tofu.run_tofu_pass(...)` call site),
+`python/pyproject.toml` (new `tofu` extra, `libcst` added to `test`).
+Full rationale for every design corner is in STATUS.md's "TOFU source
+patcher" entry; this section only records the resulting interface/shape.
+
+- **`FetchJob._call_site: Optional[Tuple[str, int]]`** — `(absolute file
+  path, 1-indexed line number)` of the first stack frame outside the
+  `ppg3` package at `FetchJob.__init__` time, or `None` if none has a real
+  on-disk file (e.g. `-c`/stdin/REPL). Recorded for every `FetchJob`
+  regardless of whether `blake3` was given.
+- **`ppg3.tofu.run_tofu_pass(graph, report, core, handle) -> None`** —
+  called by `run()` immediately after the existing `report.get("failed")`
+  check (i.e. only on a successful run). For every `FetchJob` in `graph`
+  with `blake3 is None`: resolves its actual output hash via
+  `report["job_entries"][job.id]` + `core.lookup(handle, ik)`, groups by
+  `_call_site`, and either patches (exactly one job at that site, `libcst`
+  importable) or appends to a printed fallback table (everything else:
+  shared call sites, unrecorded call sites, unpatchable sites, or `libcst`
+  missing entirely — in which case a stderr hint to `pip install
+  'ppg3[tofu]'` is also printed). Never raises on account of a missing
+  optional dependency or an unpatchable file; a genuine internal-invariant
+  violation (a `FetchJob`'s manifest content map not having exactly one
+  entry) still raises via a plain `assert`, deliberately not swallowed.
+- **Patch mechanism**: `libcst` (`MetadataWrapper` + `PositionProvider`) is
+  used only to locate the target `Call` node (matching on
+  `PositionProvider.start.line == recorded_lineno` and the callee's last
+  attribute segment / a same-file import-alias scan resolving to
+  `"FetchJob"`) and, within it, the `blake3=` keyword's value span (if
+  present) or the last argument's end position (if not). The edit itself
+  is a **plain string splice** at the resulting byte offsets — not a
+  libcst tree transform + codegen round-trip (empirically, libcst's
+  codegen does not reliably reproduce multi-line
+  `ParenthesizedWhitespace(indent=True)` indentation for a freshly-spliced
+  node — see STATUS.md). This guarantees "every other byte of the file is
+  untouched" by construction, not merely "libcst-preserved". Multiple
+  singleton call sites in one file are patched together (edits applied
+  right-to-left by offset in a single read-modify-write).
+- **Pin message** (stdout, one line per patched job): `pinned <view-path>
+  (<digest[:8]>…) in <file>:<lineno>`.
+- **Table fallback** (stdout, printed once per `run_tofu_pass` call if
+  any row remains unpatched): a header line, then one `  <url>\t<blake3>\t
+  (view=<view_path>)` line per unpatched job.
+- **`pyproject.toml`**: `[project.optional-dependencies]` gained `tofu =
+  ["libcst"]`; the existing `test` extra now also includes `libcst` so
+  `test_tofu.py` runs unconditionally in the dev venv.

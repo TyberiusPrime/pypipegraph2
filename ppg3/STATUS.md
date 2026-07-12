@@ -674,3 +674,168 @@ Totals after this WP: 180 Rust tests unchanged (no Rust touched;
 `--lib` only, the rest of the 180 lives in `core/tests/*` integration
 suites not run by that command) + 122 Python tests (101 prior + 21 new in
 `test_watch.py`), all green.
+
+## TOFU source patcher (§7.6, WP11-adjacent) — done
+
+Python-only (rule: touch only `python/ppg3/{jobs,run}.py`, new
+`python/ppg3/tofu.py`, `python/pyproject.toml`, new
+`python/tests/test_tofu.py`, this file, CONTRACT.md — no Rust, no
+`PPG3_DESIGN.md`). Picked up from the STATUS.md TODO left by the WP7-Rust
+pass ("TOFU source-patching (§7.6) is not implemented ... `FetchJob`
+accepts `blake3=None` outside `--frozen`/CI mode and simply carries
+`fixed_output: null`") — that half was already correct and untouched here;
+this WP adds the other half: call-site recording + the post-run patcher.
+
+**What changed:**
+
+- `jobs.py`: `FetchJob.__init__` now records `self._call_site = (file,
+  lineno)` via a new `_record_call_site()` helper — an `inspect`-based walk
+  up the stack to the first frame outside the `ppg3` package directory
+  (`_PKG_DIR`), returning `None` if none is found with a real on-disk file
+  (e.g. a `-c`/stdin/REPL frame). Recorded unconditionally (cheap — a few
+  frame hops), not just when `blake3=None`, since it costs nothing and
+  keeps the logic in one place. `--frozen` rejection of `blake3=None` is
+  unchanged (already implemented, already tested by
+  `test_fetchjob_frozen_mode_requires_blake3` in `test_jobs.py`, which
+  still passes untouched); the fixed_output/key-derivation shape it already
+  had (`fixed_output=None` for the unpinned case, recipe = `{"kind":
+  "fetch", "url": ...}` — no `blake3` in the recipe) also needed no
+  changes, which matters: `core/src/scheduler.rs`'s `derive_key` never
+  reads `job.fixed_output` (confirmed by reading it, not assumed), so
+  patching the hash in later never changes `ik` — the whole "second run is
+  an all-hits re-run" guarantee falls out of that for free.
+- New `python/ppg3/tofu.py`: `run_tofu_pass(graph, report, core, handle)`,
+  called from `run.py` right after the `report.get("failed")` check (i.e.
+  only on a successful run, per the DECISION text). For every `FetchJob`
+  with `blake3 is None`: reads `report["job_entries"][job.id]` for `(ik,
+  _oh)`, calls `core.lookup(handle, ik)`, asserts the manifest's `content`
+  map has exactly one entry (FetchJob always has exactly one output — the
+  task's own "assert that" instruction, kept as a hard assertion since a
+  violation would mean an internal invariant broke, not a normal
+  degrade-gracefully case) and takes its `blake3`. Groups by call site;
+  singleton sites get patched (libcst available) or tabled (not); shared
+  sites and sites with no recorded call-site always go straight to the
+  table. `libcst` import is inside a `try/except ImportError` — if missing,
+  every unpinned job goes to the table with a stderr hint to `pip install
+  'ppg3[tofu]'`; the run itself never fails on this account.
+- Patch mechanism (`tofu._patch_file`): libcst (`MetadataWrapper` +
+  `PositionProvider`) is used only to *locate* — the `Call` node(s)
+  starting on the recorded line whose callee's last name/attribute segment
+  is `FetchJob` (plus a same-line import-alias scan for `from ppg3 import
+  FetchJob as FJ`-style bare-name aliasing — attribute-form aliasing like
+  `import ppg3 as p; p.FetchJob(...)` needs no special-casing since the
+  attribute's own last segment is still literally `FetchJob`), and within
+  a match, the `blake3=` keyword arg's value span if present, or the last
+  argument's end position if not. The actual edit is a **plain string
+  splice** at those byte offsets (source split into lines once, a
+  cumulative-offset table converts libcst's 1-indexed-line/0-indexed-column
+  `CodePosition` into a flat offset) — not a libcst tree
+  transform-and-regenerate. This was a deliberate change of approach after
+  hand-verifying that libcst's `codegen` does not reliably reproduce
+  `ParenthesizedWhitespace(indent=True)` multi-line indentation when a
+  *new* node is spliced into an existing args list (empirically confirmed:
+  copying an existing trailing-comma `Comma` node's `whitespace_after`
+  verbatim onto a newly-appended `Arg` rendered flush-left instead of
+  matching the sibling indentation — a real codegen quirk, not a
+  misunderstanding of the API). Text-splicing sidesteps this entirely and
+  is strictly stronger for the "preserve exact formatting elsewhere"
+  requirement: it is by construction a no-op everywhere except the spliced
+  span, so "byte-diff only at the kwarg" holds for tabs/comments/any other
+  content without needing a dedicated formatting-preservation proof.
+  Multiple singleton call sites in the same file are patched in one
+  read-modify-write (edits applied right-to-left by offset so earlier
+  edits' offsets stay valid).
+- Multi-line calls ("kwargs on following lines, call starts at the recorded
+  line"): patched correctly (valid Python, correct kwarg value) but not
+  claimed byte-perfect on indentation — the new/replaced text lands
+  immediately after the last argument's value (before any existing
+  trailing comma), which for a no-trailing-comma multi-line call produces
+  e.g. `url="y", blake3="..."` on the last arg's own line rather than a
+  new indented line. Explicitly in scope per the task ("patched correctly"
+  is the multi-line bar, exact-text is only required for the single-line
+  case) — `test_patch_multiline_call_starting_at_recorded_line` and
+  `test_patch_multiline_no_trailing_comma` in `test_tofu.py` assert
+  validity + correct kwarg values via `ast.parse`, not exact text.
+- `run.py`: one new block right after the existing `if
+  report.get("failed"): raise ...` — `from . import tofu; tofu.
+  run_tofu_pass(graph, report, core, handle)`. Local import (not
+  module-level) so `tofu.py` (and its lazy `libcst` import) isn't on the
+  hot path for every `import ppg3`.
+- `_shim.py`: **no changes needed** — verified by reading `run_fetch()`:
+  `expected = fetch.get("blake3")` is already `None`-safe (`if expected is
+  not None and digest != expected`), the digest is always computed via
+  `_hash_file_blake3` and printed regardless, and it lands in the store
+  entry's manifest content the normal way (publish always hashes staged
+  files) — the coordinator's `run_tofu_pass` reads it back from there via
+  `core.lookup`, exactly as the task described. This matches the "Fix only
+  if broken" instruction: it wasn't.
+- `pyproject.toml`: added `[project.optional-dependencies] tofu =
+  ["libcst"]`, and added `libcst` to the existing `test` extra so
+  `test_tofu.py` runs unconditionally in the dev venv (installed via `uv
+  pip install libcst`, `libcst==1.8.6` at time of writing). No graceful
+  skip-marker was added for "libcst not installed" in `test_tofu.py`
+  (unlike `requires_blake3`/`requires_core`) since the `test` extra now
+  always pulls it in; the "libcst missing" *code path* itself is still
+  covered (`test_run_tofu_pass_libcst_missing_prints_table`, via a
+  monkeypatched `builtins.__import__` that only fails for `"libcst"`, not
+  by actually uninstalling it).
+
+**§7.6 corners interpreted (none change a DECISION, all pragmatic
+"how exactly" fills-ins the design text leaves open):**
+
+- "the Call node starting on that line": confirmed empirically (small
+  standalone script, not shipped) that CPython 3.11's `frame.f_lineno`
+  inside a class `__init__` called from a multi-line call site reports the
+  line where the call *starts* (e.g. `obj = Foo(` on line 9 of a call whose
+  args run lines 9-12), i.e. `_record_call_site()`'s `frame.f_lineno` and
+  libcst's `Call` node `PositionProvider.start.line` agree by construction
+  for this Python version — this is *why* matching on `node.start.line` is
+  correct and not a lucky guess, not just an assertion from the design
+  text.
+- Aliased bare-name imports (`from ppg3 import FetchJob as FJ`): resolved
+  via a one-off textual scan of the target file's `ImportFrom` statements
+  collecting every local name `FetchJob` is imported as, unioned with the
+  literal name `"FetchJob"` itself — deliberately not real import-graph
+  resolution (matches the task's own "resolve pragmatically" framing).
+  Does not attempt to detect *shadowing* (e.g. a local variable later
+  named `FetchJob` that isn't the ppg3 class) — out of scope, same spirit
+  as the attribute-segment rule already accepting `anything.FetchJob(...)`
+  without checking what `anything` actually is.
+- "FetchJob has exactly one output; assert that": implemented as a Python
+  `assert`, deliberately not a soft-degrade path — an unpinned `FetchJob`
+  publishing a manifest with anything other than exactly one content entry
+  would mean `FetchJob.job_def()`'s `outputs_declared=[OUTPUT_NAME]`
+  (singular, fixed) stopped matching what actually got published, which is
+  an internal-invariant violation, not a normal "TOFU can't figure out
+  what to do" case that should degrade to the table.
+- Watch-mode integration (patch triggers watcher re-run → all hits): not
+  added as an automated test. `python -m ppg3 watch` (`watch.py`) polls
+  tracked paths and reruns `runpy.run_path` on change (§6.7, done in an
+  earlier WP); since `run()` now unconditionally runs the TOFU pass on
+  success and the pinned-hash re-run is provably an all-hits run (same
+  `ik`, see above), the interaction should just work as a consequence of
+  two already-tested independent mechanisms rather than needing its own
+  proof — but a full subprocess-based watch e2e test (spawn `python -m
+  ppg3 watch`, wait for generation 1, mutate nothing itself but observe the
+  *patcher* mutate the watched script out from under the watcher, wait for
+  generation 2, assert all-hits) was judged not cheap enough to add
+  confidently non-flaky in the time available, matching the task's own
+  "skip if flaky, note in STATUS.md" allowance. The non-watch e2e test
+  (`test_e2e_tofu_pins_hash_then_second_run_is_all_hits`) covers the
+  all-hits-on-repin claim directly via two `runpy.run_path` calls instead.
+
+**Pin message format** (printed to stdout, one line per patched job):
+`pinned <view-path> (<digest[:8]>…) in <file>:<lineno>` — e.g. `pinned
+inputs/genome.fa.gz (ab12cd34…) in pipeline.py:42`, matching §7.6's own
+example modulo the task instructions' explicit "first 8 hex" (the design
+snippet elides after 4; the task text overrides that with 8, which is what
+is implemented and tested). Table fallback (unresolved jobs, printed once
+per `run_tofu_pass` call if non-empty): a header line ("could not
+auto-patch ... wire these into your own lookup ...") followed by one `  
+<url>\t<blake3>\t(view=<view_path>)` line per job.
+
+Totals after this WP: 180 Rust tests unchanged (no Rust touched this WP;
+`cargo test -p ppg3-core --lib` reconfirmed green: 121 passed, 1 ignored)
++ 145 Python tests (122 prior + 23 new in `test_tofu.py`), all green:
+`cd ppg3/python && source .venv/bin/activate && python -m pytest tests/ -q`
+→ `145 passed`.
