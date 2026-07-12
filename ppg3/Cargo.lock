@@ -402,6 +402,7 @@ version = "0.1.0"
 dependencies = [
  "ppg3-core",
  "pyo3",
+ "serde",
  "serde_json",
 ]
 

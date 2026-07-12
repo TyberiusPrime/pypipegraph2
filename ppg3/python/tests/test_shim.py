@@ -21,6 +21,22 @@ def run_shim(spec: dict, timeout=30):
     return proc
 
 
+def run_shim_argv(extra_argv: list, timeout=30):
+    """Drive the shim via the ``--spec-b64``/``--in``/``--out``/``--tool``
+    argv delivery form (see the module docstring in ``_shim.py`` and
+    STATUS.md "shim stdin question") instead of stdin — this is what
+    `jobs.py`'s `_shim_argv` actually emits for real jobs."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(PYTHON_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run(
+        [sys.executable, "-m", "ppg3._shim", *extra_argv],
+        capture_output=True,
+        timeout=timeout,
+        env=env,
+    )
+    return proc
+
+
 def test_shim_source_mode_writes_output(tmp_path):
     out_file = tmp_path / "out.txt"
     source = (
@@ -155,6 +171,47 @@ def test_shim_callback_exception_exits_nonzero(tmp_path):
     assert proc.returncode == 1
     assert b"ValueError" in proc.stderr
     assert b"boom" in proc.stderr
+
+
+def test_shim_argv_spec_b64_delivery_writes_output(tmp_path):
+    out_file = tmp_path / "out.txt"
+    source = (
+        "def run(io):\n"
+        "    with open(io.path('result'), 'w') as fh:\n"
+        "        fh.write('hello ' + str(io.params['n']))\n"
+    )
+    static_spec = {
+        "mode": "callback",
+        "transport": {"mode": "source", "source": source, "name": "run"},
+        "pickle_output": False,
+        "params": {"n": 3},
+    }
+    spec_b64 = base64.b64encode(json.dumps(static_spec).encode("utf-8")).decode("ascii")
+    proc = run_shim_argv(
+        [
+            "--spec-b64",
+            spec_b64,
+            "--out",
+            "result",
+            str(out_file),
+            "--log-dir",
+            str(tmp_path),
+        ]
+    )
+    assert proc.returncode == 0, proc.stderr.decode()
+    assert out_file.read_text() == "hello 3"
+
+
+@requires_blake3
+def test_shim_argv_spec_b64_fetch_mode(tmp_path):
+    src_file = tmp_path / "source_data.bin"
+    src_file.write_bytes(b"hello ppg3 fetch via argv")
+    out_file = tmp_path / "fetched.bin"
+    static_spec = {"mode": "fetch", "url": src_file.resolve().as_uri(), "blake3": None}
+    spec_b64 = base64.b64encode(json.dumps(static_spec).encode("utf-8")).decode("ascii")
+    proc = run_shim_argv(["--spec-b64", spec_b64, "--out", "file", str(out_file)])
+    assert proc.returncode == 0, proc.stderr.decode()
+    assert out_file.read_bytes() == b"hello ppg3 fetch via argv"
 
 
 @requires_blake3

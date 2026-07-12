@@ -38,13 +38,25 @@ opaque-file form — read straight off disk and execed, qualname looked up,
 localscope re-checked worker-side since the coordinator never parsed it,
 §6.6).
 
-Interface-gap note (see STATUS.md): CONTRACT.md's current ``PreparedJob``/
-``Executor`` Rust types (still placeholders as of this writing) have no
-explicit "spec on stdin" field. This shim assumes whatever hosts it (the
-``NoneExecutor``/bwrap runner, once written) pipes the JSON spec to the
-process's stdin, matching the CONTRACT.md prose literally; if the Rust side
-lands on a different delivery mechanism (e.g. a mounted spec file), only the
-``main()``/``_read_spec()`` functions here need to change.
+Shim spec delivery (CONTRACT.md addendum, resolved — see STATUS.md "shim
+stdin question"): the landed ``PreparedJob``/``Executor`` (``core/src/
+executor.rs``) has no stdin-piping and no spec-file field — argv/env are the
+only channels an ``Executor`` fills in. So `jobs.py` now delivers the spec
+via **argv**, not stdin: the static part (transport, params, pickle_output,
+or fetch url/hash — nothing path-shaped) travels as one base64 JSON blob
+(``--spec-b64``); every real/virtual path travels as its own argv token
+containing exactly one ``{in:NAME}``/``{out:NAME}``/``{tool:NAME}``
+placeholder (``--in NAME <path>`` / ``--out NAME <path>`` / ``--tool NAME
+<path>``, plus a bare ``--log-dir <path>``) — see `jobs.py`'s `_shim_argv`
+for why the paths can't just live inside the base64 blob (the scheduler's
+placeholder scanner and JSON's own `{`/`}` collide).
+
+Stdin delivery (the literal CONTRACT.md prose, "the shim reads a JSON job
+spec on stdin") is *also* still supported (`_read_spec`), both because it is
+simpler to unit-test standalone and because it is not actually wrong — it is
+just not what `jobs.py` uses now that the executor's real argv/env-only
+interface is known. `main()` prefers `--spec-b64` argv delivery when present,
+falling back to stdin otherwise.
 """
 
 from __future__ import annotations
@@ -55,16 +67,18 @@ import pickle
 import sys
 import traceback
 import urllib.request
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 # Kept as a local import so this module has zero required third-party deps
 # at import time; `io.py` itself is stdlib-only.
 from .io import JobIO
 
-# Duplicated from jobs.DataJob.OUTPUT_NAME (not imported — jobs.py pulls in
-# tools.py/transport.py, which is more than this worker-side module should
-# need to import just for a string constant).
+# Duplicated from jobs.DataJob.OUTPUT_NAME/FetchJob.OUTPUT_NAME (not
+# imported — jobs.py pulls in tools.py/transport.py, which is more than
+# this worker-side module should need to import just for two string
+# constants).
 DATA_PICKLE_NAME = "data.pickle"
+FETCH_OUTPUT_NAME = "file"
 
 
 class ShimError(RuntimeError):
@@ -205,11 +219,79 @@ def _read_spec() -> Dict[str, Any]:
     return json.loads(raw)
 
 
+def _parse_argv_spec(argv: List[str]) -> Optional[Dict[str, Any]]:
+    """Reconstruct the internal spec dict (same shape `run_callback`/
+    `run_fetch` expect from `_read_spec`) from the ``--spec-b64``/
+    ``--in``/``--out``/``--tool``/``--log-dir`` argv delivery form (see the
+    module docstring). Returns ``None`` (caller falls back to stdin) if
+    ``--spec-b64`` is not present at all.
+    """
+    if "--spec-b64" not in argv:
+        return None
+    spec_b64: Optional[str] = None
+    inputs: Dict[str, str] = {}
+    outputs: Dict[str, str] = {}
+    tools: Dict[str, str] = {}
+    log_dir = ""
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--spec-b64":
+            spec_b64 = argv[i + 1]
+            i += 2
+        elif tok == "--in":
+            inputs[argv[i + 1]] = argv[i + 2]
+            i += 3
+        elif tok == "--out":
+            outputs[argv[i + 1]] = argv[i + 2]
+            i += 3
+        elif tok == "--tool":
+            tools[argv[i + 1]] = argv[i + 2]
+            i += 3
+        elif tok == "--log-dir":
+            log_dir = argv[i + 1]
+            i += 2
+        else:
+            i += 1
+    if spec_b64 is None:
+        raise ShimError("--spec-b64 marker seen but no value found in argv")
+
+    static_spec = json.loads(base64.b64decode(spec_b64))
+    mode = static_spec.get("mode", "callback")
+    if mode == "fetch":
+        output_path = outputs.get(FETCH_OUTPUT_NAME)
+        if output_path is None and outputs:
+            output_path = next(iter(outputs.values()))
+        return {
+            "mode": "fetch",
+            "fetch": {
+                "url": static_spec["url"],
+                "blake3": static_spec.get("blake3"),
+                "output_path": output_path,
+            },
+        }
+    return {
+        "mode": "callback",
+        "transport": static_spec["transport"],
+        "io": {
+            "inputs": inputs,
+            "outputs": outputs,
+            "tools": tools,
+            "log_dir": log_dir,
+            "params": static_spec.get("params", {}),
+        },
+        "pickle_output": static_spec.get("pickle_output", False),
+    }
+
+
 def main(argv=None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else argv
     try:
-        spec = _read_spec()
+        spec = _parse_argv_spec(raw_argv)
+        if spec is None:
+            spec = _read_spec()
     except Exception as e:
-        sys.stderr.write(f"ppg3._shim: invalid JSON spec on stdin: {e}\n")
+        sys.stderr.write(f"ppg3._shim: invalid spec ({'argv' if '--spec-b64' in raw_argv else 'stdin'}): {e}\n")
         return 1
 
     mode = spec.get("mode", "callback")

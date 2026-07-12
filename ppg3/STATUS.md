@@ -283,20 +283,288 @@ in the test suite calls `ppg3.run()`).
   in every example shown; CommandJobs don't run through the shim and have
   no `PyEnv` to report.
 
-## TODO
-- Wire `run_in_process` (`UnsandboxedJob`) once the Rust scheduler's
-  `HostCallbacks` real-path-resolution shape is settled (see deviation
-  above).
-- Resolve the shim stdin-delivery interface gap with whichever agent
-  implements `core/src/executor.rs`.
-- Once `ppg3._core` exists: add `requires_core`-gated integration tests in
-  `python/tests/` that actually call `ppg3.run()` end-to-end (two-job
-  pipeline per CONTRACT.md's "Testing bar" smoke test), and confirm/adjust
-  the `InputRef`/`ExecTemplate`/`Retain` JSON-tagging assumption above
-  against the real Rust `#[derive(Serialize)]` output.
+## TODO (superseded — see "WP7-Rust/py-binding pass" below)
+- ~~Wire `run_in_process`...~~ partially done below (Leaf-only inputs).
+- ~~Resolve the shim stdin-delivery interface gap...~~ done below.
+- ~~Once `ppg3._core` exists: add `requires_core`-gated integration
+  tests...~~ done below (`python/tests/test_e2e.py`).
 - `ppg3 lint` (checking that `select_transport`'s recorded
   `localscope_modules` actually resolve inside a job's declared `PyEnv`) is
   not implemented — only the recording (via `LocalscopeReport.modules`) is
   in place, per CONTRACT.md's WP7 scope (the lint proper reads like a CLI
-  concern, WP5).
+  concern, WP5). Still open.
 - No `ppg3.repl()`/session-mode/watch support (WP11, explicitly deferred).
+  Still open.
+
+## WP7-Rust/py-binding pass (py/src/lib.rs, JobDef reconciliation, shim
+wiring, run.py completion, e2e) — done
+
+Picked up once `core/src/{scheduler,executor,views}.rs` had landed for
+real (WP7 above was written against placeholders). Scope: the PyO3
+extension crate, the remaining Python bridge/run wiring, serde-shape
+reconciliation against the real Rust types, and the end-to-end smoke test.
+`core/src/**` was treated as read-only (another agent was concurrently
+writing `core/tests/scheduler.rs`); **no core/src change was needed at
+all** (see "Shim spec delivery" below for why the originally-anticipated
+`PPG_ROOT` change turned out to be unnecessary).
+
+### A) `py/src/lib.rs` (crate `ppg3-py`, module `ppg3._core`)
+
+Implemented every function CONTRACT.md's "PyO3 boundary" lists —
+`input_key`, `canonicalize`, `blake3_file`, `blake3_hex`, `open_stores`,
+`lookup`, `run`, `write_generation` — plus the `StoreSetHandle` pyclass.
+Full rationale for the three additive extensions (`run`'s extra
+`work_dir` arg, `lookup`'s spliced-in `store_index`, the real 4-field
+`ViewEntry` wire shape for `write_generation`) is in the CONTRACT.md
+addendum added alongside this entry ("Addendum (WP7-Rust/py-binding
+pass)") — not duplicated here.
+
+`run()` calls `scheduler::run` inside `py.allow_threads(...)`; the two
+`HostCallbacks` methods (`PyHostCallbacks`) each re-acquire the GIL via
+`Python::with_gil` only for the duration of the single Python call — no
+scheduler worker thread holds the GIL otherwise, per §8.1 rule 1.
+
+Compiles clean: `cargo check -p ppg3-py` and `cargo clippy -p ppg3-py
+--all-targets` both zero-warning on first pass (pyo3 0.23's `Bound<'_,
+PyModule>`/`#[pyfunction]`/`&StoreSetHandle`-as-borrowed-argument APIs all
+worked as expected, no version-shim workarounds needed).
+
+### B) Reconciling `jobs.py` against the real `scheduler.rs`
+
+The placeholder-era assumption ("plain serde-default externally-tagged
+JSON") turned out to match exactly — `InputRef`/`ExecTemplate`/`Retain`
+needed **zero** changes. Two things genuinely needed fixing once the real
+`JobDef` was readable:
+
+- **`graph_job: bool`** — `scheduler.rs`'s module docs explain this is the
+  *only* field distinguishing a `GraphJob` (wants `expand_graph_job`) from
+  a plain `InProcess` loader-layer job (wants `run_in_process`); it has
+  `#[serde(default)]` so its absence was never a hard error, just silently
+  wrong routing. Every `Job.job_def()` now sets it explicitly
+  (`GraphJob` → `true`, everything else → `false`).
+- **Shim spec delivery** (below).
+
+### C) Shim spec delivery — resolved, no core change
+
+`core/src/executor.rs` landed with no stdin/spec-file channel at all —
+`PreparedJob` is strictly argv/env/Mounts, and `NoneExecutor` execs with
+`Stdio::null()` for the child's stdin. Two candidate fixes were on the
+table per the work brief: (a) an env var (`PPG_ROOT`) the shim could use
+to translate embedded `/ppg/...` paths itself, requiring a
+`core/src/executor.rs` change; (b) keep paths out of the opaque blob
+entirely. Went with (b) — **no core change needed**:
+
+- The static, non-path part of the spec (transport, `pickle_output`,
+  `Params`-typed input values, or `FetchJob`'s `url`/`blake3`) travels as
+  one `--spec-b64 <base64 JSON>` argv token.
+- Every real/virtual path travels as its own argv token pair (`--in NAME
+  <path>` / `--out NAME <path>` / `--tool NAME <path>`, plus a bare
+  `--log-dir <path>`), where `<path>` is *exactly* one `{in:NAME}`/
+  `{out:NAME}`/`{tool:NAME}` placeholder (`jobs.py`'s new `_shim_argv`).
+  `scheduler.rs`'s `lower_argv` resolves each of these to the job's real
+  virtual path, and `NoneExecutor`'s separate `/ppg/`-prefix string-rewrite
+  (already existing, unmodified) then turns that into the real staged
+  filesystem path — for free, no new machinery.
+- Embedding the placeholders *inside* the base64 JSON blob instead (the
+  first thing tried) does not work: traced `lower_token`'s scanner by
+  hand — it takes the **first** `{`...`}` pair in a token literally, so a
+  `{in:name}` placeholder nested inside JSON's own structural `{`/`}`
+  braces gets swallowed into one bogus non-matching token and echoed back
+  *unchanged* (silently un-resolved) rather than raising an error. One
+  placeholder per bare argv token sidesteps this collision entirely.
+- `_shim.py`'s `main()` now accepts **both** delivery forms: argv
+  (`--spec-b64`, preferred when present) and the original stdin form
+  (`_read_spec`, still fully functional and still what
+  `python/tests/test_shim.py`'s existing subprocess tests drive directly —
+  kept working both because it's simpler to unit-test standalone and
+  because CONTRACT.md's literal prose ("the shim reads a JSON job spec on
+  stdin") isn't wrong, it's just no longer what `jobs.py` uses to invoke
+  real jobs). Added two new argv-delivery-specific tests to
+  `test_shim.py` (`test_shim_argv_spec_b64_delivery_writes_output`,
+  `test_shim_argv_spec_b64_fetch_mode`).
+- `-I`/isolated-mode discovery finding, folded into the same investigation:
+  the work brief anticipated needing to set `env["PYTHONPATH"]` (a
+  documented "v1 wart" poisoning the key document with a host path) so
+  `python -I -m ppg3._shim` could find the `ppg3` package. Verified by
+  hand this is **not needed**: `-I` implies `-E` (ignore `PYTHON*` env
+  vars) and `-s` (no *user* site-packages), but does **not** imply `-S` —
+  the interpreter's own venv/site-packages (including a `.pth`-based
+  editable install, which is what `maturin develop` produces) is still on
+  `sys.path`. Confirmed empirically: `.venv/bin/python -I -m ppg3._shim`
+  imports `ppg3` fine with zero `PYTHONPATH`, as long as `ppg3` is actually
+  installed into the same venv `PyEnv.current()`'s `sys.executable` points
+  at (true by construction for the coordinator's own interpreter — it
+  already needs `ppg3` importable to call `ppg3.new()` at all). No
+  PYTHONPATH env var is set anywhere in `jobs.py`.
+
+### D) `run.py` + `_bridge.py`
+
+`run()` now: writes `.ppg3/config.json` (`{"stores": [...]}`, the shape
+`cli/src/config.rs` reads — confirmed by reading that file directly), lowers
+the graph (`graph.job_defs()` — leaf hashing via `StatCache`, tool
+resolution, transport payload construction were all already implemented by
+the original WP7 pass and needed no changes), calls `_core.open_stores`
+(bare-array shape) then `_core.run` with a `RunCallbacks` instance, and — 
+**only if `report["failed"]` is empty** — cross-references each job's
+`(ik, oh)` against `_core.lookup(handle, ik)` (for the `store_index` that
+isn't otherwise available on the Python side, see the CONTRACT.md addendum)
+to build a `ViewSpec` and calls `_core.write_generation`. On any failure,
+raises `PPGRunError(RunResult(report, generation=None))` — the view is left
+completely untouched, matching §11 "a generation is a consistent,
+all-or-nothing snapshot." `RunResult` exposes `.built`/`.hits`/`.failed`/
+`.job_entries`/`.generation`/`.raw`.
+
+`RunCallbacks.expand_graph_job` was already correct (just needed the
+`graph_job` fix above to actually get invoked). `RunCallbacks.
+run_in_process` (`UnsandboxedJob`) is now **partially** implemented rather
+than an unconditional `NotImplementedError`: it works for `UnsandboxedJob`s
+whose declared inputs are `File`/`Params` (leaf) refs only — a `File`'s
+real path is known host-side without any mount (leaf inputs are never
+mounted for *any* job kind, sandboxed or not: `resolve_placeholder`'s
+`Leaf` arm in `scheduler.rs` errors if an argv job even tries `{in:NAME}`
+on one), and a `Params` value is already known from `job.inputs` itself.
+A `Job`/`JobSubset`-typed input still raises `NotImplementedError` naming
+the gap — this is the real, unresolved limitation flagged by the original
+WP7 pass: `HostCallbacks::run_in_process(job_id, key_doc)` only carries the
+*declared* input hashes (from the key document), never resolved real
+filesystem paths, and `ExecTemplate::InProcess` jobs get no `PreparedJob`/
+mounts at all in `scheduler.rs`'s `dispatch_job` — that mapping is
+Rust-internal dispatch state with no PyO3-boundary exposure. Fixing this
+for real needs either a `HostCallbacks` signature change (out of scope: a
+core interface change, not "minimal", and no test in this pass exercises
+it) or a separate resolved-paths side-channel; left as `NotImplementedError`
+for the `Job`/`JobSubset` case, `TODO` below.
+
+### E) Build + test — exact commands
+
+```
+cd ppg3/python
+uv venv .venv                       # already existed in this tree
+source .venv/bin/activate
+uv pip install maturin cloudpickle blake3 pytest   # pytest was already present
+maturin develop                      # NOT `maturin develop --manifest-path ../py/Cargo.toml` — see wart below
+python -m pytest tests/ -q
+```
+
+**Wart — `maturin --manifest-path` picks the wrong project**: running
+`maturin develop --manifest-path ../py/Cargo.toml` (or `maturin build
+--manifest-path ...`) from `ppg3/python/` does **not** use
+`ppg3/python/pyproject.toml`. It instead walks up from the *Cargo
+manifest's own directory* (`ppg3/py/`, whose ancestors are `ppg3/py` →
+`ppg3` → the outer `pypipegraph2/` repo root) and finds
+`pypipegraph2/pyproject.toml` first (`ppg3/python/pyproject.toml` is a
+*sibling* of `ppg3/py/`, not an ancestor, so it's never reached this way).
+Symptom: `maturin develop --manifest-path ...` failed outright with `error:
+The dependency group 'dev' was not found in the project: pyproject.toml`
+(that dependency-groups table only exists in the outer repo's
+`pyproject.toml`); `maturin build --manifest-path ... -o dist` "succeeded"
+but silently built a wheel named `pypipegraph2-3.4.3-...whl` exporting
+`PyInit_pypipegraph2` — completely the wrong package, would have failed to
+import `ppg3._core` with a confusing error two steps later. **Fix**: run
+bare `maturin develop` / `maturin build -o dist` with cwd = `ppg3/python/`
+and *no* `--manifest-path` flag — maturin then reads
+`ppg3/python/pyproject.toml`'s own `manifest-path = "../py/Cargo.toml"` key
+and resolves correctly relative to *that* file's location. Confirmed this
+produces `ppg3-0.1.0-cp39-abi3-...whl` / a correctly-named editable install
+(`ppg3._core` imports and every function is present).
+
+**Result**: `cargo check -p ppg3-py` / `cargo clippy -p ppg3-py
+--all-targets` clean. `cargo check --workspace` clean (all four crates:
+`ppg3-core`, `ppg3-cli`, `ppg3-py`, plus the default members). `cargo test
+-p ppg3-core` could not be independently re-run to completion in this pass
+— the sibling agent editing `core/tests/scheduler.rs` had a live `cargo
+test -p ppg3-core --test scheduler` loop holding the shared `target/`
+build lock essentially continuously during this session's tail end; not
+re-attempted to avoid fighting that agent for the lock. `ppg3-core` itself
+is exercised transitively and heavily by every one of the 97 Python tests
+below (including three real end-to-end runs through the actual compiled
+scheduler/store/views code in `test_e2e.py`), which is strong indirect
+evidence it's sound; a direct `cargo test -p ppg3-core` re-run is still
+worth doing once that lock frees up.
+
+`cd ppg3/python && python -m pytest tests/ -q` → **97 passed, 0 skipped, 0
+failed** (blake3/cloudpickle/`ppg3._core` all present in this venv). The
+pre-existing 92 all still pass unmodified in behavior (the `graph_job`/
+shim-argv changes to `jobs.py` are additive fields / internal argv
+construction — no existing assertion touched them); +2 new `test_shim.py`
+cases for the argv `--spec-b64` delivery path, +3 new `test_e2e.py` cases.
+
+### `python/tests/test_e2e.py` — the CONTRACT.md "Testing bar" smoke test
+
+Gated entirely by `requires_core` (skipped, not failed, if the extension
+isn't built). Three cases, all passing against the real compiled
+extension:
+
+1. `test_e2e_two_job_pipeline_build_then_hit_then_param_flip` — exactly the
+   CONTRACT.md scenario: `CommandJob` (`/bin/sh -c "echo hello >
+   {out:greeting}"`) → `FileJob` python callback (reads the greeting,
+   writes an uppercased+param-suffixed summary). First run: `built ==
+   [greeting.txt, summary.txt]`, `hits == []`, `generation == 1`, real file
+   content verified through the `outputs/` view symlink tree. Second run
+   (fresh `Graph`, same project/store): `built == []`, `hits ==
+   [greeting.txt, summary.txt]`. Third run with a flipped `Params`: only
+   `summary.txt` rebuilds, `greeting.txt` hits. Fourth run flipping the
+   param back: all hits again (§12.3 oracle) — content matches the first
+   run's, confirming no drift/corruption from the rebuild-then-revert
+   cycle.
+2. `test_e2e_graphjob_expansion_runs_and_publishes` — a `GraphJob` whose
+   callback adds a `CommandJob` at dispatch time; confirms `expand_graph_job`
+   is actually invoked (this is exactly what the `graph_job` field fix in
+   (B) makes work — before that fix this test fails with the added job
+   never running, since the scheduler would call `run_in_process` on the
+   `GraphJob` itself instead) and the expanded job's output reaches the
+   view.
+3. `test_e2e_partial_failure_raises_and_leaves_view_untouched` — one
+   succeeding + one failing independent `CommandJob`; confirms
+   `PPGRunError` is raised, `result.generation is None`, and no `outputs/`
+   symlink is created at all (never having existed for this fresh
+   project) — i.e. a failed run truly leaves no view-level trace.
+
+**Wart discovered and worked around, documented in the test file itself**:
+`_make_graph`'s `FileJob` callback is a *module-level* function in
+`test_e2e.py`. With `PyEnv.current()` + `cloudpickle` installed (both true
+in this venv), `select_transport` picks the cloudpickle fast path — but
+cloudpickle pickles a module-level function **by reference** (module name +
+qualname) when it believes the defining module is importable, not by
+value. `test_e2e` *is* importable in the pytest parent process (pytest put
+it there) but is **not** importable in the cold `python -I` shim
+subprocess (isolated mode does not inherit pytest's rootdir `sys.path`
+insertion, and `test_e2e` isn't installed as a package) — so the subprocess
+raised `ModuleNotFoundError: No module named 'test_e2e'` trying to
+unpickle. Worked around in the test by passing `paranoid=True` to
+`ppg3.new(...)`, forcing the localscope-checked source-mode transport
+(which ships the actual source text, no by-reference module lookup). This
+is a **real, general limitation** of the cloudpickle same-env fast path as
+currently implemented, not just a test artifact: *any* job callback defined
+in a script's own top-level module (the common case for a real pipeline
+script, not just tests) will hit the same `ModuleNotFoundError` once it
+reaches the `-I` subprocess, unless that script also happens to be
+`pip install`ed as an importable package. Not fixed here (would mean
+either forcing `cloudpickle.register_pickle_by_value` process-globally in
+`transport.py`, a behavior change affecting every job regardless of
+paranoia, or detecting "is this module going to be importable from a fresh
+`-I` interpreter" some other way — both felt like they needed their own
+review rather than a fold-in here). Flagged as `TODO` below;
+`paranoid=True` is the correct, already-available user-facing mitigation
+today.
+
+## TODO (new, from this pass)
+- `RunCallbacks.run_in_process` still can't resolve `Job`/`JobSubset`-typed
+  inputs to real paths for `UnsandboxedJob` (see (D) above) — needs either
+  a `HostCallbacks` signature change surfacing resolved paths, or a
+  separate side-channel; out of scope for this pass (core interface
+  change).
+- Cloudpickle same-env transport pickles top-level-module functions **by
+  reference**, which breaks for any callback defined in a script's own
+  top-level module once it reaches the cold `-I` shim subprocess (that
+  module generally isn't importable there) — see the `test_e2e.py` wart
+  writeup above. `paranoid=True` is today's user-facing workaround;
+  consider forcing `cloudpickle.register_pickle_by_value` for the
+  defining module of same-env callbacks as a real fix.
+- No abort-flag wiring from Python (`py/src/lib.rs`'s `run()` always passes
+  a fresh, always-`false` `AtomicBool`) — see the CONTRACT.md addendum.
+- Re-run `cargo test -p ppg3-core` (and `-p ppg3-cli`, `-p ppg3-py` once it
+  has tests) to completion once the sibling agent's `core/tests/
+  scheduler.rs` work has released the shared `target/` build lock —
+  `cargo check --workspace` is clean but that's not a substitute for the
+  full suite.

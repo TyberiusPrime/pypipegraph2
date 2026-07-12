@@ -6,22 +6,35 @@ dict (destined for ``ppg3._core.run(jobs_json, ...)``); nothing here ever
 imports the compiled extension directly — leaf-file/tool hashing needs real
 I/O (stat-cache, optionally ``nix build``) but no Rust.
 
-Rust-serde shape note (deviation, see STATUS.md): CONTRACT.md gives the
-``InputRef``/``ExecTemplate``/``Retain`` Rust enum *shapes* but the core
-crate's scheduler/executor modules are still placeholders (no
-``#[serde(...)]`` attributes to check against). This module assumes plain
-serde-default *externally tagged* JSON for those enums (unit variants as
-bare strings, e.g. ``"InProcess"``/``"Default"``; struct/tuple variants as
-``{"VariantName": {...}}``/``{"VariantName": value}``). If the Rust side
-lands with different tagging, only the small `_retain_json`/exec_template/
-`_lower_input` helpers below need updating.
+Rust-serde shape note (reconciled against the real
+``core/src/scheduler.rs``, see STATUS.md): the assumption made while that
+module was still a placeholder — plain serde-default *externally tagged*
+JSON (unit variants as bare strings, e.g. ``"InProcess"``/``"Default"``;
+struct/tuple variants as ``{"VariantName": {...}}``/``{"VariantName":
+value}``) — turned out to match the landed Rust exactly, so
+`_retain_json`/`exec_template`/`_lower_input` below are unchanged. Two
+things *did* need reconciling once `scheduler.rs` landed for real:
+
+- ``JobDef.graph_job: bool`` (``#[serde(default)]`` in Rust, so its absence
+  was never a hard error, but a ``GraphJob`` that omits it is silently
+  treated as a plain ``InProcess`` "loader layer" job and gets
+  ``run_in_process`` called on it instead of ``expand_graph_job`` — every
+  ``job_def()`` below now sets it explicitly).
+- Shim spec delivery (see ``_shim_argv`` below and STATUS.md): resolved by
+  passing per-name real/virtual paths as individual argv tokens (each
+  containing exactly one ``{in:NAME}``/``{out:NAME}``/``{tool:NAME}``
+  placeholder, so the scheduler's naive first-``{``/first-``}`` token
+  scanner in ``lower_argv`` resolves them correctly) rather than embedding
+  paths inside the base64 spec blob.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import warnings
-from typing import Any, Callable, Dict, Optional, Sequence, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Union
 
 from . import canon, recipe
 from .localscope import DefinitionError
@@ -335,6 +348,64 @@ def _runtime_doc(python_env: Optional[PyEnv]) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------
+# Shim spec delivery (see module docstring + STATUS.md "shim stdin question")
+# --------------------------------------------------------------------------
+
+
+def _b64_json(obj: Any) -> str:
+    return base64.b64encode(json.dumps(obj, sort_keys=True).encode("utf-8")).decode("ascii")
+
+
+def _mounted_input_names(inputs: Dict[str, Any]) -> List[str]:
+    """Input names backed by a real mounted path (`{in:NAME}` resolves for
+    ``Job``/``JobSubset`` refs only — a `Leaf` ref has no mount and the
+    scheduler's `{in:NAME}` placeholder resolution errors the job if asked
+    for one, see `resolve_placeholder` in scheduler.rs)."""
+    return sorted(n for n, v in inputs.items() if isinstance(v, (Job, OutputRef)))
+
+
+def _leaf_params(inputs: Dict[str, Any]) -> Dict[str, Any]:
+    """``Params(...)``-typed inputs, canonicalized, keyed by input name —
+    what ends up as ``io.params`` inside the shim (§7.1)."""
+    return {n: v.canonical() for n, v in inputs.items() if isinstance(v, Params)}
+
+
+def _shim_argv(
+    python_env: PyEnv,
+    static_spec: Dict[str, Any],
+    mounted_inputs: Sequence[str],
+    output_names: Sequence[str],
+    tool_names: Sequence[str],
+) -> List[str]:
+    """Build the ``python -I -m ppg3._shim`` argv (CONTRACT.md addendum,
+    "Shim spec delivery"): the static part of the spec (transport, params,
+    pickle_output/fetch url+hash — no paths) travels as one base64 JSON
+    blob (``--spec-b64``); every real/virtual path travels as its own argv
+    token carrying exactly one ``{in:NAME}``/``{out:NAME}``/``{tool:NAME}``
+    placeholder so the scheduler's `lower_argv` (and, for `NoneExecutor`,
+    its `/ppg/` string-rewrite) can resolve it — embedding those
+    placeholders *inside* the JSON blob does not work, since `lower_argv`
+    scans for the first ``{``/``}`` pair in the whole token and JSON's own
+    structural braces collide with that (see STATUS.md for the trace)."""
+    argv = [
+        python_env.executable_hint(),
+        "-I",
+        "-m",
+        "ppg3._shim",
+        "--spec-b64",
+        _b64_json(static_spec),
+    ]
+    for name in mounted_inputs:
+        argv += ["--in", name, f"{{in:{name}}}"]
+    for name in output_names:
+        argv += ["--out", name, f"{{out:{name}}}"]
+    for name in tool_names:
+        argv += ["--tool", name, f"{{tool:{name}}}"]
+    argv += ["--log-dir", "/ppg/log"]
+    return argv
+
+
+# --------------------------------------------------------------------------
 # Job base
 # --------------------------------------------------------------------------
 
@@ -365,6 +436,8 @@ class Job:
 
 class FileJob(Job):
     kind = "file"
+    # Overridden to True by DataJob — see its class docstring.
+    _pickle_output = False
 
     def __init__(
         self,
@@ -408,6 +481,19 @@ class FileJob(Job):
         inputs_json = {
             n: _lower_input(n, v, graph) for n, v in self.inputs.items()
         }
+        static_spec = {
+            "mode": "callback",
+            "transport": self._transport["transport"],
+            "pickle_output": self._pickle_output,
+            "params": _leaf_params(self.inputs),
+        }
+        argv = _shim_argv(
+            self.python_env,
+            static_spec,
+            _mounted_input_names(self.inputs),
+            sorted(self.view.keys()),
+            [t.name for t in self.tools],
+        )
         return {
             "id": self.id,
             "recipe": self._transport["recipe"],
@@ -421,12 +507,13 @@ class FileJob(Job):
             "retain": _retain_json(self.retain),
             "exec_template": {
                 "Argv": {
-                    "argv": [self.python_env.executable_hint(), "-I", "-m", "ppg3._shim"],
+                    "argv": argv,
                     "allow_network": False,
                 }
             },
             "view": dict(self.view),
             "fixed_output": None,
+            "graph_job": False,
         }
 
 
@@ -488,6 +575,7 @@ class CommandJob(Job):
             },
             "view": dict(self.view),
             "fixed_output": None,
+            "graph_job": False,
         }
 
 
@@ -505,6 +593,7 @@ class DataJob(FileJob):
 
     kind = "data"
     OUTPUT_NAME = "data.pickle"
+    _pickle_output = True
 
     def __init__(self, view: Union[str, Dict[str, str]], run: Union[Callable, Source], **kwargs):
         if isinstance(view, str):
@@ -573,6 +662,8 @@ class FetchJob(Job):
         )
 
     def job_def(self, graph: Optional[Graph] = None) -> Dict[str, Any]:
+        static_spec = {"mode": "fetch", "url": self.url, "blake3": self.blake3}
+        argv = _shim_argv(self.python_env, static_spec, [], [self.OUTPUT_NAME], [])
         return {
             "id": self.id,
             "recipe": self._recipe,
@@ -586,12 +677,13 @@ class FetchJob(Job):
             "retain": _retain_json(self.retain),
             "exec_template": {
                 "Argv": {
-                    "argv": [self.python_env.executable_hint(), "-I", "-m", "ppg3._shim"],
+                    "argv": argv,
                     "allow_network": True,
                 }
             },
             "view": dict(self.view),
             "fixed_output": self.blake3,
+            "graph_job": False,
         }
 
 
@@ -631,6 +723,11 @@ class GraphJob(Job):
             "exec_template": "InProcess",
             "view": {},
             "fixed_output": None,
+            # The one JobDef field that actually distinguishes a GraphJob
+            # from a plain InProcess "loader layer" job (core/src/scheduler.rs
+            # module docs) — without this the scheduler calls
+            # `run_in_process` instead of `expand_graph_job`.
+            "graph_job": True,
         }
 
 
@@ -709,4 +806,5 @@ class UnsandboxedJob(Job):
             "exec_template": "InProcess",
             "view": dict(self.view),
             "fixed_output": None,
+            "graph_job": False,
         }

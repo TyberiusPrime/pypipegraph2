@@ -393,3 +393,82 @@ Python tests both consume the same files.
    with a one-line rationale.
 5. Leave the tree compiling and tests green; note anything unfinished in
    STATUS.md under "TODO".
+
+## Addendum (WP7-Rust/py-binding pass): PyO3 boundary + shim spec delivery
+
+Written once `core/src/{scheduler,executor,views}.rs` landed for real and
+`py/src/lib.rs` was implemented against them. Full rationale in STATUS.md;
+this section only records the resulting interface, since "extend, don't
+break" (rule 3 above) applies to the PyO3 boundary same as everywhere else.
+
+### `py/src/lib.rs` — additive over the original one-line sketch
+
+- `run(handle, jobs_json, parallelism_json, callbacks, work_dir) -> report_json`
+  takes a 5th argument, `work_dir: &str` — the root `NoneExecutor::new`
+  stages per-job work directories under. Not in the original sketch (which
+  predates `executor.rs`'s real `NoneExecutor::new(work_parent)` signature).
+- `lookup(handle, ik) -> Option<manifest_json>` — `manifest_json`, when
+  present, is the `Manifest` JSON with one extra top-level field spliced in:
+  `"store_index": <usize>` (the index into the `StoreSet` that `lookup`
+  walked, i.e. matching the index space `write_generation`'s `ViewSpec`
+  entries expect). Needed because `RunReport.job_entries` only carries
+  `(ik, oh)`, not *which* configured store the entry lives in, and that
+  index is otherwise purely Rust-internal (`StoreSet::lookup`'s return
+  value). An index is not a store entry path, so this stays inside "Python
+  never sees store entry paths except via manifest/report JSON."
+- `open_stores(config_json)` — `config_json` is the **bare JSON array**
+  `[{"name","path","readonly"}, ...]`, exactly as this section's original
+  one-liner already implied. This is a different, unrelated shape from
+  `.ppg3/config.json`'s `{"stores": [...]}` wrapper object (a CLI-only, WP5
+  concern documented separately above under "Additive clarification:
+  `--keep-generations` and `.ppg3/config.json`") — `ppg3.run()` (WP7,
+  python side) now writes *both* files/payloads from the same `Store` list,
+  each in its own required shape.
+- `write_generation(handle, project_dir, project_id, view_spec_json,
+  ephemeral) -> u64` — `view_spec_json` is `{"entries": [...]}` where each
+  entry is the real, 4-field `ViewEntry` shape from the "Views" section's
+  "Additive clarification (WP5)" above (`view_rel_path`, `oh`,
+  `path_within_entry`, `store_index`), **not** the original 3-tuple sketch.
+- No abort-flag plumbing in v1: `run()` constructs its own private
+  `AtomicBool` (always `false`) for the `scheduler::run` call every
+  invocation; there is currently no way for Python to request an abort
+  mid-run. `scheduler::run`'s `abort: &AtomicBool` parameter is otherwise
+  unused from the Python side.
+
+### Shim spec delivery (resolves the WP7 "interface gap" flagged for
+`core/src/executor.rs`'s implementer)
+
+`core/src/executor.rs` landed with **no stdin-piping and no spec-file
+field** — `PreparedJob` only carries `argv`/`env`/`inputs`/`tools` Mounts;
+`NoneExecutor` execs with `Stdio::null()` for stdin. So `python -I -m
+ppg3._shim` (`jobs.py`'s `FileJob`/`DataJob`/`FetchJob` argv, built by the
+new `_shim_argv` helper) receives its spec via **argv**, not stdin:
+
+- `--spec-b64 <base64 JSON>`: the static part of the spec — transport info,
+  `pickle_output`, `Params`-typed input values, or (`FetchJob`) `url`/
+  `blake3` — i.e. nothing path-shaped.
+- `--in NAME <path>` / `--out NAME <path>` / `--tool NAME <path>` (each
+  repeatable): one argv token pair per mounted input / declared output /
+  tool. The `<path>` value is always exactly one `{in:NAME}` / `{out:NAME}`
+  / `{tool:NAME}` placeholder token (see `resolve_placeholder` in
+  scheduler.rs) — **never** embedded inside the `--spec-b64` blob, because
+  `lower_argv`'s placeholder scanner finds the first `{`...`}` pair in a
+  token verbatim, and JSON's own structural braces inside a base64-decoded
+  string collide with that (confirmed by tracing `lower_token` — an
+  unmatched/malformed brace pair is echoed back unchanged, which silently
+  *skips* resolving a real placeholder nested inside it). One placeholder
+  per bare argv token sidesteps the collision entirely, and composes for
+  free with `NoneExecutor`'s separate `/ppg/`-prefix string-rewrite of the
+  now-resolved argv values.
+- `--log-dir <path>`: always the literal `/ppg/log` (a `NoneExecutor`
+  constant, not a `{...}` placeholder — no per-job resolution needed).
+- `_shim.py`'s `main()` prefers this argv form when `--spec-b64` is present
+  in `sys.argv`, else falls back to reading a spec from stdin (the literal
+  CONTRACT.md prose above, "the shim reads a JSON job spec on stdin" — kept
+  working, still exercised directly by `python/tests/test_shim.py`, just no
+  longer what `jobs.py` itself uses to invoke real jobs).
+
+This supersedes the originally-imagined fix (a `PPG_ROOT` env var for the
+shim to translate embedded `/ppg/...` paths itself): unnecessary, since
+paths never travel inside the opaque blob in the first place. **No
+`core/src/executor.rs` change was needed.**
