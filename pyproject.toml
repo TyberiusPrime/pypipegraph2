@@ -25,6 +25,7 @@ dependencies = [
 	"deepdiff>=8.0.0",
 	"filelock",
 	"lib_programname",
+	"libcst>=1.8.6",
 	"loguru",
 	# "localscope",
 	"networkx",
@@ -55,6 +56,7 @@ dev = [
 	{include-group = "test"},
 	"pre-commit",
 	"black",
+	"pytest>=9.1.0",
 ]
 
 # dppd, dppd-plotnine and pypipegraph only ship an sdist on PyPI and don't

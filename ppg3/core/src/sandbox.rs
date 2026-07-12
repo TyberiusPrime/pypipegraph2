@@ -10,11 +10,10 @@
 //!
 //! ## Scope of this implementation
 //!
-//! This container has neither user namespaces enabled in a way we can
-//! verify at build time, nor any way to *run* this code (no CI step here
-//! exercises unshare/pivot_root). Per the work-package brief: "a compiling,
-//! documented implementation is required but runtime testing is impossible
-//! in this container; correctness review will come later." Accordingly:
+//! Runtime-verified: `core/tests/sandbox_unshare.rs` drives the real
+//! unshare/pivot_root path via the `sandbox_helper` test binary (skips,
+//! not fails, where unprivileged user namespaces are unavailable).
+//! Remaining scope notes:
 //!
 //! - The real implementation lives behind `#[cfg(all(target_os = "linux",
 //!   feature = "linux-sandbox"))]` and is never compiled by the default
@@ -37,7 +36,9 @@
 
 use std::path::PathBuf;
 
+#[cfg(not(all(target_os = "linux", feature = "linux-sandbox")))]
 use crate::error::Error;
+#[cfg(not(all(target_os = "linux", feature = "linux-sandbox")))]
 use crate::Result;
 
 /// One bind mount to set up under the new root, relative to it (e.g.
@@ -76,10 +77,7 @@ mod imp {
     use std::ptr;
 
     fn errno_err(op: &str) -> Error {
-        Error::Other(format!(
-            "{op} failed: {}",
-            std::io::Error::last_os_error()
-        ))
+        Error::Other(format!("{op} failed: {}", std::io::Error::last_os_error()))
     }
 
     fn path_cstring(p: &Path) -> Result<CString> {
@@ -92,9 +90,13 @@ mod imp {
     /// further namespace operation that needs privilege inside the ns
     /// (mount, pivot_root). `setgroups` must be denied first: the kernel
     /// refuses an unprivileged write to `gid_map` otherwise.
-    unsafe fn write_uid_gid_maps() -> Result<()> {
-        let uid = libc::geteuid();
-        let gid = libc::getegid();
+    ///
+    /// `uid`/`gid` are the *parent-namespace* effective ids, captured
+    /// **before** `unshare(CLONE_NEWUSER)` — after it, `geteuid()` returns
+    /// the overflow id (65534, no mapping exists yet), and writing
+    /// `0 65534 1` fails with EPERM because 65534 is not the creator's
+    /// parent-ns euid (verified at runtime; this was a real bug).
+    unsafe fn write_uid_gid_maps(uid: libc::uid_t, gid: libc::gid_t) -> Result<()> {
         std::fs::write("/proc/self/setgroups", b"deny")
             .map_err(|e| Error::io("/proc/self/setgroups", e))?;
         std::fs::write("/proc/self/uid_map", format!("0 {uid} 1\n"))
@@ -107,21 +109,43 @@ mod imp {
     unsafe fn bind_mount(source: &Path, target: &Path, read_only: bool) -> Result<()> {
         let src = path_cstring(source)?;
         let dst = path_cstring(target)?;
-        if libc::mount(src.as_ptr(), dst.as_ptr(), ptr::null(), libc::MS_BIND, ptr::null()) != 0 {
+        if libc::mount(
+            src.as_ptr(),
+            dst.as_ptr(),
+            ptr::null(),
+            libc::MS_BIND,
+            ptr::null(),
+        ) != 0
+        {
             return Err(errno_err(&format!("bind mount {source:?} -> {target:?}")));
         }
         if read_only {
             // A read-only bind mount needs a remount pass: MS_BIND alone
             // ignores MS_RDONLY on the initial call (long-standing Linux
-            // mount(2) quirk).
-            if libc::mount(
-                ptr::null(),
-                dst.as_ptr(),
-                ptr::null(),
-                libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY,
-                ptr::null(),
-            ) != 0
-            {
+            // mount(2) quirk). The remount must also carry over the mount
+            // flags the bind inherited from its source (nosuid, nodev,
+            // atime modes, ...): inside a user namespace those flags are
+            // *locked*, and a remount that would drop any of them fails
+            // with EPERM (verified at runtime; this was a real bug).
+            let mut flags = libc::MS_BIND | libc::MS_REMOUNT | libc::MS_RDONLY;
+            let mut st: libc::statvfs = std::mem::zeroed();
+            if libc::statvfs(dst.as_ptr(), &mut st) == 0 {
+                for (st_flag, ms_flag) in [
+                    (libc::ST_NOSUID, libc::MS_NOSUID),
+                    (libc::ST_NODEV, libc::MS_NODEV),
+                    (libc::ST_NOEXEC, libc::MS_NOEXEC),
+                    (libc::ST_NOATIME, libc::MS_NOATIME),
+                    (libc::ST_NODIRATIME, libc::MS_NODIRATIME),
+                    (libc::ST_RELATIME, libc::MS_RELATIME),
+                    (libc::ST_SYNCHRONOUS, libc::MS_SYNCHRONOUS),
+                    (libc::ST_MANDLOCK, libc::MS_MANDLOCK),
+                ] {
+                    if st.f_flag & st_flag != 0 {
+                        flags |= ms_flag;
+                    }
+                }
+            }
+            if libc::mount(ptr::null(), dst.as_ptr(), ptr::null(), flags, ptr::null()) != 0 {
                 return Err(errno_err(&format!("ro-remount {target:?}")));
             }
         }
@@ -144,6 +168,9 @@ mod imp {
     /// child process for this one job.
     pub fn enter_sandbox(layout: &SandboxLayout) -> Result<()> {
         unsafe {
+            // Must be read before unshare — see write_uid_gid_maps.
+            let uid = libc::geteuid();
+            let gid = libc::getegid();
             let mut flags = libc::CLONE_NEWUSER | libc::CLONE_NEWNS;
             if !layout.allow_network {
                 flags |= libc::CLONE_NEWNET;
@@ -151,7 +178,7 @@ mod imp {
             if libc::unshare(flags) != 0 {
                 return Err(errno_err("unshare"));
             }
-            write_uid_gid_maps()?;
+            write_uid_gid_maps(uid, gid)?;
 
             // Stop mount events propagating back to the host mount ns
             // before we start bind-mounting things.
@@ -184,7 +211,11 @@ mod imp {
             std::fs::create_dir_all(&old_root).map_err(|e| Error::io(&old_root, e))?;
             let new_root_c = path_cstring(&layout.new_root)?;
             let old_root_c = path_cstring(&old_root)?;
-            let ret = libc::syscall(libc::SYS_pivot_root, new_root_c.as_ptr(), old_root_c.as_ptr());
+            let ret = libc::syscall(
+                libc::SYS_pivot_root,
+                new_root_c.as_ptr(),
+                old_root_c.as_ptr(),
+            );
             if ret != 0 {
                 return Err(errno_err("pivot_root"));
             }
@@ -222,7 +253,12 @@ pub fn enter_sandbox(_layout: &SandboxLayout) -> Result<()> {
     ))
 }
 
-#[cfg(test)]
+// The real runtime exercise of `enter_sandbox` lives in
+// `core/tests/sandbox_unshare.rs` (feature `linux-sandbox`), driving the
+// single-threaded `sandbox_helper` binary — `unshare(CLONE_NEWUSER)`
+// cannot be called from the multi-threaded test harness, and a successful
+// `pivot_root` would hijack the harness process.
+#[cfg(all(test, not(all(target_os = "linux", feature = "linux-sandbox"))))]
 mod tests {
     use super::*;
 
@@ -230,57 +266,16 @@ mod tests {
     fn stub_without_feature_returns_documented_error() {
         // This test runs under the default (no linux-sandbox feature)
         // build, which is what `cargo test -p ppg3-core` exercises.
-        #[cfg(not(all(target_os = "linux", feature = "linux-sandbox")))]
-        {
-            let layout = SandboxLayout {
-                new_root: PathBuf::from("/nonexistent"),
-                mounts: vec![],
-                chdir: PathBuf::from("/"),
-                allow_network: false,
-            };
-            let err = enter_sandbox(&layout).unwrap_err();
-            match err {
-                Error::Other(msg) => assert!(msg.contains("linux-sandbox feature not enabled")),
-                other => panic!("unexpected error variant: {other:?}"),
-            }
-        }
-    }
-
-    /// Documents how to actually exercise `enter_sandbox` — impossible in
-    /// this container (no privilege to create user namespaces reliably /
-    /// no way to assert on the result of a `pivot_root`'d child from a
-    /// test harness). To run manually on a Linux box with unprivileged
-    /// user namespaces enabled (`sysctl kernel.unprivileged_userns_clone`
-    /// or equivalent distro knob):
-    ///
-    /// 1. `cargo test -p ppg3-core --features linux-sandbox
-    ///    sandbox::tests::manual_enter_sandbox_smoke -- --ignored --nocapture`
-    /// 2. Populate a scratch dir with `in/`, `tools/`, `out/`, `log/`
-    ///    subdirectories containing marker files.
-    /// 3. Fork (e.g. via `libc::fork` in the test, or run this as a
-    ///    subprocess) *before* calling `enter_sandbox` — it mutates the
-    ///    calling process' namespaces irreversibly.
-    /// 4. After `enter_sandbox` returns `Ok`, assert: `/ppg/in/...` marker
-    ///    files are readable; a write to `/ppg/in/...` fails with EROFS;
-    ///    a path outside the declared mounts (e.g. `/etc/passwd` outside
-    ///    any bind) is ENOENT; `ip link` (if available) shows only `lo`
-    ///    when `allow_network: false`.
-    #[test]
-    #[ignore = "requires unprivileged user namespaces and a forked child; see doc comment"]
-    fn manual_enter_sandbox_smoke() {
-        #[cfg(all(target_os = "linux", feature = "linux-sandbox"))]
-        {
-            let dir = tempfile::tempdir().unwrap();
-            let layout = SandboxLayout {
-                new_root: dir.path().to_path_buf(),
-                mounts: vec![],
-                chdir: PathBuf::from("/"),
-                allow_network: false,
-            };
-            // Deliberately not forked: running this for real in-process
-            // would pivot_root the test harness itself. Left as a
-            // documented manual step (see doc comment above).
-            let _ = enter_sandbox(&layout);
+        let layout = SandboxLayout {
+            new_root: PathBuf::from("/nonexistent"),
+            mounts: vec![],
+            chdir: PathBuf::from("/"),
+            allow_network: false,
+        };
+        let err = enter_sandbox(&layout).unwrap_err();
+        match err {
+            Error::Other(msg) => assert!(msg.contains("linux-sandbox feature not enabled")),
+            other => panic!("unexpected error variant: {other:?}"),
         }
     }
 }
