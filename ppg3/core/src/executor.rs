@@ -419,10 +419,8 @@ mod tests {
         let job = sample_job();
         let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
         let joined = argv.join("\u{1}");
-        assert!(joined.contains(&format!(
-            "--ro-bind\u{1}/store/entries/aaa/data\u{1}/ppg/in/data"
-        )));
-        assert!(joined.contains(&format!("--ro-bind\u{1}/usr/bin\u{1}/ppg/tools/py")));
+        assert!(joined.contains(&"--ro-bind\u{1}/store/entries/aaa/data\u{1}/ppg/in/data".to_string()));
+        assert!(joined.contains(&"--ro-bind\u{1}/usr/bin\u{1}/ppg/tools/py".to_string()));
     }
 
     #[test]

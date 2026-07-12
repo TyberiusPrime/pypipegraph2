@@ -336,7 +336,6 @@ enum Status {
 
 #[derive(Clone)]
 struct CompletedInfo {
-    ik: String,
     oh: String,
     content: ContentMap,
     store_idx: usize,
@@ -693,7 +692,7 @@ fn apply_outcome(shared: &Shared, state: &mut State, id: &str, outcome: JobOutco
             if let Some(lease) = &shared.run_lease {
                 let _ = lease.protect(&oh);
             }
-            state.completed.insert(id.to_string(), CompletedInfo { ik, oh, content, store_idx });
+            state.completed.insert(id.to_string(), CompletedInfo { oh, content, store_idx });
             complete_success(state, id);
         }
         JobOutcome::Built { ik, oh, content, store_idx } => {
@@ -702,7 +701,7 @@ fn apply_outcome(shared: &Shared, state: &mut State, id: &str, outcome: JobOutco
             if let Some(lease) = &shared.run_lease {
                 let _ = lease.protect(&oh);
             }
-            state.completed.insert(id.to_string(), CompletedInfo { ik, oh, content, store_idx });
+            state.completed.insert(id.to_string(), CompletedInfo { oh, content, store_idx });
             complete_success(state, id);
         }
         JobOutcome::InProcessDone => {
@@ -1074,7 +1073,7 @@ mod tests {
         let mut m = HashMap::new();
         m.insert(
             id.to_string(),
-            CompletedInfo { ik: "ik".to_string(), oh: "oh".to_string(), content, store_idx: 0 },
+            CompletedInfo { oh: "oh".to_string(), content, store_idx: 0 },
         );
         m
     }
