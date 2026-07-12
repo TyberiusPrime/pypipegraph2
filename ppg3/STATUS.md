@@ -673,9 +673,79 @@ is POSIX-guaranteed) — was failing here before any sandbox work. Now
   under bwrap — their FHS library closure isn't mounted and `PreparedJob`
   has no vocabulary for it. Nix-sourced tools are the supported bwrap
   path; the integration tests skip if `/bin/sh` isn't nix-sourced.
-- Whole-store `/nix/store` bind is coarser than the per-closure ideal
-  (hermeticity: a job can read store paths it didn't declare; it cannot
-  write anything). Refine via `nix path-info -r` at tool-resolution time
-  if that matters for §5 key-document honesty.
+- ~~Whole-store `/nix/store` bind is coarser than the per-closure ideal~~
+  — done in the "Hermeticity pass" below.
 - `enter_sandbox` still lacks the PID-namespace second fork (pre-existing,
   documented in `sandbox.rs` module docs; forkserver-scoped).
+
+## Hermeticity pass (nix closure binds in BwrapExecutor) — done
+
+Follow-up to the sandbox-verification pass, per coordinator instruction:
+"we want hermeticity, so query nix when building the sandbox; assume the
+python binary is also a nixified env processed through the same path."
+Replaces the whole-`/nix/store` ro-bind with exactly the queried
+dependency closure of what the job declares. Files touched:
+`core/src/executor.rs` only (+ a CONTRACT.md addendum for the signature
+change).
+
+### What changed
+
+- `bwrap_argv(job, bwrap)` → `bwrap_argv(job, bwrap, nix_closure:
+  &BTreeSet<PathBuf>)`; each closure path is `--ro-bind p p`; the whole
+  store is never bound. Still a pure function (no nix subprocess inside),
+  so the security-relevant argv stays fully unit-testable — the closure
+  is computed by the caller (`BwrapExecutor::run`).
+- New `nix_roots(job)`: every `/nix/store` path the job references —
+  tool mount sources, argv tokens, env values — truncated to the
+  `/nix/store/<component>` root (`store_path_root`). Scanning argv is
+  what makes the nixified-python-env case work with **no separate
+  mechanism**: python jobs exec `<pyenv-store-path>/bin/python3` directly
+  as `argv[0]`, which is picked up as a root like any other nix tool
+  (verified end-to-end by hand with a real `python3-env` store path: 65
+  closure paths, `python -c` writing to `/ppg/out` succeeds).
+- New `nix_closure(roots)`: `nix-store --query --requisites <root>`
+  per root, process-globally cached (jobs overwhelmingly share the same
+  few tool roots — one nix spawn per distinct root per process, not per
+  job). Errors loudly (no silent whole-store fallback) if nix is missing
+  or the query fails: without the closure, a *hermetic* sandbox cannot be
+  built, and failing beats quietly widening the bind set.
+  `nix-store -qR` also accepts paths *inside* a store object (verified),
+  but roots are canonicalized anyway for cache-key dedup.
+- `nix-store` (classic CLI) chosen over `nix path-info -r` deliberately:
+  it needs no experimental-features flag.
+
+### Tests
+
+- Unit (4 new/rewritten): closure paths each self-bound after tool
+  mounts + whole-store bind asserted *absent*; empty closure ⇒ no store
+  binds; `store_path_root` truncation; `nix_roots` collecting
+  tools/argv/env (including the `pyenv.../bin/python3` shape).
+- Integration (2 new, on top of the existing 4, all passing here for
+  real): **hermeticity** — a store path present on the host but outside
+  the declared closure (bwrap's own package) is invisible inside the
+  sandbox; **argv[0]-direct** — a job whose argv[0] is a raw nix store
+  binary with *no* tool mount at all runs successfully (the python-job
+  shape). `setup()` now also probes `nix_closure` and skips (not fails)
+  without a working nix, per the CONTRACT.md testing bar.
+
+### Results
+
+`cargo test -p ppg3-core` → **165 green** (default) and **165 green**
+(`--features linux-sandbox`); `cargo clippy --all-targets` clean in both
+configs; `cargo check -p ppg3-cli` clean; touched file rustfmt'd.
+
+### TODO (updated)
+
+- Executor selection still hardwired to `NoneExecutor` in `py/src/lib.rs`
+  (unchanged from the previous pass). The remaining blocker is smaller
+  now: a python job whose `PyEnv` resolves to a nix store path needs
+  *only* its `sys.executable`-equivalent argv[0] to be that store path —
+  the closure machinery here picks it up automatically. What's left is
+  the python-side lowering (`jobs.py` currently uses the coordinator's
+  own `sys.executable`) plus the `sandbox="bwrap"|"none"` config knob and
+  scheduler-side executor construction.
+- Fixed-output (`allow_network`) jobs share the same closure logic; no
+  special-casing was needed.
+- The closure cache never invalidates (fine: store paths are immutable;
+  a GC'd-mid-run store path would fail at bind time with a clear bwrap
+  error).

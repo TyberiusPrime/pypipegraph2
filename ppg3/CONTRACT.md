@@ -472,3 +472,28 @@ This supersedes the originally-imagined fix (a `PPG_ROOT` env var for the
 shim to translate embedded `/ppg/...` paths itself): unnecessary, since
 paths never travel inside the opaque blob in the first place. **No
 `core/src/executor.rs` change was needed.**
+
+## Addendum (sandbox-verification pass): `bwrap_argv` takes the nix closure
+
+`pub fn bwrap_argv(job, bwrap)` (Executor section above) is now
+
+```rust
+pub fn bwrap_argv(job: &PreparedJob, bwrap: &Path,
+                  nix_closure: &BTreeSet<PathBuf>) -> Vec<String>;
+// plus the helpers BwrapExecutor uses to fill that parameter:
+pub fn nix_roots(job: &PreparedJob) -> BTreeSet<PathBuf>;
+pub fn nix_closure(roots: &BTreeSet<PathBuf>) -> Result<BTreeSet<PathBuf>>;
+```
+
+Rationale (full story in STATUS.md "Hermeticity pass"): a nix tool's
+dependency closure (ld-linux, libc, ...) lives in *other* store paths, so
+some closure-shaped bind set is required for any nix binary to run at all;
+binding the whole `/nix/store` works but is not hermetic. `nix_roots`
+collects every `/nix/store` path a job references (tool mount sources +
+argv tokens + env values — the latter two are how a nixified python env
+exec'd directly as `argv[0]` is picked up); `nix_closure` resolves them
+via `nix-store --query --requisites` (per-root, process-cached) and
+errors loudly without a working nix. Keeping the closure a *parameter* of
+`bwrap_argv` keeps it a pure, unit-testable function per the original
+contract line; only `BwrapExecutor::run` spawns the query. `NoneExecutor`
+is unaffected (no enforcement, no binds).

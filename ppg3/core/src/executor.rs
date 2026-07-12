@@ -27,7 +27,7 @@
 //! meaningful. Adding `PPG_ROOT` would break that invariant for no
 //! contract-mandated reason, so it is omitted here. See STATUS.md.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -244,7 +244,15 @@ fn write_log_file(path: &Path, bytes: &[u8]) -> Result<()> {
 /// `bwrap`'s own path). No process is spawned — this makes the
 /// (security-relevant) argv construction fully unit-testable without
 /// `bwrap` installed.
-pub fn bwrap_argv(job: &PreparedJob, bwrap: &Path) -> Vec<String> {
+///
+/// `nix_closure` is the full set of `/nix/store` paths the job may see,
+/// each bound read-only at its real path (nix binaries hardcode
+/// `/nix/store/...` — not just their own store path but their whole
+/// dependency closure: ld-linux, libc, ...). The caller computes it via
+/// [`nix_closure`] over [`nix_roots`]; keeping it a parameter keeps this
+/// function pure (no `nix` subprocess) and the bind set hermetic —
+/// exactly the declared closure, never the whole store.
+pub fn bwrap_argv(job: &PreparedJob, bwrap: &Path, nix_closure: &BTreeSet<PathBuf>) -> Vec<String> {
     let mut argv = Vec::new();
     argv.push(bwrap.to_string_lossy().into_owned());
     argv.push("--unshare-all".to_string());
@@ -257,22 +265,15 @@ pub fn bwrap_argv(job: &PreparedJob, bwrap: &Path) -> Vec<String> {
         argv.push(m.source.to_string_lossy().into_owned());
         argv.push(m.virtual_path.clone());
     }
-    let mut any_nix_tool = false;
     for m in &job.tools {
         argv.push("--ro-bind".to_string());
         argv.push(m.source.to_string_lossy().into_owned());
         argv.push(m.virtual_path.clone());
-        any_nix_tool |= m.source.starts_with("/nix/store");
     }
-    // Nix binaries hardcode /nix/store paths (§6.1) — not just their own
-    // store path but their whole dependency closure (ld-linux, libc, ...),
-    // which is not enumerable from the Mount alone. Binding only the
-    // tool's own path fails at execvp (verified: the ELF interpreter
-    // lives in a different store path). Bind the whole store read-only.
-    if any_nix_tool {
+    for p in nix_closure {
         argv.push("--ro-bind".to_string());
-        argv.push("/nix/store".to_string());
-        argv.push("/nix/store".to_string());
+        argv.push(p.to_string_lossy().into_owned());
+        argv.push(p.to_string_lossy().into_owned());
     }
     // /ppg/{in,tools} must exist even for jobs with no inputs/tools so the
     // virtual layout is uniform across executors (NoneExecutor always
@@ -318,6 +319,91 @@ pub fn bwrap_argv(job: &PreparedJob, bwrap: &Path) -> Vec<String> {
     argv
 }
 
+// ------------------------------------------------------- nix closure ---
+
+/// The `/nix/store/<component>` prefix of `p`, if `p` points into the nix
+/// store. `/nix/store/abc-env/bin/python3` → `/nix/store/abc-env`
+/// (canonical cache key; `nix-store -qR` accepts inner paths too, but
+/// keying on the root dedups every path inside the same store object).
+fn store_path_root(p: &Path) -> Option<PathBuf> {
+    let rest = p.strip_prefix("/nix/store").ok()?;
+    let first = rest.components().next()?;
+    Some(Path::new("/nix/store").join(first))
+}
+
+/// Every nix store path a job references: tool mount sources, argv tokens
+/// and env values that are `/nix/store/...` paths. Python jobs exec their
+/// nixified interpreter env directly as `argv[0]` — picked up here like
+/// any other nix tool, no separate mechanism.
+pub fn nix_roots(job: &PreparedJob) -> BTreeSet<PathBuf> {
+    let mut roots = BTreeSet::new();
+    for m in &job.tools {
+        if let Some(root) = store_path_root(&m.source) {
+            roots.insert(root);
+        }
+    }
+    for s in job.argv.iter().chain(job.env.values()) {
+        if let Some(root) = store_path_root(Path::new(s)) {
+            roots.insert(root);
+        }
+    }
+    roots
+}
+
+static NIX_CLOSURE_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Arc<BTreeSet<PathBuf>>>>,
+> = std::sync::OnceLock::new();
+
+/// The union of the runtime dependency closures of `roots`, queried via
+/// `nix-store --query --requisites` (per-root, process-globally cached —
+/// jobs overwhelmingly share the same few tool roots). Requires a working
+/// nix installation; errors loudly otherwise, because without the closure
+/// a hermetic bwrap sandbox cannot be built at all.
+pub fn nix_closure(roots: &BTreeSet<PathBuf>) -> Result<BTreeSet<PathBuf>> {
+    let cache = NIX_CLOSURE_CACHE.get_or_init(Default::default);
+    let mut union = BTreeSet::new();
+    for root in roots {
+        if let Some(hit) = cache.lock().unwrap().get(root).cloned() {
+            union.extend(hit.iter().cloned());
+            continue;
+        }
+        let output = Command::new("nix-store")
+            .args(["--query", "--requisites"])
+            .arg(root)
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|e| {
+                Error::Other(format!(
+                    "spawning nix-store to query the closure of {root:?} failed: {e} \
+                     (a hermetic bwrap sandbox requires a working nix installation)"
+                ))
+            })?;
+        if !output.status.success() {
+            return Err(Error::Other(format!(
+                "nix-store --query --requisites {root:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        let closure: BTreeSet<PathBuf> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        if closure.is_empty() {
+            return Err(Error::Other(format!(
+                "nix-store --query --requisites {root:?} returned an empty closure"
+            )));
+        }
+        union.extend(closure.iter().cloned());
+        cache
+            .lock()
+            .unwrap()
+            .insert(root.clone(), std::sync::Arc::new(closure));
+    }
+    Ok(union)
+}
+
 /// Real bubblewrap executor. Its integration tests skip themselves when
 /// `bwrap` is not on `PATH` or user namespaces are unavailable.
 pub struct BwrapExecutor {
@@ -336,7 +422,8 @@ impl Executor for BwrapExecutor {
     fn run(&self, job: &PreparedJob) -> Result<ExecResult> {
         std::fs::create_dir_all(&job.out_dir).map_err(|e| Error::io(&job.out_dir, e))?;
         std::fs::create_dir_all(&job.log_dir).map_err(|e| Error::io(&job.log_dir, e))?;
-        let full_argv = bwrap_argv(job, &self.bwrap_path);
+        let closure = nix_closure(&nix_roots(job))?;
+        let full_argv = bwrap_argv(job, &self.bwrap_path, &closure);
         let mut cmd = Command::new(&full_argv[0]);
         cmd.args(&full_argv[1..])
             .stdin(Stdio::null())
@@ -436,7 +523,7 @@ mod tests {
     #[test]
     fn bwrap_argv_starts_with_bwrap_path_and_unshare_all() {
         let job = sample_job();
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         assert_eq!(argv[0], "/usr/bin/bwrap");
         assert_eq!(argv[1], "--unshare-all");
     }
@@ -444,7 +531,7 @@ mod tests {
     #[test]
     fn bwrap_argv_network_flag_off_by_default() {
         let job = sample_job();
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         assert!(!argv.contains(&"--share-net".to_string()));
     }
 
@@ -452,7 +539,7 @@ mod tests {
     fn bwrap_argv_network_flag_present_when_allowed() {
         let mut job = sample_job();
         job.allow_network = true;
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         // must appear right after --unshare-all, before any binds
         let idx = argv.iter().position(|s| s == "--share-net").unwrap();
         assert_eq!(argv[idx - 1], "--unshare-all");
@@ -463,7 +550,7 @@ mod tests {
     #[test]
     fn bwrap_argv_binds_inputs_and_tools() {
         let job = sample_job();
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         let joined = argv.join("\u{1}");
         assert!(
             joined.contains(&"--ro-bind\u{1}/store/entries/aaa/data\u{1}/ppg/in/data".to_string())
@@ -472,12 +559,17 @@ mod tests {
     }
 
     #[test]
-    fn bwrap_argv_binds_whole_nix_store_for_nix_tools() {
+    fn bwrap_argv_binds_each_closure_path_at_its_real_path() {
         let job = sample_job();
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
-        // the virtual mount and a single whole-store bind must appear (the
-        // tool's dependency closure — ld-linux, libc, ... — lives in other
-        // store paths, so binding only the tool's own path cannot work)
+        let closure: BTreeSet<PathBuf> = [
+            "/nix/store/abc123-tool",
+            "/nix/store/def456-glibc",
+            "/nix/store/ghi789-ld-linux",
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &closure);
         let virt_idx = argv
             .windows(3)
             .position(|w| {
@@ -486,30 +578,78 @@ mod tests {
                     && w[2] == "/ppg/tools/nixtool"
             })
             .expect("virtual nix mount present");
-        let store_idx = argv
-            .windows(3)
-            .position(|w| w[0] == "--ro-bind" && w[1] == "/nix/store" && w[2] == "/nix/store")
-            .expect("whole /nix/store bind present");
-        assert!(store_idx > virt_idx);
-        // exactly one store bind, and the non-nix tool is not double-mounted
-        let store_binds = argv.iter().filter(|s| s.as_str() == "/nix/store").count();
-        assert_eq!(store_binds, 2); // one --ro-bind pair
+        for p in &closure {
+            let p = p.to_string_lossy();
+            let idx = argv
+                .windows(3)
+                .position(|w| w[0] == "--ro-bind" && w[1] == *p && w[2] == *p)
+                .unwrap_or_else(|| panic!("closure path {p} not self-bound"));
+            assert!(idx > virt_idx, "closure binds come after tool mounts");
+        }
+        // hermeticity: never the whole store, and the non-nix tool is not
+        // double-mounted
+        assert!(!argv.iter().any(|s| s == "/nix/store"));
         let count_usr_bin = argv.iter().filter(|s| s.as_str() == "/usr/bin").count();
         assert_eq!(count_usr_bin, 1);
     }
 
     #[test]
-    fn bwrap_argv_no_nix_store_bind_without_nix_tools() {
-        let mut job = sample_job();
-        job.tools.retain(|m| !m.source.starts_with("/nix/store"));
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+    fn bwrap_argv_empty_closure_yields_no_store_binds() {
+        let job = sample_job();
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
+        // the tool's virtual mount is the only place its store path appears
+        let count = argv
+            .iter()
+            .filter(|s| s.as_str() == "/nix/store/abc123-tool")
+            .count();
+        assert_eq!(count, 1);
         assert!(!argv.iter().any(|s| s == "/nix/store"));
+    }
+
+    #[test]
+    fn store_path_root_truncates_to_store_component() {
+        assert_eq!(
+            store_path_root(Path::new("/nix/store/abc-env/bin/python3")),
+            Some(PathBuf::from("/nix/store/abc-env"))
+        );
+        assert_eq!(
+            store_path_root(Path::new("/nix/store/abc-env")),
+            Some(PathBuf::from("/nix/store/abc-env"))
+        );
+        assert_eq!(store_path_root(Path::new("/usr/bin/python3")), None);
+        assert_eq!(store_path_root(Path::new("/nix/store")), None);
+    }
+
+    #[test]
+    fn nix_roots_collects_tools_argv_and_env() {
+        let mut job = sample_job();
+        // a nixified python env exec'd directly (the python-job case):
+        job.argv = vec![
+            "/nix/store/pyenv123-python3-env/bin/python3".to_string(),
+            "-I".to_string(),
+            "-m".to_string(),
+            "ppg3._shim".to_string(),
+        ];
+        job.env.insert(
+            "EXTRA".to_string(),
+            "/nix/store/envref456-data/file.txt".to_string(),
+        );
+        let roots = nix_roots(&job);
+        let expected: BTreeSet<PathBuf> = [
+            "/nix/store/abc123-tool",          // tool mount source
+            "/nix/store/pyenv123-python3-env", // argv[0], truncated to root
+            "/nix/store/envref456-data",       // env value, truncated to root
+        ]
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+        assert_eq!(roots, expected);
     }
 
     #[test]
     fn bwrap_argv_defaults_tmpdir_and_home_without_overriding_declared() {
         let job = sample_job(); // declares HOME=/tmp, no TMPDIR
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         let pair = |k: &str| {
             argv.windows(3)
                 .find(|w| w[0] == "--setenv" && w[1] == k)
@@ -526,7 +666,7 @@ mod tests {
     #[test]
     fn bwrap_argv_out_and_log_and_tmpfs_and_dev() {
         let job = sample_job();
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         let joined = argv.join("\u{1}");
         assert!(joined.contains("--bind\u{1}/store/staging/xyz/data\u{1}/ppg/out"));
         assert!(joined.contains("--bind\u{1}/store/logs/ik1/ts-host\u{1}/ppg/log"));
@@ -545,12 +685,12 @@ mod tests {
     fn bwrap_argv_chdir_respects_cwd_out() {
         let mut job = sample_job();
         job.cwd_out = true;
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         let idx = argv.iter().position(|s| s == "--chdir").unwrap();
         assert_eq!(argv[idx + 1], "/ppg/out");
 
         job.cwd_out = false;
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         let idx = argv.iter().position(|s| s == "--chdir").unwrap();
         assert_eq!(argv[idx + 1], "/");
     }
@@ -558,7 +698,7 @@ mod tests {
     #[test]
     fn bwrap_argv_clearenv_then_setenv_pairs_then_double_dash_then_job_argv() {
         let job = sample_job();
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         let clearenv_idx = argv.iter().position(|s| s == "--clearenv").unwrap();
         let dashdash_idx = argv.iter().position(|s| s == "--").unwrap();
         assert!(clearenv_idx < dashdash_idx);
@@ -579,7 +719,7 @@ mod tests {
     #[test]
     fn bwrap_argv_setenv_sorted_by_key() {
         let job = sample_job();
-        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"));
+        let argv = bwrap_argv(&job, Path::new("/usr/bin/bwrap"), &BTreeSet::new());
         let keys: Vec<&String> = argv
             .windows(3)
             .filter(|w| w[0] == "--setenv")
@@ -761,9 +901,11 @@ mod bwrap_integration {
     /// The nix package dir of the host's `/bin/sh` (e.g.
     /// `/nix/store/...-bash-5.x`), used as the job's tool mount so the
     /// sandboxed argv is `/ppg/tools/sh/bin/sh`. `None` (⇒ skip) when
-    /// bwrap can't run here or `/bin/sh` is not nix-sourced — running a
+    /// bwrap can't run here, `/bin/sh` is not nix-sourced (running a
     /// non-nix shell would need its FHS library dirs mounted at their
-    /// real paths, which `PreparedJob` deliberately has no vocabulary for.
+    /// real paths, which `PreparedJob` deliberately has no vocabulary
+    /// for), or `nix-store` can't answer closure queries — matching
+    /// CONTRACT.md's "no bwrap, no nix — skip, don't fail" bar.
     fn setup() -> Option<PathBuf> {
         if !bwrap_runtime_available() {
             eprintln!("skipping: bwrap not installed or user namespaces unavailable");
@@ -774,7 +916,16 @@ mod bwrap_integration {
             eprintln!("skipping: /bin/sh is not from /nix/store; no hermetic tool to mount");
             return None;
         }
-        Some(real.parent()?.parent()?.to_path_buf())
+        let pkg = real.parent()?.parent()?.to_path_buf();
+        let mut roots = BTreeSet::new();
+        roots.insert(pkg.clone());
+        match nix_closure(&roots) {
+            Ok(_) => Some(pkg),
+            Err(e) => {
+                eprintln!("skipping: nix closure query unavailable: {e}");
+                None
+            }
+        }
     }
 
     fn sh_job(sh_pkg: &Path, out: &Path, log: &Path, script: &str) -> PreparedJob {
@@ -923,5 +1074,78 @@ mod bwrap_integration {
             .filter(|s| !s.is_empty())
             .collect();
         assert_eq!(ifaces, vec!["lo"], "expected only loopback, got: {stdout}");
+    }
+
+    #[test]
+    fn bwrap_executor_hermetic_only_declared_closure_visible() {
+        let Some(sh_pkg) = setup() else { return };
+        // A store path guaranteed present on the host but (almost
+        // certainly) outside bash's closure: bwrap's own package.
+        let bwrap_real = std::env::var_os("PATH")
+            .and_then(|paths| {
+                std::env::split_paths(&paths).find_map(|dir| {
+                    let p = dir.join("bwrap");
+                    p.is_file().then(|| std::fs::canonicalize(p).ok())?
+                })
+            })
+            .expect("setup() guaranteed bwrap on PATH");
+        let Some(bwrap_pkg) = store_path_root(&bwrap_real) else {
+            eprintln!("skipping: bwrap is not nix-sourced, no undeclared store path to probe");
+            return;
+        };
+        let mut sh_roots = BTreeSet::new();
+        sh_roots.insert(sh_pkg.clone());
+        if nix_closure(&sh_roots).unwrap().contains(&bwrap_pkg) {
+            eprintln!("skipping: bwrap is inside bash's own closure on this host");
+            return;
+        }
+        let out = tempfile::tempdir().unwrap();
+        let log = tempfile::tempdir().unwrap();
+        let script = format!(
+            "if [ -e {p} ]; then echo undeclared-visible; else echo undeclared-hidden; fi",
+            p = bwrap_pkg.display()
+        );
+        let job = sh_job(&sh_pkg, out.path(), log.path(), &script);
+        let result = BwrapExecutor::new("bwrap").run(&job).unwrap();
+        assert_eq!(result.exit_code, 0);
+        assert_eq!(
+            String::from_utf8_lossy(&result.stdout).trim(),
+            "undeclared-hidden",
+            "a store path outside the declared closure must be invisible"
+        );
+    }
+
+    #[test]
+    fn bwrap_executor_runs_argv0_nix_env_directly_without_tool_mount() {
+        // The python-job shape: argv[0] is a nixified env's binary given
+        // as a raw /nix/store path (no /ppg/tools mount at all) — its
+        // closure must be picked up via nix_roots' argv scan.
+        let Some(sh_pkg) = setup() else { return };
+        let out = tempfile::tempdir().unwrap();
+        let log = tempfile::tempdir().unwrap();
+        let job = PreparedJob {
+            ik: "m".repeat(64),
+            argv: vec![
+                sh_pkg.join("bin/sh").to_string_lossy().into_owned(),
+                "-c".to_string(),
+                "echo direct-exec-ok > /ppg/out/direct.txt".to_string(),
+            ],
+            env: BTreeMap::new(),
+            inputs: vec![],
+            tools: vec![],
+            out_dir: out.path().to_path_buf(),
+            log_dir: log.path().to_path_buf(),
+            allow_network: false,
+            cwd_out: true,
+        };
+        let result = BwrapExecutor::new("bwrap").run(&job).unwrap();
+        assert_eq!(
+            result.exit_code,
+            0,
+            "stderr: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let content = std::fs::read_to_string(out.path().join("direct.txt")).unwrap();
+        assert_eq!(content, "direct-exec-ok\n");
     }
 }
