@@ -229,20 +229,96 @@ pub fn drop_generation(project_dir: &Path, stores: &StoreSet, generation: u64) -
 `outputs` symlink → `.ppg3/views/current` → `views/<n>` (atomic swap via
 symlink+rename).
 
+### Additive clarification (WP5, see STATUS.md for the full rationale)
+
+The `ViewSpec` sketch above — `Vec<(String, String, String)>` as "(view-rel
+path, oh, store-root path or index)" — is under-specified: it can't address
+*which file inside a multi-file entry* a view path should resolve to. As
+implemented, `ViewSpec` is:
+
+```rust
+pub struct ViewEntry {
+    pub view_rel_path: String,   // e.g. "results/counts.tsv"
+    pub oh: String,
+    pub path_within_entry: String, // relative path inside that entry's data/, matches a content-manifest key
+    pub store_index: usize,        // index into the StoreSet passed to write_generation
+}
+pub struct ViewSpec { pub entries: Vec<ViewEntry> }
+```
+i.e. the caller (eventually `ppg3.run()` on the Python side) already knows,
+per view path, exactly one `(oh, path-within-entry)` pair — there is no
+directory-of-symlinks fan-out inside `views.rs` itself.
+
+Also implemented (used by `explain.rs` and the CLI, not in the original
+sketch): `write_generation` writes a `views/<n>/meta.json` (`created_at`,
+`project_id`, `ephemeral`, `entries: [{view_rel_path, oh, path_within_entry,
+store_name}]` — entries are recorded by store *name*, not index, since a
+later reader reconstructs its own `StoreSet` and only names are stable
+across processes) and, when `ephemeral` is set, a `views/<n>/.ephemeral`
+marker file. `list_generations` additionally exposes
+`GenInfo { n, created_at, ephemeral, current, n_entries }`. `keep_last
+(project_dir, stores, n, keep_explicit) -> Result<Vec<u64>>` implements the
+§6.7 GC-keep policy and returns the dropped generation numbers.
+
 ## CLI (cli/, WP5)
 
-`ppg3 <cmd>` with clap: `store gc [--max-size BYTES] [--keep-generations N]
---store PATH`, `store verify [--sample PCT|--entry OH] --store PATH`,
-`generations list|rm N|keep N`, `rollback [N]`, `explain <view-path>`,
-`diff-entries <oh1> <oh2> --store PATH`. Project commands find `.ppg3/` by
-walking up from cwd. Human-readable output + `--json`.
+`ppg3 <cmd>` with clap: `store gc [--max-size BYTES] [--store PATH]
+[--dry-run] [--evict-logs]`, `store verify [--sample PCT|--entry OH]
+--store PATH`, `generations list|rm N|keep N [--keep-explicit]`, `rollback
+[N]`, `explain <view-path>`, `diff-entries <oh1> <oh2> --store PATH`.
+Project commands find `.ppg3/` by walking up from cwd; `--project PATH`
+overrides (accepts either the project root or the `.ppg3` dir itself).
+Human-readable output + `--json`. Exit codes: `0` ok, `1` operational
+failure (verify mismatch, determinism violation, missing/current
+generation, ...), `2` usage error (also `clap`'s own default for malformed
+arguments).
+
+### Additive clarification: `--keep-generations` and `.ppg3/config.json`
+
+`store gc` here does **not** take `--keep-generations N` (unlike the one
+line in PPG3_DESIGN.md §11's bullet list): it operates purely at the store
+level (`entries/`, `roots/`, `pins/`, `leases/`, `logs/`), which has no
+notion of "a project's generations". Generation lifecycle is a separate,
+per-project concern (`ppg3 generations keep N`), which itself unregisters
+roots in whichever stores a dropped generation referenced — run it before
+`store gc` if you want the freed entries actually swept. See STATUS.md.
+
+Project subcommands (`generations *`, `rollback`, `explain`) need a
+`StoreSet` to unregister roots / resolve manifests, but the CLI has no
+Python `ppg3.new(stores=...)` call to hand it one — so this WP defines
+`.ppg3/config.json`, written by whoever sets up the project (`run.py` on
+the Python side, WP7):
+
+```json
+{"stores": [{"name": "main", "path": "/abs/path/to/store", "readonly": false}]}
+```
+`readonly` defaults to `false` if omitted. `store gc`/`store verify`/
+`diff-entries` take a raw `--store PATH` instead and never read
+`config.json`.
 
 ## explain/diff (explain.rs, §9/§10.2)
 
 ```rust
 pub fn diff_key_documents(a: &serde_json::Value, b: &serde_json::Value) -> KeyDocDiff; // structured: changed inputs/tools/env/recipe...
-pub fn diff_entries(store: &Store, oh_a: &str, oh_b: &str) -> EntryDiff;              // files added/removed/changed(size, first differing offset, hashes)
+pub fn diff_entries(store: &Store, oh_a: &str, oh_b: &str) -> Result<EntryDiff>;       // files added/removed/changed(size, first differing offset, hashes)
+pub fn explain_view_path(project_dir: &Path, stores: &StoreSet, view_path: &str) -> Result<Explanation>;
+pub fn list_entries(store: &Store) -> Result<Vec<String>>; // every oh currently published; used by `store verify --sample`
 ```
+
+### Additive clarification (WP9, see STATUS.md)
+
+`diff_entries` returns `Result<EntryDiff>` rather than a bare `EntryDiff`
+(reading manifests/files can fail — every other WP1/WP9 API in this crate
+surfaces I/O failure via `Result`). `explain_view_path` — not in the
+original one-line sketch — is `Explanation::FirstAppearance { view_path,
+generation, oh }` when the view path has no earlier generation to diff
+against, else `Explanation::Diff { view_path, previous_generation,
+current_generation, oh_a, oh_b, diff: Box<KeyDocDiff>, why_chain:
+Vec<WhyStep> }`; `why_chain` recursively resolves changed `inputs` entries
+that are themselves resolvable parent-job output hashes (looked up by `oh`
+across every configured store), depth-capped at 8. "Previous generation"
+skips generation numbers whose directory has been dropped (by
+`drop_generation`/`keep_last`) rather than requiring exactly `n-1`.
 
 ## PyO3 boundary (py/, §8.1 rules)
 
