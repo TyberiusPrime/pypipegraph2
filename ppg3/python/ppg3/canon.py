@@ -180,21 +180,30 @@ def decanonicalize_value(value: Any) -> Any:
             return frozenset(decanonicalize_value(v) for v in value[SET_KEY])
         if ENUM_KEY in value and len(value) == 1:
             dotted = value[ENUM_KEY]
-            module_name, _, rest = dotted.rpartition(".")
-            # rest is "QualName.NAME"; qualname may itself contain dots
-            # (nested classes) so split from the right twice more carefully:
-            qual_and_name = dotted[len(module_name) + 1 :] if module_name else dotted
-            qualname, _, member_name = qual_and_name.rpartition(".")
-            try:
-                import importlib
+            # "<module>.<QualName>.<MEMBER>" — module names can themselves
+            # contain dots (subpackages), so there is no fixed split point.
+            # Try the longest possible module prefix first (importlib
+            # either succeeds or raises cleanly, so this is safe to probe).
+            import importlib
 
-                mod = importlib.import_module(module_name)
+            parts = dotted.split(".")
+            for i in range(len(parts) - 1, 0, -1):
+                module_name = ".".join(parts[:i])
+                rest = parts[i:]
+                if len(rest) < 1:
+                    continue
+                try:
+                    mod = importlib.import_module(module_name)
+                except ImportError:
+                    continue
                 obj = mod
-                for part in qualname.split("."):
-                    obj = getattr(obj, part)
-                return getattr(obj, member_name)
-            except Exception:
-                return value  # best-effort: leave the sentinel dict intact
+                try:
+                    for part in rest[:-1]:
+                        obj = getattr(obj, part)
+                    return getattr(obj, rest[-1])
+                except AttributeError:
+                    continue
+            return value  # best-effort: leave the sentinel dict intact
         if DATACLASS_KEY in value and "fields" in value:
             return {
                 DATACLASS_KEY: value[DATACLASS_KEY],

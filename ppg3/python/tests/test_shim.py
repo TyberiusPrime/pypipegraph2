@@ -4,9 +4,6 @@ import os
 import pickle
 import subprocess
 import sys
-from pathlib import Path
-
-import pytest
 
 from conftest import PYTHON_DIR, requires_blake3, requires_cloudpickle
 

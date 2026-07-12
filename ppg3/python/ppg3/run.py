@@ -19,7 +19,7 @@ import json
 from typing import Any, Dict, Optional
 
 from ._bridge import get_core
-from .jobs import Graph, GraphJob, UnsandboxedJob
+from .jobs import Graph, GraphJob
 
 
 class RunCallbacks:

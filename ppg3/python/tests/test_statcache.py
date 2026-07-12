@@ -1,7 +1,5 @@
 import time
 
-import pytest
-
 from ppg3.statcache import StatCache
 
 from conftest import requires_blake3

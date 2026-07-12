@@ -1,5 +1,3 @@
-import warnings
-
 import pytest
 
 import ppg3
@@ -62,6 +60,7 @@ def test_serialize_argv_rejects_bad_type():
         serialize_argv(["ok", 5])
 
 
+@requires_blake3
 def test_commandjob_job_def_shape(graph):
     job = ppg3.CommandJob(
         view={"sorted.bam": "out/sorted.bam"},
@@ -81,6 +80,7 @@ def test_commandjob_job_def_shape(graph):
     assert jd["retain"] == "Default"
 
 
+@requires_blake3
 def test_retain_json_variants(graph):
     j1 = ppg3.CommandJob(view={"a": "a.txt"}, argv=["true"], retain=ppg3.Retain.Evict)
     j2 = ppg3.CommandJob(
