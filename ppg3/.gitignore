@@ -4,3 +4,10 @@ __pycache__/
 .pytest_cache/
 .venv/
 dist/
+
+# The repo-root .gitignore has a `core*` rule intended for crash-dump
+# files (e.g. `core`, `core.12345`) that also unintentionally matches this
+# workspace's `core/` crate directory (ppg3-core, WP1/WP2-Rust). Un-ignore
+# it explicitly so `ppg3-core`'s sources are trackable.
+!core/
+!core/**

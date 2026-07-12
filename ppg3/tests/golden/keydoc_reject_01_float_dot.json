@@ -1,0 +1,22 @@
+{
+  "doc": {
+    "ppg3_key_version": 1,
+    "job_recipe": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv",
+    "inputs": {
+      "params": {
+        "threshold": 0.5
+      }
+    },
+    "tools": {},
+    "runtime": {
+      "python_env": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+      "preload": [],
+      "shim": "v1"
+    },
+    "env": {},
+    "outputs_declared": [
+      "out.txt"
+    ]
+  },
+  "error": true
+}

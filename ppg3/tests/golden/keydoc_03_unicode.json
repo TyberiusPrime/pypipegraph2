@@ -1,0 +1,26 @@
+{
+  "doc": {
+    "ppg3_key_version": 1,
+    "job_recipe": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "inputs": {
+      "réference": "3333333333333333333333333333333333333333333333333333333333333333",
+      "データ": "4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "tools": {},
+    "runtime": {
+      "python_env": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "preload": [
+        "café☃"
+      ],
+      "shim": "v1"
+    },
+    "env": {
+      "GREETING": "héllo wörld ☃ 日本語 😀"
+    },
+    "outputs_declared": [
+      "résultats/été.tsv"
+    ]
+  },
+  "canonical": "{\"env\":{\"GREETING\":\"héllo wörld ☃ 日本語 😀\"},\"inputs\":{\"réference\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"データ\":\"4444444444444444444444444444444444444444444444444444444444444444\"},\"job_recipe\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"outputs_declared\":[\"résultats/été.tsv\"],\"ppg3_key_version\":1,\"runtime\":{\"preload\":[\"café☃\"],\"python_env\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"shim\":\"v1\"},\"tools\":{}}",
+  "ik": "8572c54488a704dc6629bfba6e18f791b1c4620b3448d702601536a76454474b"
+}

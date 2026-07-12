@@ -1,0 +1,34 @@
+{
+  "doc": {
+    "outputs_declared": [
+      "z.txt",
+      "a.txt"
+    ],
+    "ppg3_key_version": 1,
+    "job_recipe": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "env": {
+      "Zeta": "1",
+      "alpha": "2",
+      "Alpha": "3",
+      "beta": "4"
+    },
+    "tools": {
+      "zzz": "x",
+      "aaa": "y"
+    },
+    "inputs": {
+      "z_parent": "1111111111111111111111111111111111111111111111111111111111111111",
+      "a_parent": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "runtime": {
+      "shim": "v1",
+      "preload": [
+        "pandas",
+        "numpy"
+      ],
+      "python_env": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  },
+  "canonical": "{\"env\":{\"Alpha\":\"3\",\"Zeta\":\"1\",\"alpha\":\"2\",\"beta\":\"4\"},\"inputs\":{\"a_parent\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"z_parent\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"job_recipe\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"outputs_declared\":[\"z.txt\",\"a.txt\"],\"ppg3_key_version\":1,\"runtime\":{\"preload\":[\"pandas\",\"numpy\"],\"python_env\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"shim\":\"v1\"},\"tools\":{\"aaa\":\"y\",\"zzz\":\"x\"}}",
+  "ik": "e7aeb3ba8f5edf9f89b263dd84a1472883c1c5dbfcb8e44b1dd14552f907848e"
+}

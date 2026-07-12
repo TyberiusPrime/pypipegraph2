@@ -1,0 +1,31 @@
+{
+  "doc": {
+    "ppg3_key_version": 1,
+    "job_recipe": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+    "inputs": {
+      "reads": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+      "ref": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    "tools": {
+      "samtools": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+      "bwa": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    },
+    "runtime": {
+      "python_env": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+      "preload": [
+        "numpy",
+        "pandas"
+      ],
+      "shim": "v1"
+    },
+    "env": {
+      "OMP_NUM_THREADS": "4"
+    },
+    "outputs_declared": [
+      "results/counts.tsv",
+      "results/counts.log"
+    ]
+  },
+  "canonical": "{\"env\":{\"OMP_NUM_THREADS\":\"4\"},\"inputs\":{\"reads\":\"qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\",\"ref\":\"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\"},\"job_recipe\":\"pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp\",\"outputs_declared\":[\"results/counts.tsv\",\"results/counts.log\"],\"ppg3_key_version\":1,\"runtime\":{\"preload\":[\"numpy\",\"pandas\"],\"python_env\":\"uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu\",\"shim\":\"v1\"},\"tools\":{\"bwa\":\"tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt\",\"samtools\":\"ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss\"}}",
+  "ik": "90f82e966d463b4b112d6417948029558354a5a0ab6f5d753f9bec35c61c21dc"
+}

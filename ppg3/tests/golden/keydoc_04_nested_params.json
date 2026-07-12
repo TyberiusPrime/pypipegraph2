@@ -1,0 +1,42 @@
+{
+  "doc": {
+    "ppg3_key_version": 1,
+    "job_recipe": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+    "inputs": {
+      "params": {
+        "n_trees": 200,
+        "nested": {
+          "z": [
+            1,
+            2,
+            3
+          ],
+          "a": {
+            "deep": [
+              true,
+              false,
+              null
+            ]
+          }
+        },
+        "labels": [
+          "b",
+          "a",
+          "c"
+        ]
+      }
+    },
+    "tools": {},
+    "runtime": {
+      "python_env": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+      "preload": [],
+      "shim": "v1"
+    },
+    "env": {},
+    "outputs_declared": [
+      "model.pkl"
+    ]
+  },
+  "canonical": "{\"env\":{},\"inputs\":{\"params\":{\"labels\":[\"b\",\"a\",\"c\"],\"n_trees\":200,\"nested\":{\"a\":{\"deep\":[true,false,null]},\"z\":[1,2,3]}}},\"job_recipe\":\"gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg\",\"outputs_declared\":[\"model.pkl\"],\"ppg3_key_version\":1,\"runtime\":{\"preload\":[],\"python_env\":\"hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh\",\"shim\":\"v1\"},\"tools\":{}}",
+  "ik": "385a23b285dd5fe9863642f1232df5bff48dec84aa4c57f902ab6b33faac53e9"
+}

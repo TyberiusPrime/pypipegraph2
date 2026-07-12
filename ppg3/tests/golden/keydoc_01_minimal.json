@@ -1,0 +1,19 @@
+{
+  "doc": {
+    "ppg3_key_version": 1,
+    "job_recipe": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "inputs": {},
+    "tools": {},
+    "runtime": {
+      "python_env": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "preload": [],
+      "shim": "v1"
+    },
+    "env": {},
+    "outputs_declared": [
+      "out.txt"
+    ]
+  },
+  "canonical": "{\"env\":{},\"inputs\":{},\"job_recipe\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"outputs_declared\":[\"out.txt\"],\"ppg3_key_version\":1,\"runtime\":{\"preload\":[],\"python_env\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"shim\":\"v1\"},\"tools\":{}}",
+  "ik": "ab853fe01025d6a3b7437257633e35c8feb73c8718f7bf53b55062a6aa75c5af"
+}

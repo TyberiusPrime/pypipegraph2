@@ -1,0 +1,27 @@
+{
+  "doc": {
+    "ppg3_key_version": 1,
+    "job_recipe": "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+    "inputs": {
+      "ref_subset": "jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj",
+      "whole_parent": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+    },
+    "tools": {
+      "samtools": "llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll"
+    },
+    "runtime": {
+      "python_env": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+      "preload": [
+        "numpy"
+      ],
+      "shim": "v1"
+    },
+    "env": {},
+    "outputs_declared": [
+      "counts.tsv",
+      "counts.log"
+    ]
+  },
+  "canonical": "{\"env\":{},\"inputs\":{\"ref_subset\":\"jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj\",\"whole_parent\":\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\"},\"job_recipe\":\"iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii\",\"outputs_declared\":[\"counts.tsv\",\"counts.log\"],\"ppg3_key_version\":1,\"runtime\":{\"preload\":[\"numpy\"],\"python_env\":\"mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm\",\"shim\":\"v1\"},\"tools\":{\"samtools\":\"llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll\"}}",
+  "ik": "b2ed2422edda8b8f3566c12b2993f3e684a514b69f87a7f2949a1872a51f9809"
+}

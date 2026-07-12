@@ -1,0 +1,23 @@
+{
+  "doc": {
+    "ppg3_key_version": 1,
+    "job_recipe": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+    "inputs": {},
+    "tools": {},
+    "runtime": {
+      "python_env": "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+      "preload": [],
+      "shim": "v1"
+    },
+    "env": {
+      "OMP_NUM_THREADS": "4",
+      "LC_ALL": "C.UTF-8",
+      "SOURCE_DATE_EPOCH": "0"
+    },
+    "outputs_declared": [
+      "log.txt"
+    ]
+  },
+  "canonical": "{\"env\":{\"LC_ALL\":\"C.UTF-8\",\"OMP_NUM_THREADS\":\"4\",\"SOURCE_DATE_EPOCH\":\"0\"},\"inputs\":{},\"job_recipe\":\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\",\"outputs_declared\":[\"log.txt\"],\"ppg3_key_version\":1,\"runtime\":{\"preload\":[],\"python_env\":\"oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo\",\"shim\":\"v1\"},\"tools\":{}}",
+  "ik": "78d3dfa247d5e73cdfbcb50a45b6189a832844aeb048cc58c42bbb9a465af96a"
+}
