@@ -117,7 +117,11 @@ impl Executor for MockExecutor {
             .cloned()
             .unwrap_or_else(|| panic!("MockExecutor expects argv = [\"mock\", <job-id>], got {:?}", job.argv));
 
-        if let Some(b) = self.state.lock().unwrap().barriers.get(&job_id).cloned() {
+        // NB: bind before the `if let` — in edition 2021 a `lock()` temporary
+        // in the scrutinee lives to the end of the `if let` block, which would
+        // hold the mutex across `wait()` and deadlock the other barrier party.
+        let barrier = self.state.lock().unwrap().barriers.get(&job_id).cloned();
+        if let Some(b) = barrier {
             b.wait();
         }
 
@@ -126,7 +130,10 @@ impl Executor for MockExecutor {
         let now_active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.max_active.fetch_max(now_active, Ordering::SeqCst);
 
-        if let Some(d) = self.state.lock().unwrap().delays.get(&job_id).copied() {
+        // Same guard-lifetime hazard as the barrier above: bind first so the
+        // lock is not held across the sleep (it would serialize every job).
+        let delay = self.state.lock().unwrap().delays.get(&job_id).copied();
+        if let Some(d) = delay {
             std::thread::sleep(d);
         }
 
