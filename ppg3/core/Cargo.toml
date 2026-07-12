@@ -18,3 +18,11 @@ libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# Test-only helper for core/tests/sandbox_unshare.rs — enter_sandbox needs
+# a single-threaded process, which the cargo test harness is not.
+[[bin]]
+name = "sandbox_helper"
+path = "src/bin/sandbox_helper.rs"
+required-features = ["linux-sandbox"]
+test = false

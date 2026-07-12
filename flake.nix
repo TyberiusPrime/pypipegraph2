@@ -175,7 +175,7 @@
       mkTestVenv =
         ver: (mkPythonSet pkgs.${"python" + ver}).mkVirtualEnv "pytest-python${ver}-env" testDepsSpec;
 
-      mypython = mkTestVenv "314";
+      mypython = mkTestVenv "313";
 
       # cargo-afl is not in nixpkgs, so we build it from the crates.io tarball.
       # The build produces just the `cargo-afl` binary — it does NOT compile

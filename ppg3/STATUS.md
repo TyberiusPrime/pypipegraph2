@@ -567,4 +567,115 @@ today.
   has tests) to completion once the sibling agent's `core/tests/
   scheduler.rs` work has released the shared `target/` build lock —
   `cargo check --workspace` is clean but that's not a substitute for the
-  full suite.
+  full suite. *(Done in the sandbox-verification pass below: 161 tests
+  green.)*
+
+## Sandbox verification pass (bwrap + unshare, WP3 runtime debt) — done
+
+This environment (unlike the original dev container) has bwrap 0.11.2 and
+working unprivileged user namespaces, so the never-executed enforcement
+paths could finally be *run*. Both had real bugs that only runtime
+execution could catch. Files touched: `core/src/executor.rs`,
+`core/src/sandbox.rs`, `core/src/bin/sandbox_helper.rs` (new),
+`core/tests/sandbox_unshare.rs` (new), `core/Cargo.toml` (bin target).
+`core/src/scheduler.rs` etc. untouched; `py/src/lib.rs` untouched (see
+TODO).
+
+### bwrap (`executor.rs`) — bugs found & fixed
+
+- **The old smoke test failed the moment bwrap actually existed**
+  (`assert 1 == 0`): it ran `/bin/true` with zero mounts — bwrap's root is
+  an empty tmpfs, so there was nothing to exec (and this NixOS host has no
+  `/bin/true` anyway, only `/bin/sh`).
+- **Nix dependency-closure bug (the big one)**: `bwrap_argv`'s per-tool
+  "double mount" (`/nix/store/<tool>` bound at its own real path) is not
+  sufficient to run *any* dynamically linked nix binary — the ELF
+  interpreter (`ld-linux` in glibc's *separate* store path) isn't bound,
+  so `execvp` fails with ENOENT before the program even starts. Verified
+  by hand with the host's nix bash. Fixed: one `--ro-bind /nix/store
+  /nix/store` emitted when any tool is nix-sourced (coarser than a
+  per-closure bind, but the closure is not computable from a `Mount`
+  alone; a future refinement could consume `nix path-info -r`).
+- Additions for parity/realism, all argv-unit-tested: `--proc /proc`,
+  `--tmpfs /ppg/tmp` + the same TMPDIR/HOME=`/ppg/tmp` defaulting
+  NoneExecutor does, `--dir /ppg/in` / `--dir /ppg/tools` (uniform layout
+  for jobs with no inputs/tools), `--die-with-parent`, and signal-aware
+  exit codes (128+sig, shared `exit_code_of` helper with NoneExecutor).
+- New `bwrap_runtime_available()` (spawns a trivial sandboxed command):
+  the binary being on PATH does not imply user namespaces work.
+- **4 real runtime integration tests** replace the old smoke test (skip,
+  not fail, when bwrap/userns is unavailable or `/bin/sh` isn't
+  nix-sourced): output write + cwd=/ppg/out; ro-input enforcement (read
+  ok, write fails, host file untouched); env scrub + host-fs invisibility
+  + writable /ppg/tmp; netns has only `lo` (via `/proc/net/dev`).
+  Finding from the env-scrub test: with PATH scrubbed, nixpkgs bash
+  reports its compiled-in `PATH=/no-such-path` — that's bash defaulting,
+  not a leak; the test asserts the host PATH value doesn't appear instead.
+
+### unshare (`sandbox.rs` `enter_sandbox`) — bugs found & fixed
+
+Runtime-tested for the first time via a new test-only `sandbox_helper`
+binary (`required-features = ["linux-sandbox"]`, same real-OS-process
+pattern as `store_helper`) driven by `core/tests/sandbox_unshare.rs` —
+`unshare(CLONE_NEWUSER)` cannot be called from the multi-threaded test
+harness, and a successful `pivot_root` would hijack it. Helper exit code 2
+= "userns unavailable" ⇒ test skips. Two real bugs:
+
+1. **uid/gid captured after `unshare`**: `write_uid_gid_maps` called
+   `geteuid()` *after* `unshare(CLONE_NEWUSER)`, which returns the overflow
+   id (65534) in a not-yet-mapped namespace; writing `0 65534 1` to
+   `uid_map` is EPERM (65534 is not the creator's parent-ns euid). Ids are
+   now captured before `unshare`.
+2. **ro-remount dropped locked mount flags**: the `MS_BIND|MS_REMOUNT|
+   MS_RDONLY` pass didn't carry over flags inherited from the source mount
+   (`nosuid`, `nodev`, atime modes). Inside a user namespace those are
+   *locked*; dropping any of them makes the remount fail EPERM (hit
+   immediately with a tempdir under this host's `/tmp`). Fixed by
+   `statvfs`-ing the target and OR-ing the `ST_*`→`MS_*` flags in — the
+   same strategy bwrap itself uses.
+
+After the fixes the helper verifies from inside the pivoted namespace:
+cwd, ro-mount readable + EROFS on write, `/etc/passwd` invisible,
+old-root detached, tmpfs `/tmp` writable.
+
+### Test-portability fix
+
+`none_executor_cleans_up_workdir_on_success_keeps_on_failure` used
+`/bin/true`/`/bin/false`, which don't exist on NixOS hosts (only `/bin/sh`
+is POSIX-guaranteed) — was failing here before any sandbox work. Now
+`/bin/sh -c true|false`.
+
+### Results
+
+- `cargo test -p ppg3-core` → **161 green** (default features; includes
+  the 4 bwrap runtime tests actually executing here).
+- `cargo test -p ppg3-core --features linux-sandbox` → **161 green**
+  (includes `enter_sandbox_runtime_smoke` actually entering a namespace).
+- `cargo clippy -p ppg3-core --all-targets` clean in **both** feature
+  configs (also fixed 2 pre-existing unused-import warnings the feature
+  build had). `rustfmt` run on all touched files. `cargo check -p
+  ppg3-cli` clean. `cargo check -p ppg3-py` not possible in this sandbox:
+  pyo3 is absent from the offline cargo cache (environment limitation;
+  `py/src` untouched by this pass).
+
+### TODO (new, from this pass)
+
+- **Executor selection is still hardwired**: `py/src/lib.rs` constructs
+  `NoneExecutor` unconditionally. Flipping to `BwrapExecutor` when
+  `bwrap_runtime_available()` is *not* safe yet: python jobs exec
+  `sys.executable` (a host venv path) with no corresponding tool mount, so
+  under bwrap they'd ENOENT. Needs the job's `PyEnv` lowered as a proper
+  `/ppg/tools/...` mount (plus the venv/nix-env closure story) before
+  bwrap can run python jobs; `CommandJob`s with nix tools would work
+  today. Suggest a config knob (`sandbox="bwrap"|"none"`) rather than
+  auto-detection when wired.
+- Non-nix tools (e.g. a `/usr/bin`-sourced Mount) generally cannot run
+  under bwrap — their FHS library closure isn't mounted and `PreparedJob`
+  has no vocabulary for it. Nix-sourced tools are the supported bwrap
+  path; the integration tests skip if `/bin/sh` isn't nix-sourced.
+- Whole-store `/nix/store` bind is coarser than the per-closure ideal
+  (hermeticity: a job can read store paths it didn't declare; it cannot
+  write anything). Refine via `nix path-info -r` at tool-resolution time
+  if that matters for §5 key-document honesty.
+- `enter_sandbox` still lacks the PID-namespace second fork (pre-existing,
+  documented in `sandbox.rs` module docs; forkserver-scoped).
