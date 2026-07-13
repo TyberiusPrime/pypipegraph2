@@ -61,9 +61,10 @@ file-not-found at build time, not a latent correctness bug.
 its input key. The blessed mechanism is a Nix store path (from a flake
 reference); a hash-of-binary fallback exists for non-Nix environments.
 
-**DECISION — Multiple stores, layered.** An ordered list of stores; lookup
-walks the list, writes go to the first writable store, hits from remote
-stores are substituted (copied/linked) into the local one.
+**DECISION — Multiple stores, layered.** An ordered list of named stores;
+lookup walks the list. Mounted stores are consumed in place; remote stores
+fetch on substitution. Jobs may target a specific store for publishing
+(§4.1).
 
 ## 3. Terminology
 
@@ -249,8 +250,10 @@ touches `entries/`. Nothing under `/ppg/log` participates in the content
 manifest or the output hash.
 
 - Env: `PATH` assembled from tool inputs' `bin/`; `HOME=/tmp`; `TMPDIR=/tmp`;
-  `TZ=UTC`; `LC_ALL=C.UTF-8`; `SOURCE_DATE_EPOCH=0`; plus declared `env`
-  key/values. Nothing else.
+  `TZ=UTC`; `LC_ALL=C.UTF-8`; `SOURCE_DATE_EPOCH=0`; `PYTHONHASHSEED=0`
+  (without it, pickling sets/iterating dicts is randomized per process —
+  every DataJob with a set in its payload would trip determinism
+  enforcement); plus declared `env` key/values. Nothing else.
 - No network namespace unless the job is fixed-output (§7.6).
 - The process runs as the invoking user inside a userns (no root).
 - cwd = `/ppg/out`.
@@ -274,7 +277,11 @@ three-tier data plane:
 
 1. **`DataJob` — the default replacement.** The calc callback runs
    *sandboxed*, exactly like a FileJob; its output is a serialized artifact
-   in the store (pickle by default; Arrow/npy/HDF5 encouraged). Consumers
+   in the store (pickle by default; Arrow/npy/HDF5 encouraged). The
+   serializer is part of the determinism contract: the default pickler is
+   deterministic under `PYTHONHASHSEED=0` (§6.1) for the canonicalizable
+   type set; custom serializers that embed timestamps or unordered
+   iteration are the job author's determinism violation to fix. Consumers
    declare it as a normal input and call `io.load("name")`, which
    deserializes with per-worker-process memoization. Physical-memory
    sharing is recovered through the **page cache**: N sandboxed jobs
@@ -504,10 +511,72 @@ cache miss and reruns. `retain=Pin` creates a named pin.
 
 ### 7.4 Dynamic graphs
 
-`GraphJob` (ppg2's JobGeneratingJob): runs in-process each `run()`, may add
-jobs; added jobs mostly hit the store, so repeated expansion is cheap. Its
-callback's recipe hash is recorded in the run report but does not key
-anything.
+`GraphJob` (ppg2's JobGeneratingJob): declares inputs like any job; the
+scheduler executes its callback **in the coordinator** (§8.1 rule 1's
+coarse callback) once those inputs are available — so an expansion may
+read upstream outputs (via loader-layer access, §8.1 rule 3) to decide
+what jobs to create. Added jobs join the frontier immediately; no
+whole-graph rerun (`_RunAgain` does not carry over). Added jobs mostly hit
+the store, so repeated expansion is cheap. The callback's recipe hash is
+recorded in the run report but does not key anything.
+
+Checks that re-run on every expansion, not just at definition time:
+**cycle detection** (an added edge closing a cycle fails the run with the
+cycle listed) and **view-conflict detection** (two jobs claiming one view
+path is a definition-time error, ppg2's `JobOutputConflict` retained;
+expansions hit the same check). Expansion depth is capped (default 25,
+configurable) to convert runaway recursive generators into an error.
+
+### 7.7 Failure semantics
+
+What happens when a job fails was left implicit; explicitly:
+
+- **The run continues.** Independent subgraphs build to completion (ppg2
+  behavior retained). Downstreams of a failed job are marked
+  `UpstreamFailed` and never dispatched.
+- **Nothing is published** for a failed job. Its staging directory is
+  moved to `staging/failed/<ik>-<timestamp>/` — kept for debugging (the
+  half-written outputs often *are* the diagnosis), evicted by GC like
+  `logs/` (§6.1a holds the stdout/stderr and build-info regardless).
+- **`run()` returns an outcome map** `{view_path_or_job_name: Outcome}`
+  with `Built | Hit | Substituted | Failed(error) | UpstreamFailed |
+  NotRequested`, and raises `JobsFailed` at the end unless
+  `raise_on_error=False` — ppg2's reporting contract, carried over.
+- **A completed-with-failures run still writes a view generation**,
+  containing the successful and hit entries; view paths of
+  failed/upstream-failed jobs are **omitted** — never silently satisfied
+  by a stale entry from a different configuration. (An omitted path plus
+  `rollback` beats a plausible-looking wrong file.) An **aborted** run
+  writes no generation at all: abort means "I don't want this state",
+  failure means "this is the state, minus what broke". Store entries
+  published before an abort remain — the next run hits them.
+- **Retries** (`retries=N`, `retry_on=(...)`) re-dispatch into a fresh
+  staging dir; only the final attempt's failure is reported, all attempts'
+  logs are kept.
+- A **worker/template crash** (as opposed to a job error) fails the job
+  with the crash diagnostics and restarts the template; it never wedges
+  the scheduler (no Python-side thread bookkeeping exists to corrupt —
+  §8.1 rule 2).
+
+### 7.8 Adopting existing outputs (migration path)
+
+Without this, migrating an existing project means recomputing the world —
+unacceptable for week-scale pipelines. `ppg3 adopt` (and
+`ppg3.adopt(jobs)` from the API):
+
+1. Run the definition pass; derive every job's input key as usual
+   (topologically: a job's key needs its parents' output hashes, so
+   adoption proceeds root-to-leaf, adopting or building each level).
+2. For each job whose declared outputs already exist in the old project
+   layout: hash those files, synthesize a store entry + manifest marked
+   `"adopted": true` (unverified provenance — flagged in `explain` and by
+   `verify`, which can later rebuild-and-compare exactly these), publish
+   under the derived ik.
+3. Jobs whose outputs are absent are left as ordinary misses.
+
+Adopted entries are trust-me imports by definition; `ppg3 verify
+--adopted` exists to burn them down to verified status over time. This is
+the ppg2→ppg3 migration story: adopt once, then live under enforcement.
 
 ### 7.5 Tools
 
@@ -577,6 +646,12 @@ definition-time error.** CI never TOFUs; it runs the committed, pinned
 source. The trust model is nix's: the first fetch is trusted once,
 everything after is pinned.
 
+**DECISION — fixed-output jobs are keyed by their declared hash, not by
+the URL** (nix fixed-output semantics): the URL is an advisory fetch hint
+and may be a mirror list; changing or reordering mirrors neither refetches
+nor invalidates anything downstream. The URL(s) are recorded in the
+manifest for provenance.
+
 ## 8. Engine
 
 **DECISION — the core is a Rust crate (`ppg3-core`); Python is the
@@ -620,7 +695,10 @@ Rule 3 — **Everything crossing the boundary is canonical JSON (or raw
 bytes).** Python canonicalizes parameters and extracts function sources —
 semantics that require Python — and hands finished key documents (§5) to
 Rust. Rust hashes, stores, schedules. No Python object ever enters
-`ppg3-core`; no store path semantics ever live in Python.
+`ppg3-core`. Store-path *semantics* never live in Python: when the loader
+layer or a GraphJob expansion needs to read an entry (§6.3, §7.4), the
+core hands it a resolved, opaque read-only path for that access — Python
+never constructs, parses, or persists store paths itself.
 
 The forkserver template children (§6.4) enter the sandbox via a thin PyO3
 binding over the same Rust sandbox-entry code the CLI uses — the
@@ -631,7 +709,11 @@ Scheduling loop (single logical owner of all state — adopting the audit's
 recommendation; workers are dumb):
 
 ```
-ready = jobs whose parents all have store entries (or are done in-process)
+targets = requested jobs (default: all) plus transitive ancestors
+          # partial runs (ppg2's run_for_these / calling a job) are a
+          # frontier restriction, nothing more; everything else untouched
+ready = targeted jobs whose parents all have store entries (or are done
+        in-process)
 for job in ready (respecting Resources via named pools):
     ik = derive_key(job)
     if lookup(ik):            link-count it, mark done   # cache hit
@@ -692,10 +774,21 @@ or deleting this file costs re-hashing only, never wrong reuse.
 
 ## 11. Views, generations, GC
 
-- A run produces `.ppg3/views/<n>/` (tree of relative symlinks into the
-  write store) and repoints `.ppg3/views/current`; the user-visible
-  `outputs/` is itself a symlink to `current` (**DECISION**; keeps
-  `outputs/` atomic-swappable).
+- A run produces `.ppg3/views/<n>/` (tree of symlinks into the stores) and
+  repoints `.ppg3/views/current`; the user-visible `outputs/` is itself a
+  symlink to `current` (**DECISION**; keeps `outputs/` atomic-swappable).
+- A generation is a **complete regeneration**, never an incremental
+  mutation: view paths of jobs that no longer exist simply aren't in the
+  new generation — no stale-file cleanup logic, no leftovers. Links use
+  the store's absolute mount path; a view is only meaningful on hosts
+  mounting the stores at the same paths (**DECISION**: pin shared-store
+  mount points in the project config and error on mismatch, rather than
+  pretending views are portable).
+- **Lease → root handoff**: a run's lease is released only *after* the new
+  generation's roots are registered in every involved store (and, on
+  abort, after confirming no generation is written). GC therefore never
+  sees a gap in which freshly-published entries are neither leased nor
+  rooted.
 - `ppg3 rollback [n]` repoints `current`. `ppg3 generations list/rm/keep N`.
 - GC (`ppg3 store gc [--max-size X] [--keep-generations N]`), per store:
   1. Take `gc.lock`.
@@ -793,18 +886,27 @@ front-end package. Mixed WPs name their split.
   in this document: build it as a standalone prototype ("fork, unshare,
   mount fixture layout, prove ENOENT on undeclared path, prove no
   network") before integrating. Includes the `sandbox="none"` fallback.
+  The shim child is **pid 1 of its PID namespace** and must behave like an
+  init: install signal handlers (pid-1 defaults are ignore), reap zombies
+  from job-spawned subprocesses, forward SIGTERM to its process group.
   Acceptance: §12.4 plus template-hermeticity tests (two templates for the
   same (PyEnv, preload) on different fake-HOME hosts produce
-  byte-identical job outputs).
+  byte-identical job outputs) plus a zombie-reaping test (job spawns
+  orphaning subprocesses; namespace exits clean).
 - **WP4 engine/scheduler (Rust)**: scheduler owning all threads, named
   resource pools (a real Condvar-based multi-unit semaphore — ppg2's
   Python `CoreLock` race, audit B2, must not be ported), cooperative
   abort, the two coarse Python callbacks of §8.1 rule 1. Depends on
   WP1/WP2 interfaces (mockable). Acceptance: §12.3.
 - **WP5 views/generations/GC policy + CLI (Rust)**: the standalone `ppg3`
-  binary — `rollback|generations|store gc|store push|verify|explain`.
-  Cross-store root registration (§4.1), ephemeral watch-mode generations
-  (§6.7), log-area eviction (§6.1a). Works with no Python present.
+  binary — `rollback|generations|store gc|store push|verify|explain|
+  adopt|shell`. Cross-store root registration (§4.1), ephemeral watch-mode
+  generations (§6.7), log-area eviction (§6.1a), lease→root handoff
+  (§11). `ppg3 shell <view-path>` drops the user into the job's exact
+  sandbox (inputs, tools, env, `/ppg/out` on a scratch dir) — the
+  debugging story for "why does this job fail in ppg3 but not in my
+  terminal": the answer is visible from inside. Works with no Python
+  present (adopt's key derivation is fed by a definition-pass export).
   Depends on WP1.
 - **WP6 multi-store substitution (Rust)**: ordered lookup,
   integrity-verified copy-in, s3/http readonly backends. Depends on WP1.
@@ -855,6 +957,11 @@ WP5/WP6/WP8/WP9/WP10.
    lab store) becomes the same crate behind an IPC front instead of PyO3.
    Deliberately *not* v1 — the PyO3-hosted coordinator must prove the
    crate's API first; nothing in v1 may assume it is the only host.
+7. **Machine-level resource pools.** Two coordinators on one machine each
+   believe they own all cores. An advisory per-machine pool (a lease file
+   in a well-known location, same heartbeat pattern as store intents)
+   would coordinate them; v1 ships per-coordinator pools only and
+   documents the oversubscription.
 
 ## 15. What we deliberately gave up (vs ppg2)
 
