@@ -16,10 +16,11 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ppg3_core::executor::{Executor, NoneExecutor, PreparedJob};
-use ppg3_core::forkserver::ForkserverExecutor;
+use ppg3_core::forkserver::{ForkserverExecutor, TemplateManager};
 
 const FAKE_TEMPLATE_PY: &str = r#"
 import sys, os, json, select, signal, time
@@ -117,7 +118,17 @@ def main():
                             marker = env.get("TEST_STDOUT", "")
                             if marker:
                                 sys.stdout.write(marker)
-                                sys.stdout.flush()
+                            if env.get("TEST_WRITE_PPID") == "1":
+                                # No exec happened between the template's
+                                # `fork()` and here, so the forked child's
+                                # parent pid *is* the template process' own
+                                # pid -- lets cross-run tests confirm "same
+                                # template served both dispatches" (or, after
+                                # `TemplateManager::shutdown()`, "a fresh
+                                # template was spawned") without needing any
+                                # extra wire-protocol surface.
+                                sys.stdout.write(str(os.getppid()))
+                            sys.stdout.flush()
                             code = int(env.get("TEST_EXIT_CODE", "0"))
                         except Exception:
                             os._exit(1)
@@ -163,6 +174,20 @@ fn write_fake_template(dir: &Path) -> PathBuf {
 }
 
 fn shim_job(ik: &str, out_dir: &Path, log_dir: &Path, extra_env: &[(&str, &str)]) -> PreparedJob {
+    shim_job_with_env(ik, out_dir, log_dir, extra_env, "test-py-env")
+}
+
+/// Like [`shim_job`] but with a caller-chosen `runtime.python_env` (the §5
+/// `PyEnv` tool hash) — used by the template-key tests to prove two jobs
+/// that are otherwise identical (same interpreter, same preload list) still
+/// get distinct templates when their `python_env` differs.
+fn shim_job_with_env(
+    ik: &str,
+    out_dir: &Path,
+    log_dir: &Path,
+    extra_env: &[(&str, &str)],
+    python_env: &str,
+) -> PreparedJob {
     std::fs::create_dir_all(out_dir).unwrap();
     std::fs::create_dir_all(log_dir).unwrap();
     let mut env = BTreeMap::new();
@@ -191,7 +216,7 @@ fn shim_job(ik: &str, out_dir: &Path, log_dir: &Path, extra_env: &[(&str, &str)]
         allow_network: false,
         cwd_out: true,
         runtime: Some(serde_json::json!({
-            "python_env": "test-py-env",
+            "python_env": python_env,
             "preload": ["decimal"],
             "shim": "1",
         })),
@@ -219,6 +244,16 @@ fn command_job(out_dir: &Path, log_dir: &Path) -> PreparedJob {
     }
 }
 
+/// Builds a `TemplateManager` pointed at the fake template script, wrapped
+/// in an `Arc` so callers can share it across several `ForkserverExecutor`s
+/// the way a coordinator session does (§6.7).
+fn make_manager(work_parent: &Path, template_script: &Path) -> Arc<TemplateManager> {
+    Arc::new(TemplateManager::new(
+        work_parent.to_path_buf(),
+        vec!["python3".to_string(), template_script.to_string_lossy().into_owned()],
+    ))
+}
+
 #[test]
 fn two_jobs_dispatch_concurrently_through_one_template() {
     if !python3_available() {
@@ -229,11 +264,8 @@ fn two_jobs_dispatch_concurrently_through_one_template() {
     let template_script = write_fake_template(root.path());
     let work_parent = root.path().join("work");
     let fallback = NoneExecutor::new(&work_parent);
-    let exec = ForkserverExecutor::new(
-        work_parent.clone(),
-        vec!["python3".to_string(), template_script.to_string_lossy().into_owned()],
-        fallback,
-    );
+    let manager = make_manager(&work_parent, &template_script);
+    let exec = ForkserverExecutor::new(manager, fallback);
 
     let job_a = shim_job(
         &"a".repeat(64),
@@ -298,11 +330,8 @@ fn template_death_mid_job_errors_then_respawn_serves_next_job() {
     let template_script = write_fake_template(root.path());
     let work_parent = root.path().join("work");
     let fallback = NoneExecutor::new(&work_parent);
-    let exec = ForkserverExecutor::new(
-        work_parent.clone(),
-        vec!["python3".to_string(), template_script.to_string_lossy().into_owned()],
-        fallback,
-    );
+    let manager = make_manager(&work_parent, &template_script);
+    let exec = ForkserverExecutor::new(manager, fallback);
 
     // This job's template dies the instant it receives the "run" message
     // (before even forking) — both the first attempt AND its one
@@ -342,7 +371,7 @@ fn nonshim_argv_falls_back_to_none_executor() {
     // "/definitely/does/not/exist" binary) rather than silently passing.
     let work_parent = root.path().join("work");
     let fallback = NoneExecutor::new(&work_parent);
-    let exec = ForkserverExecutor::new(
+    let manager = Arc::new(TemplateManager::new(
         work_parent,
         vec![
             "/definitely/does/not/exist/python".to_string(),
@@ -350,12 +379,130 @@ fn nonshim_argv_falls_back_to_none_executor() {
             "-m".to_string(),
             "ppg3._template".to_string(),
         ],
-        fallback,
-    );
+    ));
+    let exec = ForkserverExecutor::new(manager, fallback);
 
     let job = command_job(&root.path().join("out-c"), &root.path().join("log-c"));
     let result = exec.run(&job).expect("plain CommandJob argv must fall back to NoneExecutor");
     assert_eq!(result.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&result.stderr));
     let content = std::fs::read_to_string(root.path().join("out-c").join("marker.txt")).unwrap();
     assert_eq!(content, "fallback-ran\n");
+}
+
+// --------------------------------------------------------------------------
+// §6.7 cross-run persistence: a `TemplateManager` outlives any one
+// `ForkserverExecutor` — this is what lets a coordinator session keep
+// templates warm across separate `ppg3.run()` calls.
+// --------------------------------------------------------------------------
+
+#[test]
+fn manager_outlives_executors_same_template_reused_then_shutdown_respawns() {
+    if !python3_available() {
+        eprintln!("skipping: python3 not available");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let template_script = write_fake_template(root.path());
+    let work_parent = root.path().join("work");
+    let manager = make_manager(&work_parent, &template_script);
+
+    // --- "run" 1: a fresh executor A built on the shared manager --------
+    let exec_a = ForkserverExecutor::new(manager.clone(), NoneExecutor::new(&work_parent));
+    let job1 = shim_job(
+        &"1".repeat(64),
+        &root.path().join("out-1"),
+        &root.path().join("log-1"),
+        &[("TEST_WRITE_PPID", "1")],
+    );
+    let r1 = exec_a.run(&job1).expect("job1 dispatch");
+    assert_eq!(r1.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&r1.stderr));
+    let ppid1 =
+        std::fs::read_to_string(root.path().join("log-1").join("stdout.txt")).unwrap();
+    // Dropping executor A (as `ppg3.run()` would at the end of a run) must
+    // NOT kill the manager's template — that is the entire point of the
+    // ownership split (§6.7).
+    drop(exec_a);
+    assert_eq!(manager.template_count(), 1);
+
+    // --- "run" 2: a brand-new executor B, same manager -------------------
+    let exec_b = ForkserverExecutor::new(manager.clone(), NoneExecutor::new(&work_parent));
+    let job2 = shim_job(
+        &"2".repeat(64),
+        &root.path().join("out-2"),
+        &root.path().join("log-2"),
+        &[("TEST_WRITE_PPID", "1")],
+    );
+    let r2 = exec_b.run(&job2).expect("job2 dispatch");
+    assert_eq!(r2.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&r2.stderr));
+    let ppid2 =
+        std::fs::read_to_string(root.path().join("log-2").join("stdout.txt")).unwrap();
+    assert_eq!(
+        ppid1, ppid2,
+        "executor B must reuse the same warm template executor A used (same template pid)"
+    );
+    drop(exec_b);
+
+    // --- explicit shutdown: the next dispatch must spawn a fresh template
+    manager.shutdown();
+    assert_eq!(manager.template_count(), 0);
+
+    let exec_c = ForkserverExecutor::new(manager.clone(), NoneExecutor::new(&work_parent));
+    let job3 = shim_job(
+        &"3".repeat(64),
+        &root.path().join("out-3"),
+        &root.path().join("log-3"),
+        &[("TEST_WRITE_PPID", "1")],
+    );
+    let r3 = exec_c.run(&job3).expect("job3 dispatch");
+    assert_eq!(r3.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&r3.stderr));
+    let ppid3 =
+        std::fs::read_to_string(root.path().join("log-3").join("stdout.txt")).unwrap();
+    assert_ne!(
+        ppid1, ppid3,
+        "after shutdown() the next dispatch must spawn a fresh template process"
+    );
+    assert_eq!(manager.template_count(), 1);
+}
+
+#[test]
+fn template_key_includes_python_env_two_distinct_templates() {
+    if !python3_available() {
+        eprintln!("skipping: python3 not available");
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    let template_script = write_fake_template(root.path());
+    let work_parent = root.path().join("work");
+    let manager = make_manager(&work_parent, &template_script);
+    let exec = ForkserverExecutor::new(manager.clone(), NoneExecutor::new(&work_parent));
+
+    // Two jobs, identical interpreter + preload, but different
+    // `runtime.python_env` — §6.4/§6.7 require these to land in distinct
+    // templates (a changed `PyEnv` resolution must never reuse an old
+    // template's fork-time state).
+    let job_a = shim_job_with_env(
+        &"4".repeat(64),
+        &root.path().join("out-4"),
+        &root.path().join("log-4"),
+        &[("TEST_STDOUT", "a")],
+        "python-env-a",
+    );
+    let job_b = shim_job_with_env(
+        &"5".repeat(64),
+        &root.path().join("out-5"),
+        &root.path().join("log-5"),
+        &[("TEST_STDOUT", "b")],
+        "python-env-b",
+    );
+
+    let ra = exec.run(&job_a).expect("job a dispatch");
+    let rb = exec.run(&job_b).expect("job b dispatch");
+    assert_eq!(ra.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&ra.stderr));
+    assert_eq!(rb.exit_code, 0, "stderr: {}", String::from_utf8_lossy(&rb.stderr));
+
+    assert_eq!(
+        manager.template_count(),
+        2,
+        "distinct python_env must produce distinct templates even with identical interpreter+preload"
+    );
 }

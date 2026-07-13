@@ -1,5 +1,5 @@
 //! Forkserver executor (warm template processes, PPG3_DESIGN.md §6.4,
-//! CONTRACT.md "Executor").
+//! §6.7, CONTRACT.md "Executor").
 //!
 //! **Scope constraint (agreed, see STATUS.md)**: the forkserver itself needs
 //! *no* user namespaces. Templates fork and their children run in the same
@@ -9,23 +9,52 @@
 //! implementation item") stays the existing feature-gated stub in
 //! `sandbox.rs` — this module does not touch it.
 //!
+//! ## Ownership split (§6.7 cross-run persistence)
+//!
+//! [`TemplateManager`] owns the template pool (the keyed map of warm
+//! processes) independently of any one run: it is constructed once per
+//! coordinator *session* (`py/src/lib.rs`'s `Session` pyclass wraps an
+//! `Arc<TemplateManager>`) and handed, by reference-counted clone, to a
+//! fresh [`ForkserverExecutor`] on every `run()` call. `ForkserverExecutor`
+//! itself is now a thin per-run façade — dropping it (at the end of a run)
+//! does **not** kill any templates; only [`TemplateManager::shutdown`]
+//! (explicit `ppg3.session_stop()`) or dropping the last `Arc` to the
+//! manager (session GC'd / process exit) does. Callers that want the old
+//! "kill at run end" behavior (no session) simply construct a fresh
+//! `TemplateManager` per run and let it drop with the run — its `Drop`
+//! impl calls `shutdown()`, matching the pre-§6.7 semantics exactly.
+//!
+//! Idle-template reaping (a template whose key is no longer used by any
+//! job, e.g. after a `PyEnv` fingerprint changes) is **not implemented**:
+//! per §6.7, idle templates simply live until session end (`shutdown`) —
+//! "there is nothing to go stale" but nothing proactively evicts them
+//! either. `TemplateManager::template_count()` exposes the live count for
+//! tests/UX to observe this.
+//!
 //! ## Eligibility
 //!
 //! [`ForkserverExecutor::run`] dispatches a job through a template only when
 //! *both* hold: `job.runtime` is `Some` (the §5 `runtime` object) **and**
 //! its `argv` has the python-shim shape (`argv[1..]` contains `"-m"`
 //! immediately followed by `"ppg3._shim"` — [`is_shim_job`]). Everything
-//! else (a `CommandJob`'s plain argv, or a `ForkserverExecutor` constructed
-//! with an empty `template_argv` — the opt-out, see `py/src/lib.rs`) falls
-//! straight through to `fallback` (a plain [`NoneExecutor`]).
+//! else (a `CommandJob`'s plain argv, or a manager constructed with an
+//! empty `template_argv` — the opt-out, see `py/src/lib.rs`) falls straight
+//! through to `fallback` (a plain [`NoneExecutor`]).
 //!
 //! ## Template key
 //!
-//! One template per `(interpreter, preload)` pair, matching §6.4's "one
-//! template per `(PyEnv, preload-list)` pair" — `interpreter` is `argv[0]`
-//! of the *job* (not of the `template_argv` constructor argument, which
-//! only supplies the fixed tail after the interpreter — see
-//! [`ForkserverExecutor::new`]'s doc comment for why).
+//! One template per `(interpreter, preload, python_env)` triple — §6.4's
+//! "one template per `(PyEnv, preload-list)` pair" plus §6.4's fork-time
+//! purity requirement ("must be a pure function of `(PyEnv, preload, shim
+//! version)`") folded in explicitly by including `runtime.python_env` (the
+//! job's resolved `PyEnv` tool hash, §5) in the key. This is what makes
+//! §6.7's "a template is discarded only when its `PyEnv` resolution
+//! changes" automatic: a changed fingerprint/nix path is simply a new key —
+//! the old template is never touched, just never dispatched to again (see
+//! "Idle-template reaping" above). `interpreter` is `argv[0]` of the *job*
+//! (not of the `template_argv` constructor argument, which only supplies
+//! the fixed tail after the interpreter — see [`TemplateManager::new`]'s
+//! doc comment for why).
 //!
 //! ## Wire protocol (JSON lines, one object per line)
 //!
@@ -80,6 +109,12 @@ pub(crate) fn is_shim_job(job: &PreparedJob) -> bool {
 pub(crate) struct TemplateKey {
     interpreter: String,
     preload_json: String,
+    /// `runtime.python_env` (the §5 `PyEnv` tool hash), stringified. Part of
+    /// the key per §6.4/§6.7 (see module doc "Template key") — folded in
+    /// as its own field (not merged into `preload_json`) so
+    /// [`ForkserverExecutor`]'s doc/tests can reason about "same
+    /// interpreter+preload, different `PyEnv`" independently.
+    python_env: String,
 }
 
 /// `None` only if `job.argv` is empty (never true for a job that passed
@@ -87,16 +122,25 @@ pub(crate) struct TemplateKey {
 /// anyway, since this is also unit-tested standalone).
 pub(crate) fn template_key_for(job: &PreparedJob) -> Option<TemplateKey> {
     let interpreter = job.argv.first()?.clone();
-    let preload = job
-        .runtime
-        .as_ref()
+    let runtime = job.runtime.as_ref();
+    let preload = runtime
         .and_then(|r| r.get("preload"))
         .cloned()
         .unwrap_or_else(|| Value::Array(vec![]));
     let preload_json = serde_json::to_string(&preload).ok()?;
+    // `runtime.python_env` is a JSON string in the well-formed §5 document
+    // (or `null` for a non-python job, which never reaches here since
+    // `is_shim_job` already requires the shim argv shape) — stringify
+    // whatever is there defensively rather than assuming the exact shape.
+    let python_env = match runtime.and_then(|r| r.get("python_env")) {
+        Some(Value::String(s)) => s.clone(),
+        Some(other) => other.to_string(),
+        None => "null".to_string(),
+    };
     Some(TemplateKey {
         interpreter,
         preload_json,
+        python_env,
     })
 }
 
@@ -214,11 +258,16 @@ enum DispatchOutcome {
     TemplateDied,
 }
 
-// ======================================================== ForkserverExecutor
+// ========================================================= TemplateManager
 
-/// Warm-template executor (§6.4). Falls back to a plain [`NoneExecutor`]
-/// for anything not eligible for template dispatch (see [`is_shim_job`]).
-pub struct ForkserverExecutor {
+/// Owns the keyed pool of warm template processes (§6.4/§6.7), independent
+/// of any one run. See the module doc "Ownership split" for the lifecycle
+/// story: a `TemplateManager` is normally wrapped in an `Arc` and shared —
+/// by a coordinator session across many `run()` calls (§6.7), or, for a
+/// caller with no session concept, constructed fresh per run so its `Drop`
+/// (which calls [`shutdown`](TemplateManager::shutdown)) reproduces the
+/// pre-§6.7 "kill at run end" behavior exactly.
+pub struct TemplateManager {
     work_parent: PathBuf,
     /// The fixed *tail* of the template start command (flags/module after
     /// the interpreter, e.g. `["-I", "-m", "ppg3._template"]`) — see
@@ -226,11 +275,10 @@ pub struct ForkserverExecutor {
     /// Empty ⇒ forkserver dispatch is globally disabled (every job goes to
     /// `fallback`) — the `forkserver=False` opt-out (`py/src/lib.rs`).
     template_argv: Vec<String>,
-    fallback: NoneExecutor,
     templates: Mutex<HashMap<TemplateKey, Arc<Mutex<TemplateSlot>>>>,
 }
 
-impl ForkserverExecutor {
+impl TemplateManager {
     /// `template_argv`: the command used to start a template, e.g.
     /// `["/path/to/python", "-I", "-m", "ppg3._template"]` (the py side
     /// passes the venv interpreter; core tests pass a custom script — see
@@ -240,32 +288,71 @@ impl ForkserverExecutor {
     /// per CONTRACT.md rule 4, see STATUS.md "template interpreter
     /// substitution"): element 0 of `template_argv` is treated as a
     /// *default*, not as the interpreter every template is forced to use.
-    /// At spawn time this executor substitutes the *job's own* interpreter
+    /// At spawn time this manager substitutes the *job's own* interpreter
     /// (`job.argv[0]`, i.e. the resolved `PyEnv.executable_hint()` a
     /// `FileJob`/`DataJob`/`FetchJob` already carries) for `template_argv[0]`
     /// and keeps `template_argv[1..]` as the fixed tail — this is what
     /// makes "Template key: (interpreter path = argv[0] of the job, ...)"
     /// (§6.4) actually spawn the interpreter its own key names, and is what
-    /// lets a single `ForkserverExecutor` serve jobs declared under
+    /// lets a single `TemplateManager` serve jobs declared under
     /// *different* `PyEnv`s (§6.4's "gains something ppg2 never had") in
-    /// one run. For every graph in this codebase's test suite (all jobs
-    /// share one `PyEnv.current()`) `job.argv[0] == template_argv[0]`
-    /// anyway, so this substitution is behaviorally invisible there; it
-    /// only matters once multi-PyEnv graphs exist.
+    /// one run — or across many runs in one session (§6.7). For every graph
+    /// in this codebase's test suite (all jobs share one `PyEnv.current()`)
+    /// `job.argv[0] == template_argv[0]` anyway, so this substitution is
+    /// behaviorally invisible there; it only matters once multi-PyEnv
+    /// graphs exist.
     ///
     /// Empty `template_argv` disables the forkserver entirely: every job
-    /// (shim-shaped or not) goes straight to `fallback`.
-    pub fn new(work_parent: PathBuf, template_argv: Vec<String>, fallback: NoneExecutor) -> Self {
-        ForkserverExecutor {
+    /// (shim-shaped or not) goes straight to a caller's `fallback`.
+    pub fn new(work_parent: PathBuf, template_argv: Vec<String>) -> Self {
+        TemplateManager {
             work_parent,
             template_argv,
-            fallback,
             templates: Mutex::new(HashMap::new()),
         }
     }
 
+    /// Whether this manager is configured to ever spawn a template (a
+    /// non-empty `template_argv`) — the Rust-side mirror of the
+    /// `forkserver=False` opt-out.
+    pub(crate) fn is_enabled(&self) -> bool {
+        !self.template_argv.is_empty()
+    }
+
+    /// Number of template keys with a live-or-formerly-live slot registered
+    /// (i.e. distinct `(interpreter, preload, python_env)` triples ever
+    /// dispatched to) — for tests/UX (§6.7: idle templates are not reaped,
+    /// so this only grows, or resets to 0 after [`shutdown`](Self::shutdown)).
+    pub fn template_count(&self) -> usize {
+        self.templates.lock().unwrap().len()
+    }
+
+    /// Kill and reap every live template, then clear the pool. Idempotent —
+    /// safe to call on an already-empty/shutdown manager (a no-op), and
+    /// also runs automatically on `Drop`. This is the Rust side of
+    /// `ppg3.session_stop()` (§6.7 "session end ... kills templates").
+    pub fn shutdown(&self) {
+        let slots: Vec<Arc<Mutex<TemplateSlot>>> = {
+            let mut map = self.templates.lock().unwrap();
+            let slots = map.values().cloned().collect();
+            map.clear();
+            slots
+        };
+        for slot_arc in slots {
+            let mut slot = slot_arc.lock().unwrap();
+            if let Some(t) = slot.template.take() {
+                let mut child = t.child.lock().unwrap();
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
     fn key_hash(key: &TemplateKey) -> String {
-        let bytes = format!("{}\u{0}{}", key.interpreter, key.preload_json);
+        let bytes = format!(
+            "{}\u{0}{}\u{0}{}",
+            key.interpreter, key.preload_json, key.python_env
+        );
         crate::hash::blake3_hex(bytes.as_bytes())[..16].to_string()
     }
 
@@ -504,34 +591,48 @@ impl ForkserverExecutor {
     }
 }
 
+/// §6.7 "session end ... kills templates": dropping the last `Arc` to a
+/// `TemplateManager` (session GC'd, or — for a caller with no session
+/// concept — a per-run manager going out of scope at the end of `run()`)
+/// kills every live template. Calls the same [`shutdown`](TemplateManager::shutdown)
+/// an explicit `ppg3.session_stop()` does, so both paths are one code path.
+impl Drop for TemplateManager {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+// ======================================================== ForkserverExecutor
+
+/// Warm-template executor (§6.4) — a thin per-run façade over a shared
+/// [`TemplateManager`] (§6.7: the manager, not the executor, owns the
+/// template pool's lifetime). Falls back to a plain [`NoneExecutor`] for
+/// anything not eligible for template dispatch (see [`is_shim_job`]).
+/// Dropping a `ForkserverExecutor` does **not** kill any templates — only
+/// dropping (or explicitly shutting down) the underlying `TemplateManager`
+/// does; see the module doc "Ownership split".
+pub struct ForkserverExecutor {
+    manager: Arc<TemplateManager>,
+    fallback: NoneExecutor,
+}
+
+impl ForkserverExecutor {
+    pub fn new(manager: Arc<TemplateManager>, fallback: NoneExecutor) -> Self {
+        ForkserverExecutor { manager, fallback }
+    }
+}
+
 impl Executor for ForkserverExecutor {
     fn run(&self, job: &PreparedJob) -> Result<ExecResult> {
-        if self.template_argv.is_empty() || !is_shim_job(job) {
+        if !self.manager.is_enabled() || !is_shim_job(job) {
             return self.fallback.run(job);
         }
         warn_once();
-        self.run_via_template(job)
+        self.manager.run_via_template(job)
     }
 
     fn is_sandboxed(&self) -> bool {
         false
-    }
-}
-
-impl Drop for ForkserverExecutor {
-    fn drop(&mut self) {
-        let slots: Vec<Arc<Mutex<TemplateSlot>>> = {
-            let map = self.templates.lock().unwrap();
-            map.values().cloned().collect()
-        };
-        for slot_arc in slots {
-            let slot = slot_arc.lock().unwrap();
-            if let Some(t) = &slot.template {
-                let mut child = t.child.lock().unwrap();
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
     }
 }
 
@@ -541,6 +642,10 @@ mod tests {
     use std::collections::BTreeMap as Map;
 
     fn shim_job(argv0: &str, preload: Vec<&str>) -> PreparedJob {
+        shim_job_with_env(argv0, preload, "abc123")
+    }
+
+    fn shim_job_with_env(argv0: &str, preload: Vec<&str>, python_env: &str) -> PreparedJob {
         PreparedJob {
             ik: "a".repeat(64),
             argv: vec![
@@ -559,7 +664,7 @@ mod tests {
             allow_network: false,
             cwd_out: true,
             runtime: Some(serde_json::json!({
-                "python_env": "abc123",
+                "python_env": python_env,
                 "preload": preload,
                 "shim": "1",
             })),
@@ -655,10 +760,18 @@ mod tests {
     }
 
     #[test]
+    fn template_key_differs_by_python_env() {
+        let a = template_key_for(&shim_job_with_env("/py", vec!["numpy"], "env-a")).unwrap();
+        let b = template_key_for(&shim_job_with_env("/py", vec!["numpy"], "env-b")).unwrap();
+        assert_ne!(a, b, "same interpreter+preload but different python_env must differ");
+    }
+
+    #[test]
     fn empty_template_argv_always_falls_back() {
         let parent = tempfile::tempdir().unwrap();
         let fallback = NoneExecutor::new(parent.path());
-        let exec = ForkserverExecutor::new(parent.path().to_path_buf(), vec![], fallback);
+        let manager = Arc::new(TemplateManager::new(parent.path().to_path_buf(), vec![]));
+        let exec = ForkserverExecutor::new(manager, fallback);
         // A shim-shaped job with a real interpreter would normally route
         // through the template, but empty template_argv disables that
         // globally — falls back to NoneExecutor, which will fail to exec
@@ -669,5 +782,15 @@ mod tests {
         let job = shim_job("/bin/true", vec![]);
         let result = exec.run(&job).unwrap();
         assert_eq!(result.exit_code, 0);
+    }
+
+    #[test]
+    fn manager_shutdown_is_idempotent_and_clears_count() {
+        let parent = tempfile::tempdir().unwrap();
+        let manager = TemplateManager::new(parent.path().to_path_buf(), vec![]);
+        assert_eq!(manager.template_count(), 0);
+        manager.shutdown();
+        manager.shutdown();
+        assert_eq!(manager.template_count(), 0);
     }
 }

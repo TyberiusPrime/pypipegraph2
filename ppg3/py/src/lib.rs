@@ -15,13 +15,30 @@
 //!   (..., template_argv = Vec::new()))]`) sixth argument, `template_argv:
 //!   Vec<String>` (forkserver work package, see STATUS.md) — the template
 //!   start command (e.g. `[sys.executable, "-I", "-m", "ppg3._template"]`)
-//!   handed to [`ForkserverExecutor::new`]. `run()` now always constructs a
+//!   handed to [`TemplateManager::new`]. `run()` now always constructs a
 //!   `ForkserverExecutor` (wrapping a plain `NoneExecutor` as its
 //!   `fallback`) instead of a bare `NoneExecutor`; an empty `template_argv`
 //!   (the default, and what `run.py` passes for `forkserver=False`) makes
 //!   `ForkserverExecutor` behave exactly like the old bare `NoneExecutor`
 //!   for every job — this is a behavior-preserving superset, not a
 //!   breaking change, for any caller that omits the new argument.
+//! - `run(...)` takes a further additive, optional seventh argument,
+//!   `session: Option<Session>` (§6.7 cross-run template persistence, see
+//!   STATUS.md "session mode"). `Session` (a new `#[pyclass]`) wraps an
+//!   `Arc<TemplateManager>` that outlives any one `run()` call —
+//!   `python/ppg3/run.py` keeps a module-level `Session` alive across
+//!   `ppg3.run()` calls so warm templates survive between runs inside one
+//!   coordinator process. When `session` is given, `run()` builds its
+//!   `ForkserverExecutor` from `session`'s manager (a cloned `Arc`, cheap)
+//!   and **ignores** `template_argv` entirely — the session was already
+//!   configured with its own `template_argv` at `open_session()` time, and
+//!   letting a later `run()` call silently override it would defeat the
+//!   whole point of a session having one stable template pool. Without a
+//!   `session` (the default, `None`), `run()` builds a private
+//!   `TemplateManager` exactly as before — that manager (and any templates
+//!   it spawned) is torn down at the end of the call when the `Arc` drops,
+//!   reproducing the pre-§6.7 "kill at run end" behavior for callers that
+//!   never opted into a session.
 //! - `lookup(...)` returns the manifest JSON with an extra top-level
 //!   `store_index` field spliced in (`#[serde(flatten)]` of the `Manifest`
 //!   plus `"store_index"`). CONTRACT.md's `ViewSpec`/`write_generation`
@@ -44,6 +61,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -51,7 +69,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use ppg3_core::executor::NoneExecutor;
-use ppg3_core::forkserver::ForkserverExecutor;
+use ppg3_core::forkserver::{ForkserverExecutor, TemplateManager};
 use ppg3_core::manifest::Manifest;
 use ppg3_core::scheduler::{self, HostCallbacks, JobDef};
 use ppg3_core::store::Store;
@@ -139,6 +157,56 @@ fn lookup(handle: &StoreSetHandle, ik: &str) -> PyResult<Option<String>> {
     }
 }
 
+// ============================================================= session
+
+/// A coordinator-session handle (§6.7 "templates outlive runs inside a
+/// coordinator session"): wraps an `Arc<TemplateManager>` so warm templates
+/// survive across multiple [`run`] calls sharing this `Session`, instead of
+/// being killed at the end of each individual run. Python holds one of
+/// these at module scope (`python/ppg3/run.py`); when the last reference to
+/// a `Session` (and thus to its `Arc<TemplateManager>`) is dropped —
+/// explicit `ppg3.session_stop()`, or ordinary Python GC at process exit —
+/// every template it owns is killed (`TemplateManager`'s `Drop` impl).
+#[pyclass]
+struct Session {
+    manager: Arc<TemplateManager>,
+}
+
+/// Opens a new coordinator session: a `TemplateManager` whose templates
+/// live until `session_shutdown()` is called (or this `Session` — and every
+/// clone of it — is dropped). `work_dir`: the staging root passed through
+/// to `TemplateManager::new` (same role as `run()`'s own `work_dir`
+/// argument — see that function's doc comment on why a *stable* directory
+/// matters for session mode). `template_argv`: the template start command
+/// (e.g. `[sys.executable, "-I", "-m", "ppg3._template"]`); empty disables
+/// the forkserver for every `run()` call that uses this session (the
+/// `forkserver=False` opt-out, session-scoped).
+#[pyfunction]
+fn open_session(work_dir: &str, template_argv: Vec<String>) -> Session {
+    Session {
+        manager: Arc::new(TemplateManager::new(PathBuf::from(work_dir), template_argv)),
+    }
+}
+
+/// Kills and reaps every template `session` currently owns, then clears its
+/// pool (`TemplateManager::shutdown` — idempotent, safe to call more than
+/// once on the same session). Does not invalidate `session` itself: a
+/// further `run(..., session=session)` call simply respawns templates on
+/// demand into the same (now-empty) pool.
+#[pyfunction]
+fn session_shutdown(session: &Session) {
+    session.manager.shutdown();
+}
+
+/// Number of distinct template keys `session` has ever spawned a template
+/// for (§6.7: idle templates — e.g. from a since-superseded `PyEnv`
+/// resolution — are not proactively reaped, so this only grows until
+/// `session_shutdown()` resets it to 0). For tests/UX.
+#[pyfunction]
+fn session_template_count(session: &Session) -> usize {
+    session.manager.template_count()
+}
+
 // =============================================================== run()
 
 /// Wraps a Python `callbacks` object (§8.1 rule 1: the two coarse
@@ -192,8 +260,14 @@ impl HostCallbacks for PyHostCallbacks {
     }
 }
 
+// `session` (§6.7) is the 8th additive-but-optional argument on this PyO3
+// boundary function; splitting it into a builder/options struct would ripple
+// through `run.py`'s call site and CONTRACT.md's PyO3 boundary sketch for no
+// real clarity gain at this arity — every argument here is a plain JSON
+// str/bool/Vec/handle, not several booleans that are easy to transpose.
+#[allow(clippy::too_many_arguments)]
 #[pyfunction]
-#[pyo3(signature = (handle, jobs_json, parallelism_json, callbacks, work_dir, template_argv = Vec::new()))]
+#[pyo3(signature = (handle, jobs_json, parallelism_json, callbacks, work_dir, template_argv = Vec::new(), session = None))]
 fn run(
     py: Python<'_>,
     handle: &StoreSetHandle,
@@ -202,6 +276,7 @@ fn run(
     callbacks: PyObject,
     work_dir: &str,
     template_argv: Vec<String>,
+    session: Option<PyRef<'_, Session>>,
 ) -> PyResult<String> {
     let jobs: Vec<JobDef> = serde_json::from_str(jobs_json).map_err(to_pyerr)?;
     let parallelism: BTreeMap<String, u64> =
@@ -215,7 +290,19 @@ fn run(
     // processes (`ppg3_core::forkserver::ForkserverExecutor`) while
     // `CommandJob`s and non-shim argv still fall back to `NoneExecutor`
     // unchanged.
-    let executor = ForkserverExecutor::new(PathBuf::from(work_dir), template_argv, fallback);
+    //
+    // Additive 7th argument (§6.7 session mode, see STATUS.md): `session`,
+    // when given, supplies an already-open `TemplateManager` (a cloned
+    // `Arc`, so its templates outlive this call) and `template_argv` above
+    // is ignored — see this module's doc comment "session" bullet for why.
+    // Without a session, a fresh `TemplateManager` is built right here and
+    // torn down (killing any templates it spawned) when it drops at the
+    // end of this function, exactly like the pre-§6.7 `ForkserverExecutor`.
+    let manager = match &session {
+        Some(s) => s.manager.clone(),
+        None => Arc::new(TemplateManager::new(PathBuf::from(work_dir), template_argv)),
+    };
+    let executor = ForkserverExecutor::new(manager, fallback);
     let host_callbacks = PyHostCallbacks { callbacks };
     let abort = AtomicBool::new(false);
 
@@ -287,6 +374,7 @@ fn write_generation(
 #[pyo3(name = "_core")]
 fn ppg3_core_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<StoreSetHandle>()?;
+    m.add_class::<Session>()?;
     m.add_function(wrap_pyfunction!(input_key, m)?)?;
     m.add_function(wrap_pyfunction!(canonicalize, m)?)?;
     m.add_function(wrap_pyfunction!(blake3_file, m)?)?;
@@ -295,5 +383,8 @@ fn ppg3_core_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(lookup, m)?)?;
     m.add_function(wrap_pyfunction!(run, m)?)?;
     m.add_function(wrap_pyfunction!(write_generation, m)?)?;
+    m.add_function(wrap_pyfunction!(open_session, m)?)?;
+    m.add_function(wrap_pyfunction!(session_shutdown, m)?)?;
+    m.add_function(wrap_pyfunction!(session_template_count, m)?)?;
     Ok(())
 }
