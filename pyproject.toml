@@ -22,6 +22,7 @@ urls = {"homepage"= "https://github.com/TyberiusPrime/pypipegraph2"}
 
 requires-python = ">=3.12"
 dependencies = [
+	"blake3>=1.0.9",
 	"deepdiff>=8.0.0",
 	"filelock",
 	"lib_programname",

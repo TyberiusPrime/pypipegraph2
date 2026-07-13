@@ -157,6 +157,8 @@
         rich = [ ];
         wrapt = [ ];
         xxhash = [ ];
+        blake3 = [ ];
+        libcst = [];
       };
 
       # Python versions covered by the (former) GitHub Actions test matrix.
@@ -267,24 +269,26 @@
         let
           venv = mkTestVenv ver;
         in
-        pkgs.runCommand "pytest-python${ver}" {
-          nativeBuildInputs = [
-            venv
-            pkgs.procps # tests/test_external_jobs.py shells out to `ps`
-          ];
-        } ''
-          mkdir -p work
-          cp -r ${./python} work/python
-          cp -r ${testsSrc} work/tests
-          cp ${./pyproject.toml} work/pyproject.toml
-          cp ${./Cargo.toml} work/Cargo.toml # tests/test_version.py reads the crate version from here
-          chmod -R u+w work
-          cp ${pypipegraph2-so}/lib/libpypipegraph2.so work/python/pypipegraph2/pypipegraph2.abi3.so
-          cd work
-          export HOME=$TMPDIR
-          pytest tests
-          touch $out
-        '';
+        pkgs.runCommand "pytest-python${ver}"
+          {
+            nativeBuildInputs = [
+              venv
+              pkgs.procps # tests/test_external_jobs.py shells out to `ps`
+            ];
+          }
+          ''
+            mkdir -p work
+            cp -r ${./python} work/python
+            cp -r ${testsSrc} work/tests
+            cp ${./pyproject.toml} work/pyproject.toml
+            cp ${./Cargo.toml} work/Cargo.toml # tests/test_version.py reads the crate version from here
+            chmod -R u+w work
+            cp ${pypipegraph2-so}/lib/libpypipegraph2.so work/python/pypipegraph2/pypipegraph2.abi3.so
+            cd work
+            export HOME=$TMPDIR
+            pytest tests
+            touch $out
+          '';
 
       pytestChecks = builtins.listToAttrs (
         map (ver: {
