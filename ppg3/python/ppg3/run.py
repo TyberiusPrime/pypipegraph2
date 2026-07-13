@@ -112,7 +112,15 @@ class RunCallbacks:
             raise RuntimeError(f"run_in_process: no UnsandboxedJob with id {job_id!r}")
         if job_id in self._inprocess_memo:
             return
-        json.loads(key_doc_json)  # currently unused beyond validating shape
+        json.loads(key_doc_json)  # validate shape
+        # §6.7 session-lifetime memo, keyed by ik: an InProcess job whose
+        # key document is unchanged since an earlier run in this session
+        # does not run again. Cleared by session_stop().
+        core = get_core()
+        ik = core.input_key(core.canonicalize(key_doc_json).encode("utf-8"))
+        if ik in _loader_memo:
+            self._inprocess_memo[job_id] = None
+            return
 
         inputs: Dict[str, str] = {}
         params: Dict[str, Any] = {}
@@ -132,6 +140,7 @@ class RunCallbacks:
         job_io = JobIO(inputs=inputs, outputs={}, tools={}, log_dir="", params=params)
         job.run(job_io)
         self._inprocess_memo[job_id] = None
+        _loader_memo[ik] = None
 
 
 def _write_project_config(graph: Graph) -> None:
@@ -191,6 +200,47 @@ def watch_mode():
 # the raw decoded RunReport dict (``built``/``hits``/``failed``/
 # ``job_entries``), stashed unconditionally (success or failure) so the
 # watcher can print counts either way.
+# ---------------------------------------------------------- session (§6.7)
+#
+# One module-level coordinator session per process: warm forkserver
+# templates (and the loader-layer memos below) survive across ppg3.run()
+# calls — watch-mode iterations and repl use get this for free, since both
+# just call run() again in the same process. The session's TemplateManager
+# lives on the Rust side (see py/src/lib.rs `Session`); templates are keyed
+# by (interpreter, preload, python_env hash), so a changed PyEnv resolution
+# simply spawns a new template and the old one idles until session end.
+_session: Optional[Any] = None
+_session_work_dir: Optional[str] = None
+
+# §6.7: "loader-layer memos persist across runs in the session, keyed by
+# ik". Consulted by RunCallbacks.run_in_process; cleared by session_stop().
+_loader_memo: Dict[str, None] = {}
+
+
+def _get_session(core) -> Any:
+    global _session, _session_work_dir
+    if _session is None:
+        import tempfile
+
+        _session_work_dir = tempfile.mkdtemp(prefix="ppg3-session-")
+        _session = core.open_session(
+            _session_work_dir, [sys.executable, "-I", "-m", "ppg3._template"]
+        )
+    return _session
+
+
+def session_stop() -> None:
+    """End the coordinator session (§6.7 `ppg3 session stop`): kill all warm
+    forkserver templates and clear the loader-layer memos. Safe to call any
+    number of times; the next :func:`run` lazily starts a fresh session."""
+    global _session
+    if _session is not None:
+        core = get_core()
+        core.session_shutdown(_session)
+        _session = None
+    _loader_memo.clear()
+
+
 _last_run_info: Dict[str, Any] = {
     "graph": None,
     "watched_paths": [],
@@ -268,8 +318,19 @@ def run(
     template_argv = (
         [sys.executable, "-I", "-m", "ppg3._template"] if graph.forkserver else []
     )
+    # §6.7: with the forkserver on, dispatch through the module-level
+    # session so templates stay warm across run() calls in this process
+    # (watch iterations, repl). run(session=...) makes the Rust side use
+    # the session's TemplateManager instead of a run-scoped one.
+    session = _get_session(core) if graph.forkserver else None
     report_json = core.run(
-        handle, jobs_json, parallelism_json, callbacks, work_dir, template_argv
+        handle,
+        jobs_json,
+        parallelism_json,
+        callbacks,
+        work_dir,
+        template_argv,
+        session,
     )
     report = json.loads(report_json)
 

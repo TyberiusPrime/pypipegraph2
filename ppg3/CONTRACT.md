@@ -646,3 +646,12 @@ errors loudly without a working nix. Keeping the closure a *parameter* of
 `bwrap_argv` keeps it a pure, unit-testable function per the original
 contract line; only `BwrapExecutor::run` spawns the query. `NoneExecutor`
 is unaffected (no enforcement, no binds).
+
+## Additive clarification (§6.7 session mode)
+
+`_core.open_session(work_dir, template_argv) -> Session`,
+`_core.run(..., session=None)` (session's TemplateManager wins over the
+per-call `template_argv` when given), `_core.session_shutdown(session)`,
+`_core.session_template_count(session)`. Python keeps one module-level
+Session per process (run.py); `ppg3.session_stop()` ends it and clears the
+ik-keyed loader memos.

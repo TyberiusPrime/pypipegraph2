@@ -1021,3 +1021,22 @@ configs; `cargo check -p ppg3-cli` clean; touched file rustfmt'd.
 - The closure cache never invalidates (fine: store paths are immutable;
   a GC'd-mid-run store path would fail at bind time with a clear bwrap
   error).
+
+## Session mode: cross-run template persistence (§6.7) — done
+
+Rust half (previous commit): TemplateManager split from ForkserverExecutor,
+Session pyclass, run(session=...), template key includes runtime.python_env
+(changed PyEnv ⇒ new template automatically; old one idles until session
+end — no idle reaping in v1).
+
+Python half (this commit, coordinator-written after the agent hit a usage
+limit): module-level lazy session in run.py (created on first forkserver
+run; stable mkdtemp work dir per process), run() dispatches through it, so
+watch iterations and repl use reuse warm templates with no further wiring.
+ppg3.session_stop() (exported) kills templates and clears the §6.7
+loader-layer memos, which are now module-level keyed by ik (an InProcess
+job with an unchanged key document runs once per session, not per run).
+Proof tests (test_session.py): same template pid across two runs with
+distinct graphs/stores/projects; session_stop → count 0 → next run
+respawns (new pid); loader memo hit across runs, cleared by session_stop;
+idempotent stop. Totals: 184 Rust + 149 Python tests, clippy clean.
