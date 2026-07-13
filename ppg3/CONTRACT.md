@@ -621,3 +621,12 @@ patcher" entry; this section only records the resulting interface/shape.
 - **`pyproject.toml`**: `[project.optional-dependencies]` gained `tofu =
   ["libcst"]`; the existing `test` extra now also includes `libcst` so
   `test_tofu.py` runs unconditionally in the dev venv.
+
+## Additive clarification (§6.7 session mode)
+
+`_core.open_session(work_dir, template_argv) -> Session`,
+`_core.run(..., session=None)` (session's TemplateManager wins over the
+per-call `template_argv` when given), `_core.session_shutdown(session)`,
+`_core.session_template_count(session)`. Python keeps one module-level
+Session per process (run.py); `ppg3.session_stop()` ends it and clears the
+ik-keyed loader memos.

@@ -25,13 +25,14 @@ from .jobs import (
     new,
 )
 from .localscope import DefinitionError
-from .run import run
+from .run import run, session_stop
 from .tools import PyEnv, ToolSpec
 from .transport import Source
 
 __all__ = [
     "new",
     "run",
+    "session_stop",
     "FileJob",
     "CommandJob",
     "DataJob",
