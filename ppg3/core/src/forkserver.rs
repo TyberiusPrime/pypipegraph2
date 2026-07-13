@@ -779,7 +779,18 @@ mod tests {
         // behavior here) but must NOT attempt any template spawn (no
         // panics, no hangs) — using /bin/true as argv[0] keeps this a pure
         // "did it route to fallback" check without needing python.
-        let job = shim_job("/bin/true", vec![]);
+
+        let bin_true = {
+            // no /bin/true on nixos.
+            std::str::from_utf8(
+                &(
+            std::process::Command::new("which")
+                .arg("true")
+                .output()
+                .expect("failed to run `which true`")
+                .stdout)).expect("which true did not return utf-8").trim().to_string()
+        };
+        let job = shim_job(&bin_true, vec![]);
         let result = exec.run(&job).unwrap();
         assert_eq!(result.exit_code, 0);
     }

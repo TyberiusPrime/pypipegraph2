@@ -1007,6 +1007,7 @@ mod bwrap_integration {
             log_dir: log.to_path_buf(),
             allow_network: false,
             cwd_out: true,
+            runtime: None,
         }
     }
 
