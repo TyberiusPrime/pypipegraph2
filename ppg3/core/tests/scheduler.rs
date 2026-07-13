@@ -725,44 +725,71 @@ fn determinism_violation_surfaces() {
     );
 }
 
-/// §7.6 fixed-output jobs: a correct declared `fixed_output` succeeds
-/// normally; a wrong one fails the job with a message naming both hashes.
+/// §7.6 fixed-output jobs: `fixed_output` (a FetchJob's `blake3=`) pins the
+/// **content blake3 of the produced file** — what `b3sum` yields and what
+/// TOFU writes back — NOT the output hash `oh` (blake3 of the content-map
+/// JSON). A matching file-hash pin succeeds; a mismatch fails with a message
+/// naming both hashes. Regression lock: pinning the `oh` (the old, broken
+/// expectation) must now *fail*, because a correctly-pinned fetch was failing
+/// on every cold-cache rebuild when the check compared against `oh`.
 #[test]
 fn fixed_output_verified() {
     let (_dir, storeset) = fresh_storeset();
     let callbacks = TestCallbacks::new();
     let abort = AtomicBool::new(false);
 
-    // Compute the correct oh independently, exactly the way the store does
-    // (hash the same content under its own scratch dir), so this assertion
-    // doesn't depend on the test host's umask.
+    // Compute both hashes independently, exactly the way the store does (hash
+    // the same content under a scratch dir), so this doesn't depend on umask.
     let scratch = tempfile::tempdir().unwrap();
     std::fs::write(scratch.path().join("out.txt"), b"fixed-content").unwrap();
     let content = ppg3_core::store::hash_staging_content(scratch.path()).unwrap();
-    let correct_oh = ppg3_core::manifest::output_hash(&content).unwrap();
+    let file_blake3 = content.values().next().unwrap().blake3.clone();
+    let oh = ppg3_core::manifest::output_hash(&content).unwrap();
+    // The two are categorically different hashes — this is the whole point.
+    assert_ne!(file_blake3, oh, "file content hash must differ from the output hash");
 
     let exec = MockExecutor::new();
     exec.set_output("f_ok", &[("out.txt", b"fixed-content")]);
-    exec.set_output("f_bad", &[("out.txt", b"fixed-content")]);
+    exec.set_output("f_bad_oh", &[("out.txt", b"fixed-content")]);
+    exec.set_output("f_bad_wrong", &[("out.txt", b"fixed-content")]);
 
+    // Correct: pins the file's content blake3.
     let mut f_ok = base_job("f_ok");
     f_ok.outputs_declared = vec!["out.txt".to_string()];
-    f_ok.fixed_output = Some(correct_oh.clone());
+    f_ok.fixed_output = Some(file_blake3.clone());
 
-    let mut f_bad = base_job("f_bad");
-    f_bad.outputs_declared = vec!["out.txt".to_string()];
-    let wrong_oh = "0".repeat(64);
-    f_bad.fixed_output = Some(wrong_oh.clone());
+    // Regression: pinning the output hash `oh` must be REJECTED now.
+    let mut f_bad_oh = base_job("f_bad_oh");
+    f_bad_oh.outputs_declared = vec!["out.txt".to_string()];
+    f_bad_oh.fixed_output = Some(oh.clone());
 
-    let report =
-        scheduler::run(&storeset, &exec, vec![f_ok, f_bad], &callbacks, &parallelism(2, &[]), &abort).unwrap();
+    // A plainly-wrong pin fails and the message names declared + actual.
+    let mut f_bad_wrong = base_job("f_bad_wrong");
+    f_bad_wrong.outputs_declared = vec!["out.txt".to_string()];
+    let wrong = "0".repeat(64);
+    f_bad_wrong.fixed_output = Some(wrong.clone());
+
+    let report = scheduler::run(
+        &storeset,
+        &exec,
+        vec![f_ok, f_bad_oh, f_bad_wrong],
+        &callbacks,
+        &parallelism(3, &[]),
+        &abort,
+    )
+    .unwrap();
 
     assert_eq!(report.built, vec!["f_ok".to_string()]);
-    assert!(report.failed.contains_key("f_bad"));
-    let msg = &report.failed["f_bad"];
-    assert!(msg.contains(&wrong_oh), "expected declared oh in message: {msg}");
-    assert!(msg.contains(&correct_oh), "expected produced oh in message: {msg}");
-    assert_eq!(report.job_entries.get("f_ok").unwrap().1, correct_oh);
+    assert!(
+        report.failed.contains_key("f_bad_oh"),
+        "pinning the output hash must be rejected (regression): {report:?}"
+    );
+    assert!(report.failed.contains_key("f_bad_wrong"));
+    let msg = &report.failed["f_bad_wrong"];
+    assert!(msg.contains(&wrong), "expected declared blake3 in message: {msg}");
+    assert!(msg.contains(&file_blake3), "expected actual file blake3 in message: {msg}");
+    // The successful job's store entry is still keyed by its oh.
+    assert_eq!(report.job_entries.get("f_ok").unwrap().1, oh);
 }
 
 /// §6.3 item 2 (the loader layer): a plain `InProcess` (non-`graph_job`)

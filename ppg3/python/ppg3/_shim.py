@@ -206,9 +206,25 @@ def run_fetch(spec: Dict[str, Any]) -> int:
     digest = _hash_file_blake3(output_path)
     print(f"blake3:{digest}")
     if expected is not None and digest != expected:
+        # Preserve the rejected download next to its intended path so the
+        # caller can inspect/diff it (the store never publishes a failed
+        # fetch, so without this the bytes would be discarded). Report the
+        # absolute path plus both hashes so a real content drift is
+        # diagnosable, not just "the numbers differ".
+        import os as _os
+
+        rejected = output_path + ".rejected"
+        try:
+            _os.replace(output_path, rejected)
+            kept = _os.path.abspath(rejected)
+        except OSError:
+            kept = _os.path.abspath(output_path)
         sys.stderr.write(
-            f"ppg3._shim: fetch hash mismatch for {url}: expected {expected}, "
-            f"got {digest}\n"
+            f"ppg3._shim: fetch hash mismatch for {url}:\n"
+            f"  expected blake3 {expected} (the pinned/old content)\n"
+            f"  got      blake3 {digest} (the freshly downloaded content)\n"
+            f"  the downloaded bytes were kept at: {kept}\n"
+            f"  diff them against your pinned copy to see what upstream changed.\n"
         )
         return 1
     return 0

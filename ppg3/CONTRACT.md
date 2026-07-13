@@ -195,9 +195,9 @@ pub struct JobDef {
     pub retain: Retain,                       // Default | Evict | Pin(name)
     pub exec_template: ExecTemplate,          // how to lower to PreparedJob
     pub view: BTreeMap<String, String>,       // output name -> view-relative path
-    pub fixed_output: Option<String>,         // declared oh for FetchJob-style
+    pub fixed_output: Option<String>,         // FetchJob `blake3=`: pinned content blake3 of the single fetched file (what `b3sum` yields), verified against that file's hash — NOT the output hash `oh`
 }
-pub enum InputRef { Job { id: String }, JobSubset { id: String, names: Vec<String> }, Leaf { hash: String } }
+pub enum InputRef { Job { id: String }, JobSubset { id: String, names: Vec<String> }, Leaf { hash: String }, File { hash: String, source: String } }  // File: host path mounted read-only at /ppg/in/<name>; keys by `hash` only (identical contribution to Leaf, no ik churn), `source` never enters the key document
 pub enum ExecTemplate { Argv { argv: Vec<String>, allow_network: bool }, InProcess }  // InProcess => host callback
 ```
 
@@ -589,8 +589,11 @@ patcher" entry; this section only records the resulting interface/shape.
 - **`ppg3.tofu.run_tofu_pass(graph, report, core, handle) -> None`** —
   called by `run()` immediately after the existing `report.get("failed")`
   check (i.e. only on a successful run). For every `FetchJob` in `graph`
-  with `blake3 is None`: resolves its actual output hash via
-  `report["job_entries"][job.id]` + `core.lookup(handle, ik)`, groups by
+  with `blake3 is None`: resolves the content blake3 of its single output
+  file (the manifest content map's sole entry, via
+  `report["job_entries"][job.id]` + `core.lookup(handle, ik)` — this is what
+  the scheduler verifies `fixed_output` against, NOT the output hash `oh`),
+  groups by
   `_call_site`, and either patches (exactly one job at that site, `libcst`
   importable) or appends to a printed fallback table (everything else:
   shared call sites, unrecorded call sites, unpatchable sites, or `libcst`

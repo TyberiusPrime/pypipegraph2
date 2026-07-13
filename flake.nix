@@ -159,6 +159,7 @@
         xxhash = [ ];
         blake3 = [ ];
         libcst = [];
+        pip = [];
       };
 
       # Python versions covered by the (former) GitHub Actions test matrix.

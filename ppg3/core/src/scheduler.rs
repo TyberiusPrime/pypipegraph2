@@ -88,6 +88,11 @@ pub enum InputRef {
     Job { id: String },
     JobSubset { id: String, names: Vec<String> },
     Leaf { hash: String },
+    /// A host file mounted read-only into the sandbox (`ppg3.File(...)`).
+    /// `hash` is the content hash that gates staleness (its *only* input-key
+    /// contribution — identical to `Leaf`, so it does not re-key existing
+    /// jobs); `source` is the absolute host path bound at `/ppg/in/<name>`.
+    File { hash: String, source: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,7 +233,7 @@ fn validate_and_index(
         for r in j.inputs.values() {
             let pid = match r {
                 InputRef::Job { id } | InputRef::JobSubset { id, .. } => Some(id.as_str()),
-                InputRef::Leaf { .. } => None,
+                InputRef::Leaf { .. } | InputRef::File { .. } => None,
             };
             if let Some(pid) = pid {
                 let parent: &JobDef = if let Some(p) = existing_jobs.get(pid) {
@@ -278,7 +283,7 @@ fn parent_ids(job: &JobDef) -> Vec<String> {
         .values()
         .filter_map(|r| match r {
             InputRef::Job { id } | InputRef::JobSubset { id, .. } => Some(id.clone()),
-            InputRef::Leaf { .. } => None,
+            InputRef::Leaf { .. } | InputRef::File { .. } => None,
         })
         .collect()
 }
@@ -583,21 +588,29 @@ fn dispatch_argv_job(
 
     let mut input_mounts = Vec::new();
     for (name, r) in &job.inputs {
-        let pid = match r {
-            InputRef::Job { id } | InputRef::JobSubset { id, .. } => Some(id.as_str()),
-            InputRef::Leaf { .. } => None,
-        };
-        if let Some(pid) = pid {
-            let c = completed.get(pid).ok_or_else(|| {
-                Error::Other(format!(
-                    "internal scheduling error: missing completed info for parent {pid:?}"
-                ))
-            })?;
-            let source = shared.storeset.stores[c.store_idx].data_dir(&c.oh);
-            input_mounts.push(Mount {
-                virtual_path: format!("/ppg/in/{name}"),
-                source,
-            });
+        match r {
+            InputRef::Job { id } | InputRef::JobSubset { id, .. } => {
+                let c = completed.get(id.as_str()).ok_or_else(|| {
+                    Error::Other(format!(
+                        "internal scheduling error: missing completed info for parent {id:?}"
+                    ))
+                })?;
+                let source = shared.storeset.stores[c.store_idx].data_dir(&c.oh);
+                input_mounts.push(Mount {
+                    virtual_path: format!("/ppg/in/{name}"),
+                    source,
+                });
+            }
+            // A `ppg3.File(...)` input: the host file is bound read-only
+            // directly at `/ppg/in/<name>` (not under a directory — only this
+            // one file is exposed). `{in:name}` resolves to that path.
+            InputRef::File { source, .. } => {
+                input_mounts.push(Mount {
+                    virtual_path: format!("/ppg/in/{name}"),
+                    source: std::path::PathBuf::from(source),
+                });
+            }
+            InputRef::Leaf { .. } => {}
         }
     }
     let mut tool_mounts = Vec::new();
@@ -648,12 +661,35 @@ fn dispatch_argv_job(
     let job_view_name = job.view.values().next().map(|s| s.as_str());
     let outcome = write_store.publish(staging, ik, key_doc, built, job_view_name)?;
 
+    let manifest = write_store.lookup(ik)?.ok_or_else(|| {
+        Error::Other(format!(
+            "just-published entry for input key {ik} vanished from its own store"
+        ))
+    })?;
+
     if let Some(declared) = &job.fixed_output {
-        if outcome.oh() != declared {
+        // `fixed_output` (a FetchJob's `blake3=`) pins the **content blake3 of
+        // the fetched file** — what `b3sum <file>` yields, what a user pins by
+        // hand, and what TOFU writes back. It is NOT the output hash `oh`
+        // (blake3 of the content-map JSON): comparing against `oh` here made a
+        // correctly-pinned fetch fail on every cold-cache rebuild. A FetchJob
+        // produces exactly one output file, so its single content entry's
+        // blake3 is the value to check.
+        let actual = match (manifest.content.len(), manifest.content.values().next()) {
+            (1, Some(entry)) => &entry.blake3,
+            (n, _) => {
+                return Err(Error::JobFailed(format!(
+                    "job {:?}: blake3 pin requires exactly one output file, but the \
+                     job produced {n}",
+                    job.id
+                )));
+            }
+        };
+        if actual != declared {
             return Err(Error::JobFailed(format!(
-                "job {:?} declared fixed_output {declared:?} but produced {:?}",
-                job.id,
-                outcome.oh()
+                "job {:?}: declared blake3={declared:?} but the fetched content \
+                 hashed to {actual:?}",
+                job.id
             )));
         }
     }
@@ -661,12 +697,6 @@ fn dispatch_argv_job(
     if let Retain::Pin(name) = &job.retain {
         write_store.pin(name, outcome.oh())?;
     }
-
-    let manifest = write_store.lookup(ik)?.ok_or_else(|| {
-        Error::Other(format!(
-            "just-published entry for input key {ik} vanished from its own store"
-        ))
-    })?;
 
     let store_idx = shared
         .storeset
@@ -744,7 +774,9 @@ fn derive_key(
     let mut inputs_val = serde_json::Map::new();
     for (name, r) in &job.inputs {
         let v = match r {
-            InputRef::Leaf { hash } => hash.clone(),
+            // File contributes only its content hash — identical shape to
+            // Leaf, so mounting a File never changes an existing input key.
+            InputRef::Leaf { hash } | InputRef::File { hash, .. } => hash.clone(),
             InputRef::Job { id } => {
                 let c = completed.get(id).ok_or_else(|| {
                     format!(
@@ -872,9 +904,13 @@ fn resolve_placeholder(
         })?;
         return match r {
             InputRef::Leaf { .. } => Err(Error::JobFailed(format!(
-                "job {:?}: {{in:{name}}} refers to a Leaf input, which has no mounted path",
+                "job {:?}: {{in:{name}}} refers to a Leaf input (a Params value), \
+                 which has no mounted path — read it via io.params instead",
                 job.id
             ))),
+            // A File input is bound directly at /ppg/in/<name> (the file
+            // itself), so the placeholder is that path with no filename suffix.
+            InputRef::File { .. } => Ok(Some(format!("/ppg/in/{name}"))),
             InputRef::Job { id } | InputRef::JobSubset { id, .. } => {
                 let c = completed.get(id).ok_or_else(|| {
                     Error::Other(format!(
@@ -1105,6 +1141,58 @@ mod tests {
         let job = argv_job("a", inputs);
         let completed = completed_with("p", &["a.txt", "b.txt"]);
         assert_eq!(lower_token("{in:data}", &job, &completed).unwrap(), "/ppg/in/data");
+    }
+
+    #[test]
+    fn lower_token_in_placeholder_file_points_at_mounted_file() {
+        // A `ppg3.File(...)` input is bound read-only *as the file itself* at
+        // /ppg/in/<name>, so {in:name} is that path with no filename suffix
+        // (unlike a single-file *job* output, which appends the basename).
+        let mut inputs = BTreeMap::new();
+        inputs.insert(
+            "raw".to_string(),
+            InputRef::File { hash: "ab".repeat(32), source: "/data/raw.txt".to_string() },
+        );
+        let job = argv_job("a", inputs);
+        assert_eq!(
+            lower_token("{in:raw}", &job, &HashMap::new()).unwrap(),
+            "/ppg/in/raw"
+        );
+    }
+
+    #[test]
+    fn lower_token_in_placeholder_leaf_params_still_errors() {
+        // A pure Leaf (a Params value) has no mount; asking for its path is a
+        // job-definition error, not a silent empty string.
+        let mut inputs = BTreeMap::new();
+        inputs.insert("cfg".to_string(), InputRef::Leaf { hash: "deadbeef".to_string() });
+        let job = argv_job("a", inputs);
+        assert!(matches!(
+            lower_token("{in:cfg}", &job, &HashMap::new()),
+            Err(Error::JobFailed(_))
+        ));
+    }
+
+    #[test]
+    fn file_input_keys_identically_to_equivalent_leaf() {
+        // Mounting a File must not perturb the input key: its only key
+        // contribution is the content hash, byte-for-byte what a Leaf of the
+        // same hash produces. Guards the "no cache churn" promise.
+        let h = "c0ffee".to_string();
+        let mut leaf_inputs = BTreeMap::new();
+        leaf_inputs.insert("x".to_string(), InputRef::Leaf { hash: h.clone() });
+        let (_ld, leaf_ik) = derive_key(&argv_job("a", leaf_inputs), &HashMap::new()).unwrap();
+
+        let mut file_inputs = BTreeMap::new();
+        file_inputs.insert(
+            "x".to_string(),
+            InputRef::File { hash: h.clone(), source: "/anywhere/on/disk.txt".to_string() },
+        );
+        let (fdoc, file_ik) = derive_key(&argv_job("a", file_inputs), &HashMap::new()).unwrap();
+
+        assert_eq!(file_ik, leaf_ik, "File must key identically to an equal Leaf");
+        // The source path must never leak into the key document.
+        assert_eq!(fdoc["inputs"]["x"], serde_json::json!("c0ffee"));
     }
 
     #[test]

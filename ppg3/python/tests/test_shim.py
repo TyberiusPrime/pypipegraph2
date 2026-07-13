@@ -255,3 +255,10 @@ def test_shim_fetch_mode_hash_mismatch_fails(tmp_path):
     proc = run_shim(spec)
     assert proc.returncode == 1
     assert b"mismatch" in proc.stderr
+    # The rejected download must be preserved (not discarded) and its path
+    # reported, so the user can diff it against their pinned copy.
+    rejected = out_file.with_name(out_file.name + ".rejected")
+    assert rejected.exists(), "rejected download must be kept for inspection"
+    assert rejected.read_bytes() == b"hello ppg3 fetch"
+    assert str(rejected).encode() in proc.stderr
+    assert b"expected blake3" in proc.stderr and b"got" in proc.stderr

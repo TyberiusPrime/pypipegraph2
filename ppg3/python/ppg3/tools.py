@@ -22,7 +22,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 from . import canon
 from .localscope import DefinitionError
@@ -128,18 +128,6 @@ class ToolSpec:
         return f"ToolSpec({self.kind!r}, {self.ref_or_path!r})"
 
 
-def _sys_path_fingerprint() -> List[Tuple[str, Optional[int]]]:
-    out = []
-    for p in sys.path:
-        try:
-            mtime_ns = os.stat(p).st_mtime_ns
-        except OSError:
-            mtime_ns = None
-        out.append((p, mtime_ns))
-    out.sort(key=lambda t: t[0])
-    return out
-
-
 class PyEnv:
     """A Python interpreter environment a job runs under (§7.5)."""
 
@@ -170,13 +158,23 @@ class PyEnv:
 
     def resolve(self) -> ToolResolution:
         if self.kind == "current":
+            # Identity of the *current* interpreter. Deliberately stable and
+            # working-directory-independent: the interpreter's realpath and
+            # version, nothing else.
+            #
+            # We do NOT fingerprint `sys.path` by directory mtime (as an
+            # earlier version did). mtimes are not content, are not
+            # reproducible across machines/checkouts, and — fatally —
+            # `sys.path[0]` is the script's directory, i.e. the project dir
+            # that ppg3 writes `store/`, `.ppg3/` and `outputs/` into on every
+            # run. Hashing it re-keyed the PyEnv on each invocation, so every
+            # Python job (FetchJob/FileJob/DataJob) re-ran — and re-fetched —
+            # every single time. `current` is `weakly_hermetic` by design; a
+            # job's own code is already captured by its recipe hash.
             doc = {
                 "kind": "pyenv_current",
                 "executable": os.path.realpath(sys.executable),
                 "version": list(sys.version_info[:3]),
-                "sys_path": [
-                    [p, m] for p, m in _sys_path_fingerprint()
-                ],
             }
             h = canon.input_key_local(canon.canonicalize_value(doc, "$.pyenv"))
             return ToolResolution(

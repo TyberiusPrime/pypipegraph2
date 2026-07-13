@@ -353,11 +353,16 @@ def _lower_input(input_name: str, value: Any, graph: Graph) -> Dict[str, Any]:
     if isinstance(value, Job):
         return {"Job": {"id": value.id}}
     if isinstance(value, File):
-        # §6.7 watch mode: leaf File inputs are watched paths, recorded here
-        # at lowering time (job_defs()/job_def(), called from run()).
+        # §6.7 watch mode: File inputs are watched paths, recorded here at
+        # lowering time (job_defs()/job_def(), called from run()).
         graph.record_watched_path(value.path)
         h = graph.statcache().hash_file(value.path)
-        return {"Leaf": {"hash": h}}
+        # A File is BOTH a change-detection dependency (its content hash, the
+        # only thing that enters the input key) AND a mounted read-only input
+        # bound at /ppg/in/<name> — the `source` is carried out-of-band and
+        # never keyed, so it does not perturb the ik. Absolute so the mount
+        # resolves regardless of the run's cwd.
+        return {"File": {"hash": h, "source": os.path.abspath(value.path)}}
     if isinstance(value, Params):
         h = canon.input_key_local(value.canonical())
         return {"Leaf": {"hash": h}}
@@ -397,11 +402,15 @@ def _b64_json(obj: Any) -> str:
 
 
 def _mounted_input_names(inputs: Dict[str, Any]) -> List[str]:
-    """Input names backed by a real mounted path (`{in:NAME}` resolves for
-    ``Job``/``JobSubset`` refs only — a `Leaf` ref has no mount and the
-    scheduler's `{in:NAME}` placeholder resolution errors the job if asked
-    for one, see `resolve_placeholder` in scheduler.rs)."""
-    return sorted(n for n, v in inputs.items() if isinstance(v, (Job, OutputRef)))
+    """Input names backed by a real mounted path, i.e. those `{in:NAME}` /
+    ``io.input(NAME)`` resolve to a path for: ``Job``/``JobSubset`` refs
+    (parent output entries) and ``File`` refs (a host file bound read-only).
+    A ``Params`` (`Leaf`) ref has no mount — the scheduler's `{in:NAME}`
+    resolution errors if asked for one; params arrive via ``io.params``
+    instead (see `resolve_placeholder` in scheduler.rs)."""
+    return sorted(
+        n for n, v in inputs.items() if isinstance(v, (Job, OutputRef, File))
+    )
 
 
 def _leaf_params(inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -751,7 +760,15 @@ class FetchJob(Job):
             "recipe": self._recipe,
             "inputs": {},
             "tools": {},
-            "runtime": _runtime_doc(self.python_env),
+            # A fetch's identity is (url, expected content) — NOT the local
+            # Python environment. The download is performed by a trivial,
+            # env-independent shim, so the interpreter that happens to run it
+            # must not enter the key (otherwise a pinned URL re-downloads
+            # whenever the PyEnv hash shifts). `python_env` is still used to
+            # *execute* the shim via argv[0] (`executable_hint`, which is not
+            # part of the key document). `shim` is kept so shim-logic changes
+            # still invalidate.
+            "runtime": {"python_env": None, "preload": [], "shim": SHIM_VERSION},
             "env": {},
             "outputs_declared": [self.OUTPUT_NAME],
             "resources": {},

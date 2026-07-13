@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 import ppg3
@@ -130,6 +132,37 @@ def test_fetchjob_with_hash_ok_even_frozen(tmp_path):
 
 
 @requires_blake3
+def test_fetchjob_key_is_independent_of_pyenv(tmp_path):
+    # A fetch's identity is (url, expected content), NOT the local interpreter.
+    # Its key-document `runtime` must not carry the PyEnv hash, or a pinned URL
+    # re-downloads whenever the environment fingerprint shifts. The shim is
+    # still executed via a real interpreter (argv[0]), which is not keyed.
+    ppg3.new(
+        default_python=PyEnv.current(),
+        project_dir=str(tmp_path / ".ppg3"),
+        frozen=False,
+    )
+    jd = ppg3.FetchJob(view="inputs/x.dat", url="https://example.invalid/x").job_def()
+    assert jd["runtime"]["python_env"] is None, jd["runtime"]
+    # It still runs through the shim (argv[0] is a real interpreter path).
+    assert jd["exec_template"]["Argv"]["argv"][0]
+
+
+def test_pyenv_current_hash_is_stable_across_cwd_mutation(tmp_path, monkeypatch):
+    # Regression: PyEnv.current() must not fold sys.path directory mtimes into
+    # its hash. sys.path[0] is the script/working dir that ppg3 writes into on
+    # every run; hashing its mtime re-keyed every Python job each invocation.
+    import sys
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    h1 = PyEnv.current().resolve().hash
+    # Mutate the just-added sys.path entry the way a real run mutates the CWD.
+    (tmp_path / "freshly_written_file").write_text("x")
+    h2 = PyEnv.current().resolve().hash
+    assert h1 == h2, "PyEnv hash must not depend on sys.path directory mtimes"
+
+
+@requires_blake3
 def test_unsandboxedjob_warns(graph):
     with pytest.warns(UserWarning, match="unsandboxed"):
         job = ppg3.UnsandboxedJob(run=dummy_run, name="loader-thing")
@@ -173,9 +206,15 @@ def test_input_lowering_file_and_params(graph, tmp_path):
     )
     jd = job.job_def(graph)
     assert set(jd["inputs"].keys()) == {"raw", "cfg"}
-    assert "Leaf" in jd["inputs"]["raw"]
+    # A File lowers to a *mounted* input: content hash (the only ik input)
+    # plus the absolute host source path bound read-only at /ppg/in/raw.
+    assert "File" in jd["inputs"]["raw"]
+    assert len(jd["inputs"]["raw"]["File"]["hash"]) == 64
+    assert jd["inputs"]["raw"]["File"]["source"] == str(data_file)
+    assert os.path.isabs(jd["inputs"]["raw"]["File"]["source"])
+    # Params stays a pure (unmounted) Leaf, delivered via io.params.
     assert "Leaf" in jd["inputs"]["cfg"]
-    assert len(jd["inputs"]["raw"]["Leaf"]["hash"]) == 64
+    assert len(jd["inputs"]["cfg"]["Leaf"]["hash"]) == 64
 
 
 @requires_blake3

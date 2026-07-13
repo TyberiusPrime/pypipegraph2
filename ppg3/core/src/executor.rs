@@ -141,6 +141,17 @@ pub(crate) struct StagedJob {
     pub log_dir: PathBuf,
 }
 
+/// Absolutize a symlink *target*. Layout symlinks live under `<work>/ppg/`,
+/// so a relative target would be resolved relative to that directory (not the
+/// caller's cwd) and dangle — e.g. a relative store path `store/...` becomes
+/// `<work>/ppg/store/...`, breaking `chdir` into `ppg/out` (reported as a
+/// spawn ENOENT). Anchor relatives to the process cwd, where the backing
+/// paths actually live. Lexical only (unlike `canonicalize`): store/tool
+/// paths that are already absolute pass through unchanged and need not exist.
+fn abs_target(p: &Path) -> Result<PathBuf> {
+    std::path::absolute(p).map_err(|e| Error::io(p, e))
+}
+
 fn build_layout(job: &PreparedJob, work: &Path) -> Result<()> {
     let ppg = work.join("ppg");
     for sub in ["in", "tools", "tmp"] {
@@ -150,19 +161,23 @@ fn build_layout(job: &PreparedJob, work: &Path) -> Result<()> {
     for m in &job.inputs {
         let name = ppg_name(&m.virtual_path)?;
         let link = ppg.join("in").join(name);
-        std::os::unix::fs::symlink(&m.source, &link).map_err(|e| Error::io(&link, e))?;
+        std::os::unix::fs::symlink(abs_target(&m.source)?, &link)
+            .map_err(|e| Error::io(&link, e))?;
     }
     for m in &job.tools {
         let name = ppg_name(&m.virtual_path)?;
         let link = ppg.join("tools").join(name);
-        std::os::unix::fs::symlink(&m.source, &link).map_err(|e| Error::io(&link, e))?;
+        std::os::unix::fs::symlink(abs_target(&m.source)?, &link)
+            .map_err(|e| Error::io(&link, e))?;
     }
     std::fs::create_dir_all(&job.out_dir).map_err(|e| Error::io(&job.out_dir, e))?;
     std::fs::create_dir_all(&job.log_dir).map_err(|e| Error::io(&job.log_dir, e))?;
     let out_link = ppg.join("out");
-    std::os::unix::fs::symlink(&job.out_dir, &out_link).map_err(|e| Error::io(&out_link, e))?;
+    std::os::unix::fs::symlink(abs_target(&job.out_dir)?, &out_link)
+        .map_err(|e| Error::io(&out_link, e))?;
     let log_link = ppg.join("log");
-    std::os::unix::fs::symlink(&job.log_dir, &log_link).map_err(|e| Error::io(&log_link, e))?;
+    std::os::unix::fs::symlink(abs_target(&job.log_dir)?, &log_link)
+        .map_err(|e| Error::io(&log_link, e))?;
     Ok(())
 }
 
@@ -179,6 +194,14 @@ fn rewrite_ppg_path(s: &str, work: &Path) -> String {
 /// in the same unenforced staged layout, per the forkserver work package's
 /// scope constraint — see STATUS.md). Does not spawn anything.
 pub(crate) fn stage(job: &PreparedJob, work_parent: &Path) -> Result<StagedJob> {
+    // The staged base must be absolute: executors set the child's
+    // `current_dir` to `cwd` (below) and then exec `argv[0]`. If both were
+    // relative to the caller's cwd, the child chdirs first and the relative
+    // `argv[0]` is then resolved against the *new* cwd — doubling the prefix
+    // and failing with ENOENT (a real binary "not found"). Absolutize once,
+    // here, so every downstream path (argv, cwd, symlink names) is anchored.
+    let work_parent = std::path::absolute(work_parent)
+        .map_err(|e| Error::io(work_parent, e))?;
     let work = work_parent.join(unique_name(&job.ik));
     build_layout(job, &work)?;
 
@@ -1210,5 +1233,61 @@ mod bwrap_integration {
         );
         let content = std::fs::read_to_string(out.path().join("direct.txt")).unwrap();
         assert_eq!(content, "direct-exec-ok\n");
+    }
+
+    // Serializes the one test that must run under a *relative* cwd, and
+    // restores the cwd afterwards (even on panic). Every other test uses
+    // absolute tempdir paths, so they are unaffected by the temporary chdir.
+    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct RestoreCwd(PathBuf);
+    impl Drop for RestoreCwd {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
+    #[test]
+    fn none_executor_tolerates_relative_work_out_and_log_paths() {
+        // Regression for two relative-path bugs that both surfaced as a
+        // misleading `spawning "..." failed: No such file or directory`
+        // even though the interpreter was perfectly runnable:
+        //   1. a relative `argv[0]` (a `/ppg/...` entry rewritten under a
+        //      relative work dir) was re-resolved *after* the child chdir'd
+        //      into the (also relative) job cwd, doubling the prefix; and
+        //   2. `ppg/out` symlinked a relative store path, which dangled when
+        //      resolved from under `ppg/`, so the child's chdir into it
+        //      failed (a failed child chdir is reported as a spawn ENOENT).
+        // Reproduces the real trigger: ppg3 invoked from a project subdir
+        // with a relative project_dir/store, interpreter mounted as a
+        // `/ppg/tools/...` tool. NoneExecutor (not bwrap) is the path that
+        // chdirs the child directly; it lives here only for `setup`/`sh_job`.
+        let Some(sh_pkg) = setup() else { return };
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _restore = RestoreCwd(std::env::current_dir().unwrap());
+        let root = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(root.path()).unwrap();
+
+        // Every path handed to the executor is RELATIVE to `root`; nothing is
+        // created up front — build_layout must materialise the whole layout.
+        // sh_job mounts `sh_pkg` at /ppg/tools/sh and runs
+        // `/ppg/tools/sh/bin/sh` (→ relative argv[0], bug 1) with cwd_out
+        // pointing at the relative store out dir (→ dangling symlink, bug 2).
+        let exec = NoneExecutor::new("proj/work");
+        let job = sh_job(
+            &sh_pkg,
+            Path::new("store/out"),
+            Path::new("store/log"),
+            "echo hello > /ppg/out/greeting.txt",
+        );
+        let result = exec.run(&job).unwrap();
+        assert_eq!(
+            result.exit_code,
+            0,
+            "stderr: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let content = std::fs::read_to_string("store/out/greeting.txt").unwrap();
+        assert_eq!(content, "hello\n");
     }
 }

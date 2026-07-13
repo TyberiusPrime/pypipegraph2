@@ -11,3 +11,4 @@ dist/
 # it explicitly so `ppg3-core`'s sources are trackable.
 !core/
 !core/**
+test/
