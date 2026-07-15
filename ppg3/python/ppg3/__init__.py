@@ -24,6 +24,7 @@ from .jobs import (
     UnsandboxedJob,
     new,
 )
+from .jj import JJError
 from .localscope import DefinitionError
 from .run import run, session_stop
 from .tools import PyEnv, ToolSpec
@@ -51,6 +52,7 @@ __all__ = [
     "Out",
     "Tool",
     "DefinitionError",
+    "JJError",
 ]
 
 __version__ = "0.1.0"

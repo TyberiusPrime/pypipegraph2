@@ -11,7 +11,7 @@ use predicates::prelude::*;
 use ppg3_core::manifest::BuiltInfo;
 use ppg3_core::store::Store;
 use ppg3_core::storeset::StoreSet;
-use ppg3_core::views::{self, ViewEntry, ViewSpec};
+use ppg3_core::views::{self, VcsInfo, ViewEntry, ViewSpec};
 
 fn built() -> BuiltInfo {
     BuiltInfo {
@@ -472,6 +472,144 @@ fn store_gc_end_to_end_sweeps_unrooted_unpinned_entry() {
     assert!(!store_dir.join("v1/entries").join(&oh_orphan).exists());
     assert!(store_dir.join("v1/entries").join(&oh_rooted).exists());
     assert!(store_dir.join("v1/entries").join(&oh_pinned).exists());
+}
+
+#[test]
+fn project_gc_two_phases_drop_oplog_generation_then_sweep_freed_entry() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (project_root, project_dir, store) = setup_project(tmp.path());
+
+    let oh_old = publish(
+        &store,
+        &"1".repeat(64),
+        &simple_doc("r1"),
+        &[("out.txt", b"old-oplog")],
+    );
+    let oh_cur = publish(
+        &store,
+        &"2".repeat(64),
+        &simple_doc("r2"),
+        &[("out.txt", b"current")],
+    );
+    let stores = StoreSet::new(vec![store]);
+
+    // Old generation from a dirty jj working copy (op-log bucket)...
+    let vcs_dirty = VcsInfo {
+        backend: "jj".to_string(),
+        commit_id: "c".repeat(40),
+        change_id: "oldchangeid".to_string(),
+        op_id: "o".repeat(64),
+        committed: false,
+        parent_commit_id: None,
+    };
+    let n_old = views::write_generation_with_vcs(
+        &project_dir,
+        "proj",
+        &stores,
+        &one_entry_spec("out.txt", oh_old.clone()),
+        false,
+        Some(vcs_dirty),
+    )
+    .unwrap();
+    // ...then a committed current generation.
+    let vcs_clean = VcsInfo {
+        backend: "jj".to_string(),
+        commit_id: "d".repeat(40),
+        change_id: "curchangeid".to_string(),
+        op_id: "p".repeat(64),
+        committed: true,
+        parent_commit_id: Some("e".repeat(40)),
+    };
+    let n_cur = views::write_generation_with_vcs(
+        &project_dir,
+        "proj",
+        &stores,
+        &one_entry_spec("out.txt", oh_cur.clone()),
+        false,
+        Some(vcs_clean),
+    )
+    .unwrap();
+
+    // The human `generations list` shows the committed/op-log distinction.
+    Command::cargo_bin("ppg3")
+        .unwrap()
+        .current_dir(&project_root)
+        .args(["generations", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("op-log"))
+        .stdout(predicate::str::contains("committed"))
+        .stdout(predicate::str::contains("oldchangeid"));
+
+    // Dry run first: reports the drop + would-be sweep, changes nothing.
+    let output = Command::cargo_bin("ppg3")
+        .unwrap()
+        .current_dir(&project_root)
+        .args([
+            "--json",
+            "gc",
+            "--keep",
+            "5",
+            "--keep-oplog",
+            "0",
+            "--max-size",
+            "1",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "gc --dry-run failed: {output:?}");
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        parsed["generations"]["dropped_oplog"],
+        serde_json::json!([n_old])
+    );
+    assert!(views::list_generations(&project_dir)
+        .unwrap()
+        .iter()
+        .any(|g| g.n == n_old));
+
+    // Real run: phase 1 drops the op-log generation, phase 2 sweeps the
+    // entry its root had been keeping alive.
+    let output = Command::cargo_bin("ppg3")
+        .unwrap()
+        .current_dir(&project_root)
+        .args([
+            "--json",
+            "gc",
+            "--keep",
+            "5",
+            "--keep-oplog",
+            "0",
+            "--max-size",
+            "1",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "gc failed: {output:?}");
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        parsed["generations"]["dropped_oplog"],
+        serde_json::json!([n_old])
+    );
+    assert_eq!(
+        parsed["generations"]["dropped_committed"],
+        serde_json::json!([])
+    );
+    assert_eq!(parsed["generations"]["kept"], serde_json::json!([n_cur]));
+    let removed: Vec<String> = parsed["stores"]["main"]["removed_entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(removed, vec![oh_old.clone()]);
+
+    let store_dir = tmp.path().join("store");
+    assert!(!store_dir.join("v1/entries").join(&oh_old).exists());
+    assert!(store_dir.join("v1/entries").join(&oh_cur).exists());
+    assert!(!project_dir.join("views").join(n_old.to_string()).exists());
+    assert!(project_dir.join("views").join(n_cur.to_string()).exists());
 }
 
 #[test]

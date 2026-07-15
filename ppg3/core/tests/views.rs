@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use ppg3_core::manifest::BuiltInfo;
 use ppg3_core::store::Store;
 use ppg3_core::storeset::StoreSet;
-use ppg3_core::views::{self, ViewEntry, ViewSpec};
+use ppg3_core::views::{self, VcsInfo, ViewEntry, ViewSpec};
 
 fn built() -> BuiltInfo {
     BuiltInfo {
@@ -526,6 +526,159 @@ fn outputs_symlink_does_not_clobber_pre_existing_real_directory() {
         std::fs::read_to_string(outputs_path.join("keep-me.txt")).unwrap(),
         "do not delete"
     );
+}
+
+fn sample_vcs(committed: bool) -> VcsInfo {
+    VcsInfo {
+        backend: "jj".to_string(),
+        commit_id: "c".repeat(40),
+        change_id: "z".repeat(32),
+        op_id: "0".repeat(64),
+        committed,
+        parent_commit_id: if committed {
+            Some("p".repeat(40))
+        } else {
+            None
+        },
+    }
+}
+
+/// Write one single-entry generation, optionally with VCS info.
+fn write_gen(
+    project_dir: &Path,
+    stores: &StoreSet,
+    seed: &str,
+    ephemeral: bool,
+    vcs: Option<VcsInfo>,
+) -> u64 {
+    let oh = publish_one(&stores.stores[0], seed, "a.txt", seed.as_bytes());
+    let spec = ViewSpec {
+        entries: vec![ViewEntry {
+            view_rel_path: "out.txt".to_string(),
+            oh,
+            path_within_entry: "a.txt".to_string(),
+            store_index: 0,
+        }],
+    };
+    views::write_generation_with_vcs(project_dir, "proj", stores, &spec, ephemeral, vcs).unwrap()
+}
+
+#[test]
+fn vcs_info_roundtrips_through_meta_and_list() {
+    let store_dir = tempfile::tempdir().unwrap();
+    let store = Store::open("s", store_dir.path(), false).unwrap();
+    let stores = StoreSet::new(vec![store]);
+    let project = tempfile::tempdir().unwrap();
+    let project_dir = project.path().join(".ppg3");
+
+    let n1 = write_gen(&project_dir, &stores, "vcs1", false, Some(sample_vcs(true)));
+    let n2 = write_gen(&project_dir, &stores, "vcs2", false, None);
+
+    let meta = views::read_generation_meta(&project_dir, n1).unwrap();
+    let vcs = meta.vcs.expect("vcs info must persist");
+    assert_eq!(vcs.backend, "jj");
+    assert!(vcs.committed);
+    assert_eq!(
+        vcs.parent_commit_id.as_deref(),
+        Some("p".repeat(40).as_str())
+    );
+
+    let gens = views::list_generations(&project_dir).unwrap();
+    assert!(gens.iter().find(|g| g.n == n1).unwrap().vcs.is_some());
+    assert!(gens.iter().find(|g| g.n == n2).unwrap().vcs.is_none());
+
+    // meta.json without a vcs key (pre-VCS generations) must not serialize
+    // a `"vcs"` field at all, and must still parse.
+    let raw = std::fs::read_to_string(
+        project_dir
+            .join("views")
+            .join(n2.to_string())
+            .join("meta.json"),
+    )
+    .unwrap();
+    assert!(!raw.contains("\"vcs\""));
+}
+
+#[test]
+fn remove_old_generations_splits_committed_and_oplog_budgets() {
+    let store_dir = tempfile::tempdir().unwrap();
+    let store = Store::open("s", store_dir.path(), false).unwrap();
+    let stores = StoreSet::new(vec![store]);
+    let project = tempfile::tempdir().unwrap();
+    let project_dir = project.path().join(".ppg3");
+
+    // committed, committed, committed, oplog, oplog, oplog, committed (current)
+    let c1 = write_gen(&project_dir, &stores, "sc1", false, Some(sample_vcs(true)));
+    let c2 = write_gen(&project_dir, &stores, "sc2", false, Some(sample_vcs(true)));
+    let c3 = write_gen(&project_dir, &stores, "sc3", false, Some(sample_vcs(true)));
+    let o1 = write_gen(&project_dir, &stores, "so1", false, Some(sample_vcs(false)));
+    let o2 = write_gen(&project_dir, &stores, "so2", false, Some(sample_vcs(false)));
+    let o3 = write_gen(&project_dir, &stores, "so3", false, Some(sample_vcs(false)));
+    let cur = write_gen(&project_dir, &stores, "sc4", false, Some(sample_vcs(true)));
+
+    // keep 2 committed + 1 op-log; current never counts against a budget.
+    let report = views::remove_old_generations(&project_dir, &stores, 2, 1, false).unwrap();
+    assert_eq!(report.dropped_committed, vec![c1]);
+    assert_eq!(report.dropped_oplog, vec![o1, o2]);
+    assert_eq!(report.kept, vec![c2, c3, o3, cur]);
+    assert!(!report.dry_run);
+
+    let remaining: Vec<u64> = views::list_generations(&project_dir)
+        .unwrap()
+        .into_iter()
+        .map(|g| g.n)
+        .collect();
+    assert_eq!(remaining, vec![c2, c3, o3, cur]);
+}
+
+#[test]
+fn remove_old_generations_treats_no_vcs_as_committed_and_ephemeral_as_oplog() {
+    let store_dir = tempfile::tempdir().unwrap();
+    let store = Store::open("s", store_dir.path(), false).unwrap();
+    let stores = StoreSet::new(vec![store]);
+    let project = tempfile::tempdir().unwrap();
+    let project_dir = project.path().join(".ppg3");
+
+    let novcs1 = write_gen(&project_dir, &stores, "nv1", false, None);
+    let novcs2 = write_gen(&project_dir, &stores, "nv2", false, None);
+    // ephemeral (watch mode) with a *committed* vcs state still lands in
+    // the op-log bucket: ephemeral is transient by definition (§6.7).
+    let eph = write_gen(&project_dir, &stores, "nv3", true, Some(sample_vcs(true)));
+    let cur = write_gen(&project_dir, &stores, "nv4", false, None);
+
+    let report = views::remove_old_generations(&project_dir, &stores, 1, 0, false).unwrap();
+    assert_eq!(report.dropped_committed, vec![novcs1]);
+    assert_eq!(report.dropped_oplog, vec![eph]);
+    assert_eq!(report.kept, vec![novcs2, cur]);
+}
+
+#[test]
+fn remove_old_generations_dry_run_drops_nothing() {
+    let store_dir = tempfile::tempdir().unwrap();
+    let store = Store::open("s", store_dir.path(), false).unwrap();
+    let stores = StoreSet::new(vec![store]);
+    let project = tempfile::tempdir().unwrap();
+    let project_dir = project.path().join(".ppg3");
+
+    let g1 = write_gen(
+        &project_dir,
+        &stores,
+        "dry1",
+        false,
+        Some(sample_vcs(false)),
+    );
+    let _g2 = write_gen(&project_dir, &stores, "dry2", false, None);
+
+    let report = views::remove_old_generations(&project_dir, &stores, 1, 0, true).unwrap();
+    assert!(report.dry_run);
+    assert_eq!(report.dropped_oplog, vec![g1]);
+
+    let remaining: Vec<u64> = views::list_generations(&project_dir)
+        .unwrap()
+        .into_iter()
+        .map(|g| g.n)
+        .collect();
+    assert_eq!(remaining.len(), 2, "dry run must not drop anything");
 }
 
 #[test]

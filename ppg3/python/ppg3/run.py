@@ -290,6 +290,26 @@ def run(
 
     core = get_core()
 
+    # jj support (ppg3.new(jj=True), see jj.py): enforce that every
+    # job-source file known so far is tracked (hard error, before any job
+    # is dispatched) and snapshot the jj state — the snapshot happens
+    # *before* the run so the recorded commit/op ids match the sources the
+    # jobs were actually lowered from.
+    vcs_json: Optional[str] = None
+    jj_root: Optional[str] = None
+    if graph.jj:
+        from . import jj as _jj
+
+        jj_root = _jj.find_workspace_root(os.getcwd())
+        if jj_root is None:
+            raise _jj.JJError(
+                "ppg3.new(jj=True): no jj workspace found from "
+                f"{os.getcwd()!r} (create one with `jj git init --colocate`, "
+                "or drop jj=True)"
+            )
+        _jj.assert_sources_tracked(jj_root, graph.source_paths())
+        vcs_json = json.dumps(_jj.capture_state(jj_root))
+
     _write_project_config(graph)
     work_dir = os.path.join(graph.project_dir, "work")
     os.makedirs(work_dir, exist_ok=True)
@@ -389,11 +409,27 @@ def run(
             )
     view_spec_json = json.dumps({"entries": view_entries})
 
+    # jj support: a GraphJob expansion may have defined jobs (and thus new
+    # job-source files: call sites, Source refs) mid-run that the pre-run
+    # check could not have seen — re-check the final source set before the
+    # generation is written, so an untracked dynamically-introduced source
+    # still hard-errors rather than silently producing a generation whose
+    # recorded jj state doesn't cover its own sources.
+    if graph.jj and jj_root is not None:
+        from . import jj as _jj
+
+        _jj.assert_sources_tracked(jj_root, graph.source_paths())
+
     # §6.7: an explicit `ephemeral=True` kwarg *or* an active watch-mode
     # context both mark the generation ephemeral; either alone is enough.
     effective_ephemeral = ephemeral or _watch_active
     generation = core.write_generation(
-        handle, graph.project_dir, project_id, view_spec_json, effective_ephemeral
+        handle,
+        graph.project_dir,
+        project_id,
+        view_spec_json,
+        effective_ephemeral,
+        vcs_json,
     )
     _last_run_info["generation"] = generation
     return RunResult(report, generation=generation)

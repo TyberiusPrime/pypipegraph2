@@ -72,6 +72,36 @@ enum Command {
         #[command(subcommand)]
         cmd: GenerationsCmd,
     },
+    /// Project-level GC, split into two explicitly separate phases:
+    /// 1. remove old generations (per-bucket budgets: properly *committed*
+    ///    generations vs *op-log*/ephemeral ones — see `generations list`'s
+    ///    VCS column), which unregisters their store roots;
+    /// 2. mark/sweep every writable store in `.ppg3/config.json` so the
+    ///    entries those roots kept alive are actually reclaimed.
+    Gc {
+        /// How many old committed (or VCS-less) generations to keep, in
+        /// addition to the current one.
+        #[arg(long, default_value_t = 10)]
+        keep: u64,
+        /// How many old op-log/ephemeral generations to keep (dirty jj
+        /// working copy at run time, or watch-mode ephemeral) — their
+        /// source state is not durably committed, so the default is
+        /// deliberately smaller.
+        #[arg(long, default_value_t = 2)]
+        keep_oplog: u64,
+        /// Store sweep budget; without it phase 2 still removes
+        /// evict-marked entries and dangling input links.
+        #[arg(long)]
+        max_size: Option<u64>,
+        /// Allow phase 2 to evict `logs/` under budget pressure.
+        #[arg(long)]
+        evict_logs: bool,
+        /// Report both phases without deleting anything.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        project: Option<PathBuf>,
+    },
     /// Repoint `views/current` at an earlier (or explicit) generation.
     Rollback {
         /// Generation to roll back to; default is the previous existing
@@ -217,6 +247,25 @@ fn run(cli: Cli) -> Result<i32, AppError> {
                 cmd_generations_keep(&project_dir, n, keep_explicit, json)
             }
         },
+        Command::Gc {
+            keep,
+            keep_oplog,
+            max_size,
+            evict_logs,
+            dry_run,
+            project,
+        } => {
+            let project_dir = config::resolve_project_dir(project.as_deref())?;
+            cmd_gc(
+                &project_dir,
+                keep,
+                keep_oplog,
+                max_size,
+                evict_logs,
+                dry_run,
+                json,
+            )
+        }
         Command::Rollback {
             generation,
             project,
@@ -350,6 +399,93 @@ fn cmd_store_verify(
     Ok(if any_fail { 1 } else { 0 })
 }
 
+// ---- gc (project-level, two-phase) ----
+
+/// Combined report of the two split GC phases. `stores` maps store name ->
+/// its mark/sweep report; readonly stores are listed under
+/// `skipped_readonly_stores` instead of being swept.
+#[derive(Serialize)]
+struct GcCombinedReport {
+    generations: ppg3_core::views::RemoveOldReport,
+    stores: std::collections::BTreeMap<String, ppg3_core::gc::GcReport>,
+    skipped_readonly_stores: Vec<String>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_gc(
+    project_dir: &Path,
+    keep: u64,
+    keep_oplog: u64,
+    max_size: Option<u64>,
+    evict_logs: bool,
+    dry_run: bool,
+    json: bool,
+) -> Result<i32, AppError> {
+    let stores = config::load_storeset(project_dir)?;
+
+    // Phase 1: generation lifecycle — old generations go first so their
+    // roots are unregistered before the store sweep marks.
+    let generations =
+        views::remove_old_generations(project_dir, &stores, keep, keep_oplog, dry_run)?;
+
+    // Phase 2: per-store mark/sweep of what is genuinely unreferenced now.
+    let mut store_reports = std::collections::BTreeMap::new();
+    let mut skipped_readonly_stores = Vec::new();
+    for store in &stores.stores {
+        if store.is_readonly() {
+            skipped_readonly_stores.push(store.name().to_string());
+            continue;
+        }
+        let report = store.gc(&GcPolicy {
+            max_size,
+            evict_logs,
+            dry_run,
+        })?;
+        store_reports.insert(store.name().to_string(), report);
+    }
+
+    let combined = GcCombinedReport {
+        generations,
+        stores: store_reports,
+        skipped_readonly_stores,
+    };
+    if json {
+        print_json(&combined)?;
+    } else {
+        let prefix = if dry_run { "[dry-run] " } else { "" };
+        println!(
+            "{prefix}phase 1 (old generations): dropped {} committed ({}), {} op-log ({}); kept {}",
+            combined.generations.dropped_committed.len(),
+            fmt_u64s(&combined.generations.dropped_committed),
+            combined.generations.dropped_oplog.len(),
+            fmt_u64s(&combined.generations.dropped_oplog),
+            fmt_u64s(&combined.generations.kept),
+        );
+        println!("{prefix}phase 2 (unreferenced store entries):");
+        for (name, r) in &combined.stores {
+            println!(
+                "{prefix}  store {name}: removed {} entries, {} logs, {} dangling input link(s); freed {} bytes, {} bytes remaining",
+                r.removed_entries.len(),
+                r.removed_logs.len(),
+                r.removed_dangling_inputs.len(),
+                r.bytes_freed,
+                r.remaining_size,
+            );
+        }
+        for name in &combined.skipped_readonly_stores {
+            println!("{prefix}  store {name}: skipped (readonly)");
+        }
+    }
+    Ok(0)
+}
+
+fn fmt_u64s(ns: &[u64]) -> String {
+    if ns.is_empty() {
+        return "-".to_string();
+    }
+    ns.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")
+}
+
 // ---- generations ----
 
 fn cmd_generations_list(project_dir: &Path, json: bool) -> Result<i32, AppError> {
@@ -358,13 +494,19 @@ fn cmd_generations_list(project_dir: &Path, json: bool) -> Result<i32, AppError>
         print_json(&gens)?;
     } else {
         println!(
-            "{:<6} {:<16} {:<10} {:<8} ENTRIES",
-            "GEN", "CREATED_AT_MS", "EPHEMERAL", "CURRENT"
+            "{:<6} {:<16} {:<10} {:<8} {:<10} {:<14} ENTRIES",
+            "GEN", "CREATED_AT_MS", "EPHEMERAL", "CURRENT", "VCS", "CHANGE_ID"
         );
         for g in &gens {
+            let (vcs_state, change_id) = match &g.vcs {
+                Some(v) if v.committed => ("committed", v.change_id.as_str()),
+                Some(v) => ("op-log", v.change_id.as_str()),
+                None => ("-", "-"),
+            };
+            let change_short: String = change_id.chars().take(12).collect();
             println!(
-                "{:<6} {:<16} {:<10} {:<8} {}",
-                g.n, g.created_at, g.ephemeral, g.current, g.n_entries
+                "{:<6} {:<16} {:<10} {:<8} {:<10} {:<14} {}",
+                g.n, g.created_at, g.ephemeral, g.current, vcs_state, change_short, g.n_entries
             );
         }
     }

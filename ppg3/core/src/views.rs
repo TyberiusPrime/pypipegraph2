@@ -61,6 +61,39 @@ pub struct ViewSpec {
     pub entries: Vec<ViewEntry>,
 }
 
+/// VCS (jujutsu) snapshot recorded at generation-write time, when the
+/// coordinator ran with jj support enabled (`ppg3.new(jj=True)` on the
+/// Python side). `committed` distinguishes a generation whose job sources
+/// were exactly a durable commit (the jj working-copy commit `@` was
+/// empty, so the source tree equals its parent — a commit that survives
+/// normal history rewriting) from an *op-log* generation: one built from a
+/// dirty working copy whose state is recorded only as jj's automatic
+/// working-copy snapshot, i.e. recoverable solely through the operation
+/// log once the user amends onward. Op-log generations are reproducible
+/// today but not durably so — `remove_old_generations` therefore prunes
+/// them under a separate (typically smaller) budget.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VcsInfo {
+    /// VCS backend name; `"jj"` is the only producer today.
+    pub backend: String,
+    /// Commit id of the jj working-copy commit `@` at run time (the commit
+    /// that actually contained the job sources).
+    pub commit_id: String,
+    /// Change id of `@` (stable across jj rewrites, unlike `commit_id`).
+    pub change_id: String,
+    /// Operation-log id current when the generation was written — the
+    /// durable handle for op-log generations (`jj op restore <op_id>`).
+    pub op_id: String,
+    /// `true` ⇔ the working copy was empty at run time: the sources are
+    /// exactly `parent_commit_id`, a proper commit. `false` ⇔ op-log
+    /// generation (sources only exist as the `@` auto-snapshot).
+    pub committed: bool,
+    /// Commit id of `@-` (the working-copy parent) — for `committed`
+    /// generations this is the commit the sources correspond to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_commit_id: Option<String>,
+}
+
 /// Persisted per-generation metadata (`views/<n>/meta.json`). Store entries
 /// are recorded by store *name* (not index) since indices are only
 /// meaningful for the `StoreSet` a given `write_generation` call was made
@@ -81,6 +114,11 @@ pub struct GenMeta {
     pub project_id: String,
     #[serde(default)]
     pub ephemeral: bool,
+    /// VCS snapshot at write time; `None` for runs made without jj support
+    /// (including every generation written before this field existed —
+    /// `serde(default)` keeps old `meta.json` files readable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vcs: Option<VcsInfo>,
     pub entries: Vec<GenMetaEntry>,
 }
 
@@ -92,6 +130,9 @@ pub struct GenInfo {
     pub ephemeral: bool,
     pub current: bool,
     pub n_entries: usize,
+    /// VCS snapshot from `meta.json`, when the generation was written with
+    /// jj support enabled.
+    pub vcs: Option<VcsInfo>,
 }
 
 fn now_ms() -> i64 {
@@ -278,6 +319,20 @@ pub fn write_generation(
     spec: &ViewSpec,
     ephemeral: bool,
 ) -> Result<u64, Error> {
+    write_generation_with_vcs(project_dir, project_id, stores, spec, ephemeral, None)
+}
+
+/// [`write_generation`] plus an optional VCS snapshot persisted into the
+/// generation's `meta.json` (additive over the CONTRACT.md sketch — the
+/// original entry point above keeps its signature and delegates here).
+pub fn write_generation_with_vcs(
+    project_dir: &Path,
+    project_id: &str,
+    stores: &StoreSet,
+    spec: &ViewSpec,
+    ephemeral: bool,
+    vcs: Option<VcsInfo>,
+) -> Result<u64, Error> {
     for e in &spec.entries {
         validate_view_rel_path(&e.view_rel_path)?;
         if stores.stores.get(e.store_index).is_none() {
@@ -346,6 +401,7 @@ pub fn write_generation(
         created_at: now_ms(),
         project_id: project_id.to_string(),
         ephemeral,
+        vcs,
         entries: meta_entries,
     };
     let meta_path = tmp_gen_dir.join(META_FILE);
@@ -415,6 +471,7 @@ pub fn list_generations(project_dir: &Path) -> Result<Vec<GenInfo>, Error> {
             ephemeral,
             current: current == Some(n),
             n_entries: meta.entries.len(),
+            vcs: meta.vcs,
         });
     }
     out.sort_by_key(|g| g.n);
@@ -496,6 +553,95 @@ pub fn keep_last(
         dropped.push(g);
     }
     Ok(dropped)
+}
+
+/// Report of [`remove_old_generations`] — the "old generations" half of the
+/// split GC (`ppg3 gc` phase 1; phase 2 is the per-store mark/sweep in
+/// `gc.rs`, which only ever sees the roots left over after this phase).
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct RemoveOldReport {
+    /// Dropped generations that were properly committed (or predate VCS
+    /// tracking — see `classify_oplog`).
+    pub dropped_committed: Vec<u64>,
+    /// Dropped op-log/ephemeral generations.
+    pub dropped_oplog: Vec<u64>,
+    /// Generations still present after the (possibly dry) run.
+    pub kept: Vec<u64>,
+    pub dry_run: bool,
+}
+
+/// `true` ⇔ this generation belongs to the *op-log* bucket of
+/// [`remove_old_generations`]: either its jj working copy was dirty at run
+/// time (`vcs.committed == false` — the sources survive only in jj's op
+/// log) or it is a watch-mode `ephemeral` generation (transient by §6.7's
+/// own definition). Generations with no VCS info at all are classified as
+/// committed — the conservative choice, since nothing is known about them
+/// and the committed budget is the larger one.
+fn classify_oplog(g: &GenInfo) -> bool {
+    g.ephemeral || g.vcs.as_ref().map(|v| !v.committed).unwrap_or(false)
+}
+
+/// Phase 1 of the split GC: drop old generations, with separate retention
+/// budgets for properly committed generations (`keep`) and op-log/ephemeral
+/// generations (`keep_oplog` — typically smaller: their source state is not
+/// durably recorded, so keeping many of them pins intermediates that can
+/// never be re-derived from history anyway once jj's op log is abandoned).
+/// The current generation is never dropped and does not count against
+/// either budget. `dry_run` reports what would be dropped without touching
+/// anything. This deliberately does NOT sweep store entries — run the
+/// store-level mark/sweep (`Store::gc`) afterwards to actually reclaim the
+/// space freed by the unregistered roots.
+pub fn remove_old_generations(
+    project_dir: &Path,
+    stores: &StoreSet,
+    keep: u64,
+    keep_oplog: u64,
+    dry_run: bool,
+) -> Result<RemoveOldReport, Error> {
+    let gens = list_generations(project_dir)?;
+    let current = gens.iter().find(|g| g.current).map(|g| g.n);
+
+    let mut committed: Vec<u64> = Vec::new();
+    let mut oplog: Vec<u64> = Vec::new();
+    for g in &gens {
+        if Some(g.n) == current {
+            continue;
+        }
+        if classify_oplog(g) {
+            oplog.push(g.n);
+        } else {
+            committed.push(g.n);
+        }
+    }
+    committed.sort_unstable();
+    oplog.sort_unstable();
+
+    let mut report = RemoveOldReport {
+        dry_run,
+        ..Default::default()
+    };
+    let drop_committed = committed.len().saturating_sub(keep as usize);
+    let drop_oplog = oplog.len().saturating_sub(keep_oplog as usize);
+    for &g in &committed[..drop_committed] {
+        if !dry_run {
+            drop_generation(project_dir, stores, g)?;
+        }
+        report.dropped_committed.push(g);
+    }
+    for &g in &oplog[..drop_oplog] {
+        if !dry_run {
+            drop_generation(project_dir, stores, g)?;
+        }
+        report.dropped_oplog.push(g);
+    }
+
+    report.kept = gens
+        .iter()
+        .map(|g| g.n)
+        .filter(|n| !report.dropped_committed.contains(n) && !report.dropped_oplog.contains(n))
+        .collect();
+    report.kept.sort_unstable();
+    Ok(report)
 }
 
 #[cfg(test)]

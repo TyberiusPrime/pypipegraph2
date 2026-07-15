@@ -337,15 +337,26 @@ struct ViewSpecWire {
     entries: Vec<ViewEntryWire>,
 }
 
+/// `vcs_json`, when given, is the JSON encoding of `views::VcsInfo`
+/// (backend/commit_id/change_id/op_id/committed[/parent_commit_id]) —
+/// produced by the Python side's jj capture (`ppg3.jj.capture_state`) and
+/// persisted verbatim into the generation's `meta.json`. Optional and
+/// defaulted so pre-existing callers keep working unchanged.
 #[pyfunction]
+#[pyo3(signature = (handle, project_dir, project_id, view_spec_json, ephemeral, vcs_json = None))]
 fn write_generation(
     handle: &StoreSetHandle,
     project_dir: &str,
     project_id: &str,
     view_spec_json: &str,
     ephemeral: bool,
+    vcs_json: Option<&str>,
 ) -> PyResult<u64> {
     let wire: ViewSpecWire = serde_json::from_str(view_spec_json).map_err(to_pyerr)?;
+    let vcs: Option<views::VcsInfo> = match vcs_json {
+        Some(s) => Some(serde_json::from_str(s).map_err(to_pyerr)?),
+        None => None,
+    };
     let spec = ViewSpec {
         entries: wire
             .entries
@@ -358,12 +369,13 @@ fn write_generation(
             })
             .collect(),
     };
-    views::write_generation(
+    views::write_generation_with_vcs(
         Path::new(project_dir),
         project_id,
         &handle.inner,
         &spec,
         ephemeral,
+        vcs,
     )
     .map_err(to_pyerr)
 }

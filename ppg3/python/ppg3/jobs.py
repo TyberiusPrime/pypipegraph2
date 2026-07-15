@@ -206,6 +206,7 @@ class Graph:
         frozen: bool,
         paranoid: bool,
         forkserver: bool = True,
+        jj: bool = False,
     ):
         self.stores = list(stores)
         self.default_python = default_python
@@ -213,6 +214,10 @@ class Graph:
         self.parallelism = dict(parallelism)
         self.frozen = frozen
         self.paranoid = paranoid
+        # jj (jujutsu) support (see jj.py): when enabled, run() hard-errors
+        # on job sources not tracked in the enclosing jj workspace and
+        # captures commit/change/op-log ids into the generation meta.
+        self.jj = jj
         # §6.4: warm template processes for python FileJob/DataJob/FetchJob
         # dispatch. `False` disables it (`run.py` then passes an empty
         # `template_argv` to `ppg3._core.run`, which makes the Rust
@@ -230,10 +235,27 @@ class Graph:
         # CONTRACT.md "Python package" watch addendum). Never includes the
         # pipeline script itself; `python -m ppg3 watch` adds that.
         self._watched_paths: Set[str] = set()
+        # jj support: files that *define* jobs — constructor call sites,
+        # callback source files, Source refs + includes. Distinct from
+        # `_watched_paths`, which additionally holds leaf *data* inputs
+        # (`ppg3.File`) — data files need not be under version control,
+        # job sources (with jj=True) must.
+        self._source_paths: Set[str] = set()
 
     def record_watched_path(self, path: Union[str, "os.PathLike"]) -> None:
         """Record a path that watch mode (§6.7) should poll for changes."""
         self._watched_paths.add(str(path))
+
+    def record_source_path(self, path: Union[str, "os.PathLike"]) -> None:
+        """Record a job-*source* file (for jj tracking enforcement)."""
+        self._source_paths.add(str(path))
+
+    def source_paths(self) -> List[str]:
+        """Sorted, de-duplicated snapshot of every job-source file recorded
+        so far: job-constructor call sites, callback source files, and
+        ``Source`` refs + includes. What ``run()`` hands to
+        ``jj.assert_sources_tracked`` when ``jj=True``."""
+        return sorted(self._source_paths)
 
     def watched_paths(self) -> List[str]:
         """Sorted, de-duplicated snapshot of every path recorded so far via
@@ -278,6 +300,7 @@ def new(
     frozen: Optional[bool] = None,
     paranoid: bool = False,
     forkserver: bool = True,
+    jj: bool = False,
 ) -> Graph:
     """Create (and make current) a new ``Graph``. Module-level "current
     graph" like ppg2 — job constructors look it up implicitly.
@@ -288,6 +311,12 @@ def new(
     Pass ``forkserver=False`` to opt out and get the old cold-exec-per-job
     behavior unconditionally (e.g. for isolating whether a bug is
     forkserver-related).
+
+    ``jj=True`` enables jj (jujutsu) support (see :mod:`ppg3.jj`): ``run()``
+    then hard-errors if any job-source file is not tracked in the enclosing
+    jj workspace, and records the jj commit/change/op-log ids into the
+    generation's metadata (``ppg3 generations list`` shows them; ``ppg3 gc``
+    prunes uncommitted "op-log" generations under a separate budget).
     """
     global _current_graph
     if frozen is None:
@@ -306,6 +335,7 @@ def new(
         frozen=frozen,
         paranoid=paranoid,
         forkserver=forkserver,
+        jj=jj,
     )
     _current_graph = graph
     return graph
@@ -459,6 +489,18 @@ def _shim_argv(
 # --------------------------------------------------------------------------
 
 
+def _callable_source_file(fn: Callable) -> Optional[str]:
+    """Best-effort on-disk source file of a callback, or ``None`` (builtins,
+    C extensions, REPL-defined functions)."""
+    try:
+        path = inspect.getsourcefile(fn)
+    except TypeError:
+        return None
+    if path is None or not os.path.isfile(path):
+        return None
+    return os.path.abspath(path)
+
+
 class Job:
     kind = "base"
 
@@ -466,6 +508,12 @@ class Job:
         self.graph = graph
         self.id = job_id
         self.view = dict(view) if view else {}
+        # jj support: the file this job constructor was called from is a
+        # job-source file (this is how the pipeline script itself, and any
+        # module defining e.g. callback-less CommandJobs, gets recorded).
+        site = _record_call_site()
+        if site is not None:
+            graph.record_source_path(site[0])
         graph.add(self)
 
     def __getitem__(self, name: str) -> OutputRef:
@@ -519,10 +567,17 @@ class FileJob(Job):
         if isinstance(run, Source):
             # §6.7 watch mode: Source callback files are watched paths,
             # recorded at definition time (as opposed to leaf File inputs,
-            # recorded at lowering time in `_lower_input`).
+            # recorded at lowering time in `_lower_input`). They are also
+            # job-source files for jj tracking enforcement.
             graph.record_watched_path(run.path)
+            graph.record_source_path(run.path)
             for inc in run.includes:
                 graph.record_watched_path(inc)
+                graph.record_source_path(inc)
+        elif callable(run):
+            src = _callable_source_file(run)
+            if src is not None:
+                graph.record_source_path(src)
         self.tools = list(tools)
         self.inputs = dict(inputs or {})
         self.env = dict(env or {})
@@ -805,6 +860,9 @@ class GraphJob(Job):
             raise DefinitionError("GraphJob(fn) requires name= if fn has no __qualname__")
         super().__init__(graph, job_id, {})
         self.fn = fn
+        src = _callable_source_file(fn)
+        if src is not None:
+            graph.record_source_path(src)
         self._recipe = recipe.recipe_hash(fn)
 
     def job_def(self, graph: Optional[Graph] = None) -> Dict[str, Any]:
@@ -880,6 +938,9 @@ class UnsandboxedJob(Job):
             stacklevel=2,
         )
         self.run = run
+        src = _callable_source_file(run)
+        if src is not None:
+            graph.record_source_path(src)
         self.inputs = dict(inputs or {})
         self.env = dict(env or {})
         self.resources = resources.pools if isinstance(resources, Resources) else {}

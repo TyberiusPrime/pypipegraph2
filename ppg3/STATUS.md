@@ -1040,3 +1040,63 @@ Proof tests (test_session.py): same template pid across two runs with
 distinct graphs/stores/projects; session_stop → count 0 → next run
 respawns (new pid); loader memo hit across runs, cleared by session_stop;
 idempotent stop. Totals: 184 Rust + 149 Python tests, clippy clean.
+
+## jj (jujutsu) support + split GC — done
+
+Not in PPG3_DESIGN.md (user-requested extension); everything additive.
+CONTRACT.md gained an "Additive addendum: jj support + split GC" section
+recording the interfaces. Four features:
+
+a) **Untracked job sources are a hard error when enabled.**
+   `ppg3.new(jj=True)` → `run()` refuses to run (raises `ppg3.JJError`)
+   when any *job-source* file is not tracked in the enclosing jj
+   workspace, or lies outside it. Job sources are recorded on a new
+   `Graph._source_paths` set (distinct from `_watched_paths`, which also
+   holds leaf *data* `File`s — data need not be under VCS): every job
+   constructor's call site (reusing the §7.6 `_record_call_site` frame
+   walk, so callback-less `CommandJob`s and the pipeline script itself are
+   covered), every callable callback's `inspect.getsourcefile`, and every
+   `Source` ref + includes. The check runs before dispatch AND again after
+   the run but before `write_generation` (a `GraphJob` expansion can
+   introduce new sources mid-run).
+b) **jj state captured per run.** `ppg3/jj.py` shells out to jj
+   (binary overridable via `PPG3_JJ` — how the tests fake it): working-copy
+   commit id + change id (`jj log -r @`), current op-log id (`jj op log
+   --limit 1 -T id`), `committed` = working copy *empty*, plus
+   `parent_commit_id` when unambiguous (non-merge). Serialized through a
+   new optional `vcs_json` parameter on `_core.write_generation` into
+   `views::GenMeta.vcs` (`Option<VcsInfo>`, `serde(default)` so old
+   `meta.json` files still parse; omitted from JSON when absent).
+   Capture happens *before* `_core.run` so the ids match the sources jobs
+   were lowered from.
+c) **GC split in two.** New CLI `ppg3 gc [--keep N] [--keep-oplog M]
+   [--max-size B] [--evict-logs] [--dry-run]`: phase 1 = remove old
+   generations (`views::remove_old_generations`, unregisters roots; has
+   real dry-run support, unlike `keep_last`), phase 2 = per-store
+   mark/sweep (`Store::gc`) over every writable store in
+   `.ppg3/config.json` (readonly stores reported as skipped). Report keeps
+   the phases separate (`{"generations": .., "stores": .., 
+   "skipped_readonly_stores": ..}`). `store gc` / `generations keep`
+   remain unchanged for store-only / generations-only use.
+d) **Committed vs op-log generations.** Phase 1 buckets non-current
+   generations: *op-log* = `vcs.committed == false` (dirty working copy —
+   source state recoverable only via `jj op restore`) OR ephemeral
+   (watch-mode, transient by §6.7); *committed* = `vcs.committed == true`
+   or no vcs info at all (conservative: unknown provenance gets the larger
+   budget). Budgets: `--keep` (default 10) for committed, `--keep-oplog`
+   (default 2) for op-log. `generations list` grew VCS/CHANGE_ID columns.
+
+Decision worth recording: `committed` is defined as "the working-copy
+commit `@` was empty", i.e. the source tree equals `@-` (a durable commit),
+NOT "has a description" — description-less but clean states are perfectly
+reproducible from normal history, while any dirty working copy is only an
+anonymous auto-snapshot regardless of description.
+
+Tests: `core/tests/views.rs` (vcs meta roundtrip + old-meta compat, bucket
+split, ephemeral/no-vcs classification, dry run), `cli/tests/cli.rs`
+(two-phase gc end to end incl. dry run + human `generations list`
+columns), `python/tests/test_jj.py` (13 tests driving the real subprocess
+path against a scripted fake jj via `PPG3_JJ`, incl. two `requires_core`
+e2e runs asserting the meta.json vcs block and the hard-error paths, plus
+one `requires_real_jj` integration test that runs when a real jj is on
+PATH). Totals: 202 Rust + 165 Python tests (1 skipped without a real jj), clippy clean.

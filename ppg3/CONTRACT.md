@@ -650,6 +650,53 @@ errors loudly without a working nix. Keeping the closure a *parameter* of
 contract line; only `BwrapExecutor::run` spawns the query. `NoneExecutor`
 is unaffected (no enforcement, no binds).
 
+## Additive addendum: jj (jujutsu) support + split GC
+
+Not in PPG3_DESIGN.md; user-requested extension. Everything additive; full
+rationale in STATUS.md "jj (jujutsu) support + split GC".
+
+- **`views::VcsInfo`** `{ backend, commit_id, change_id, op_id, committed,
+  parent_commit_id: Option }` — persisted as `GenMeta.vcs: Option<VcsInfo>`
+  (`serde(default)`, omitted when `None`; pre-existing `meta.json` files
+  parse unchanged) and surfaced on `GenInfo.vcs`. `committed` ⇔ the jj
+  working copy commit `@` was empty at run time (sources == `@-`, a
+  durable commit); `false` ⇔ an *op-log generation* (sources exist only as
+  jj's working-copy auto-snapshot, recoverable via `jj op restore
+  <op_id>`).
+- **`views::write_generation_with_vcs(.., vcs: Option<VcsInfo>)`** — the
+  original `write_generation` keeps its signature and delegates with
+  `None`.
+- **`views::remove_old_generations(project_dir, stores, keep, keep_oplog,
+  dry_run) -> RemoveOldReport`** — phase 1 of the split GC: buckets
+  non-current generations into *committed* (`vcs.committed == true`, or no
+  vcs info — conservative) vs *op-log* (`vcs.committed == false`, or
+  ephemeral §6.7 watch generations), keeps the last `keep` / `keep_oplog`
+  of each, drops the rest (roots unregistered via `drop_generation`).
+  Genuine `dry_run` (unlike `keep_last`, which is unchanged).
+- **CLI `ppg3 gc [--keep N=10] [--keep-oplog M=2] [--max-size B]
+  [--evict-logs] [--dry-run] [--project P]`** — the split GC entry point:
+  phase 1 as above, then phase 2 = `Store::gc` mark/sweep on every
+  *writable* store in `.ppg3/config.json` (readonly ones reported as
+  skipped). JSON report: `{"generations": RemoveOldReport, "stores":
+  {name: GcReport}, "skipped_readonly_stores": [..]}`. `store gc` and
+  `generations keep` remain as the single-phase tools. `generations list`
+  grew `VCS` (`committed`/`op-log`/`-`) and `CHANGE_ID` columns.
+- **PyO3**: `_core.write_generation(handle, project_dir, project_id,
+  view_spec_json, ephemeral, vcs_json = None)` — 6th optional argument,
+  the JSON encoding of `VcsInfo`.
+- **Python**: `ppg3.new(.., jj: bool = False)`; `ppg3/jj.py`
+  (`find_workspace_root`, `capture_state`, `assert_sources_tracked`,
+  `list_tracked_files`, `JJError` — exported as `ppg3.JJError`; jj binary
+  overridable via `PPG3_JJ`, which is also how tests fake it). With
+  `jj=True`, `run()`: (1) hard-errors before dispatch if no enclosing jj
+  workspace or any *job-source* file is untracked/outside it — job
+  sources = every job constructor's call-site file, callable callbacks'
+  `inspect.getsourcefile`, `Source` refs + includes, tracked on the new
+  `Graph._source_paths` / `Graph.source_paths()` (leaf-data `File`s are
+  deliberately NOT job sources); (2) captures jj state *before*
+  `_core.run`; (3) re-checks sources after the run (GraphJob expansion may
+  add some) and passes `vcs_json` to `write_generation`.
+
 ## Additive clarification (§6.7 session mode)
 
 `_core.open_session(work_dir, template_argv) -> Session`,
