@@ -10,7 +10,7 @@ A job that runs an external programm, logging the command, stdout, stderr, and r
 ## Parameters
 
 * output_path - the folder where the output files will be stored.
-* additional_created_files: A dictionary of {key: relative_path} that will be added to the job's output. 
+* additional_created_files - A dictionary of {key: relative_path} that will be added to the job's output. 
   Downstream jobs can find the files by going job['key'].
 * cmd_or_cmd_func - a list of strings that will be passed to subprocess.Popen, or a function that returns such a list.
   (shell=True is *not* being supported). The function will be called when the job is run, so after the dependencies have been 
