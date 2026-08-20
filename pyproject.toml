@@ -9,7 +9,7 @@ module-name = "pypipegraph2.pypipegraph2"
 name = "pypipegraph2"
 version = "3.5.0"
 description = "Advanced python 'what changed and what do we need to do' tracking"
-# long-description = "README.md"
+readme = "README.md"
 authors = [
  {"name" = "Florian Finkernagel", "email" = "finkernagel@imt.uni-marburg.de"}
 ]
