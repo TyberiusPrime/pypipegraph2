@@ -301,6 +301,17 @@
         # be sure to set this back in your build scripts,
         # otherwise pyo3 will get recompiled all the time
         CARGO_TARGET_DIR = "target_rust_analyzer";
+        # pkgs.pre-commit and pkgs.black are python3.13 applications; their
+        # python setup hook prepends their (and their dependencies')
+        # site-packages to PYTHONPATH. That includes python3.13-pytest, which
+        # then shadows the python3.14 venv's own pytest: the venv's
+        # bin/pytest runs under python3.14 but imports _pytest from the 3.13
+        # tree, failing with "cannot import name '_console_main'". The venv
+        # and the wrapped tools both carry their paths internally, so nothing
+        # in this shell needs PYTHONPATH.
+        shellHook = ''
+          unset PYTHONPATH
+        '';
         nativeBuildInputs = [
           rust
           pkgs.cargo-binutils
