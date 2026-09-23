@@ -110,6 +110,18 @@ class TestExternalJobs:
         assert job["stdout"].read_text().strip() == ""
         assert job["stderr"].read_text().strip() == ""
 
+    def test_path(self):
+        job = ppg.ExternalJob(
+            "one",
+            {"two": "two.txt"},
+            ["touch", Path("one/two.txt")], # paths are meant for inputs, so they're not rebased on output_path
+            cwd=Path(".").absolute(),
+        )
+        ppg.run()
+        assert job["two"].exists()
+        assert job["stdout"].read_text().strip() == ""
+        assert job["stderr"].read_text().strip() == ""
+
     def test_start_new_session(self):
         """Test that start_new_session really starts a new session."""
         job1 = ppg.ExternalJob(
@@ -251,6 +263,13 @@ def test_external_job_pretty_print_cmd():
   --enable \\
   --timeout 30""",
         ),
+(
+            ["exec", "--path", Path("/some/long/path with spaces"), "--enable", "--timeout", "30"],
+           """exec \\
+  --path '/some/long/path with spaces' \\
+  --enable \\
+  --timeout 30""",
+        )
     ]
     for input, output in test_cases:
         assert output == external_job_pretty_print_cmd(input)

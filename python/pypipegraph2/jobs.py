@@ -3523,15 +3523,8 @@ def ExternalJob(
             cmd = cmd_or_cmd_func()
         else:
             cmd = cmd_or_cmd_func
-        cmd = [
-            (
-                x
-                if not isinstance(x, ExternalOutputPath)
-                else str((output_path / x.path).absolute())
-            )
-            for x in cmd
-        ]
-        output_files["cmd"].write_text(external_job_pretty_print_cmd(cmd))
+        cmd = external_job_prepare_cmd(cmd, output_path)
+        output_files["cmd"].write_text(external_job_pretty_print_cmd(cmd, output_path))
         p = subprocess.Popen(
             cmd,
             stdout=open(output_files["stdout"], "wb"),
@@ -3582,12 +3575,35 @@ def ExternalJob(
     return res
 
 
-def external_job_pretty_print_cmd(cmd_args: [str]) -> str:
+def external_job_prepare_cmd(
+    cmd: List[str | Path | ExternalOutputPath], output_path: Path
+) -> List[str]:
+    """Rewrite Path & ExternalOutputPath to (absolute path) strings
+    for passing onto downstreams"""
+    adjusted_cmd = []
+    for arg in cmd:
+        if isinstance(arg, ExternalOutputPath):
+            arg_rewritten = str((output_path / arg.path).absolute())
+        elif isinstance(arg, Path):
+            arg_rewritten = str(arg.absolute())
+        elif isinstance(arg, str):
+            arg_rewritten = arg
+        else:
+            raise ValueError("Invalid type for argument ({type(arg)}): '{repr(arg)'}")
+        adjusted_cmd.append(arg_rewritten)
+    return adjusted_cmd
+
+
+def external_job_pretty_print_cmd(
+    cmd_args: List[str], output_path: Path = Path("")
+) -> str:
     """
     Pretty prints a command line from a list of exec arguments,
     grouping '--key value' pairs intelligently across multiple lines.
     """
     import shlex
+
+    cmd_args = external_job_prepare_cmd(cmd_args, output_path)
 
     lines = []
     first = True
