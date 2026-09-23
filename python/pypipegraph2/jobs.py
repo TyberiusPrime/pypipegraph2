@@ -3502,6 +3502,9 @@ def ExternalJob(
             raise ValueError(
                 f"additional_created_files contained Paths when it should be strs relative to output_path. {k} was {v}"
             )
+    # check early if possible
+    if isinstance(cmd_or_cmd_func, list):
+        cmd_or_cmd_func = external_job_prepare_cmd(cmd_or_cmd_func, output_path)
 
     def run(
         output_files,
