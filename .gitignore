@@ -92,3 +92,4 @@ coverage-html-tests/
 coverage-html-fuzz/
 mutants.out*/
 core*
+result

@@ -13,6 +13,7 @@ from typing import Union, List, Dict, Optional, Tuple, Callable
 from pathlib import Path
 from io import StringIO
 from collections import namedtuple
+from collections.abc import Sequence
 from threading import Lock, Event, local
 from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
@@ -50,6 +51,13 @@ python_version = ".".join(
 DependsOnInvariant = namedtuple("DependsOnInvariant", ["invariant", "self"])
 CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
 PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
+
+type Jobs = Job | Sequence[Job]
+# what Job.depends_on accepts: a job, a job id, a (nested) sequence of those,
+# or a callable returning any of the above (resolved on first ppg run)
+type DependsOnTarget = (
+    str | Job | Sequence[DependsOnTarget] | Callable[[], DependsOnTarget]
+)
 
 
 def _normalize_path(path):
@@ -152,9 +160,9 @@ class JobList(list):
 
     """
 
-    def depends_on(self, *args, **kwargs):  # pragma: no cover
+    def depends_on(self, *other_jobs: DependsOnTarget):  # pragma: no cover
         for job in self:
-            job.depends_on(*args, **kwargs)
+            job.depends_on(*other_jobs)
 
 
 def _verify_function_outside_variables(func, allowed_non_locals, job_id="Unknown job"):
@@ -221,7 +229,7 @@ def _verify_function_outside_variables(func, allowed_non_locals, job_id="Unknown
             raise exceptions.FunctionUsesUndeclaredNonLocalsError(msg)
 
 
-def _allow_non_locals_plus(allowed_non_locals: Optional[List[str]], plus: List[str]):
+def _allow_non_locals_plus(allowed_non_locals: list[str] | None, plus: list[str]):
     res = plus.copy()
     if allowed_non_locals:
         res.extend(allowed_non_locals)
@@ -230,15 +238,15 @@ def _allow_non_locals_plus(allowed_non_locals: Optional[List[str]], plus: List[s
 
 @total_ordering
 class Job:
-    job_id: int
-    historical: Optional[Tuple[str, Dict[str, str]]]
+    job_id: str
+    historical: tuple[str, dict[str, str]] | None
 
     def __new__(cls, outputs, *args, **kwargs):
         return _dedup_job(cls, ":::".join(sorted([str(x) for x in outputs])))
 
     def __init__(
         self,
-        outputs: Union[str, List[str], Dict[str, str]],
+        outputs: str | list[str] | dict[str, str],
         resources: Resources = Resources.SingleCore,
     ):
         self.use_resources(resources)
@@ -308,7 +316,7 @@ class Job:
 
     def cleanup(self, _runmode):
         """Overwritten by Ephemeral jobs downstream"""
-        pass
+        pass  # noqa: PIE790
 
     def readd(self):
         """Readd this job to the current global pipegraph
@@ -360,8 +368,8 @@ class Job:
 
     def depends_on(
         self,
-        other_job: Union[Union[str, Job], List[Union[str, Job]]] = False,
-        *other_jobs: Union[Union[str, Job], List[Union[str, Job]]],
+        other_job: DependsOnTarget | bool = False,
+        *other_jobs: DependsOnTarget,
     ):
         """Depend on another Job, which must be done before this one can run.
         If the other job changes it's output, this job will be invalidated (and rerun).
@@ -380,7 +388,9 @@ class Job:
 
         from . import global_pipegraph
 
-        if other_job is False and not other_jobs:
+        assert global_pipegraph is not None, "Must have a global ppg at this point"
+
+        if isinstance(other_job, bool) and other_job is False and not other_jobs:
             # raise ValueError("You have to pass in at least one job")
             return self  # this is how ppg1 did it
         if other_jobs:
@@ -392,7 +402,7 @@ class Job:
                 "You passed in a CachedJobTuple/PlotJobTuple - unclear what to depend on. Pass in either .load/.calc or .plot/.cache/.table"
             )
         elif hasattr(other_job, "__iter__") and not isinstance(other_job, (Job, str)):
-            for x in other_job:
+            for x in other_job:  # type: ignore
                 self.depends_on(x)
         else:
             if isinstance(other_job, Job):
@@ -400,7 +410,7 @@ class Job:
                 o_inputs = other_job.outputs
             elif other_job is None:
                 return self
-            elif hasattr(other_job, "__call__"):
+            elif callable(other_job):
                 self.dependency_callbacks.append(other_job)
                 return self  # don't do the 'add a job right now' dance
             else:
@@ -410,7 +420,7 @@ class Job:
                     o_job = global_pipegraph.find_job_from_file(other_job)
                 except KeyError as e:
                     raise KeyError(
-                        f"Dependency specified via job_id {repr(other_job)}. No such job found"
+                        f"Dependency specified via job_id {other_job!r}. No such job found"
                     )
                 o_inputs = [other_job]  # that's actually the filenames!
             if o_job.job_id == self.job_id:
@@ -481,6 +491,8 @@ class Job:
         """
         from . import global_pipegraph
 
+        assert global_pipegraph is not None, "Must have a global ppg at this point"
+
         global_pipegraph.run_for_these(self)
         return self._call_result()
 
@@ -494,6 +506,7 @@ class Job:
         """
         from . import global_pipegraph
 
+        assert global_pipegraph is not None, "Must have a global ppg at this point"
         e = global_pipegraph.last_run_result[self.job_id].error
         if isinstance(e, exceptions.JobError):
             return e.args[0]
@@ -516,6 +529,7 @@ class Job:
         """
         from . import global_pipegraph
 
+        assert global_pipegraph is not None, "Must have a global ppg at this point"
         e = global_pipegraph.last_run_result[self.job_id].error
         if isinstance(e, exceptions.JobError):
             return e.args[1]
@@ -528,6 +542,7 @@ class Job:
         global pipegraph"""
         from . import global_pipegraph
 
+        assert global_pipegraph is not None, "Must have a global ppg at this point"
         gg = global_pipegraph
         return [gg.jobs[job_id] for job_id in gg.job_dag.predecessors(self.job_id)]
 
@@ -546,6 +561,7 @@ class Job:
 
         import pypipegraph2 as ppg
 
+        assert ppg.global_pipegraph is not None, "Must have a global ppg at this point"
         nodes = []
         seen = set()
         edges = set()
@@ -572,7 +588,7 @@ class Job:
                 nodes.append(
                     f"job_{counter[0]} = ppg.ParameterInvariant('{counter[0]}', 55) #{j.job_id}"
                 )
-            elif isinstance(j, ppg.FunctionInvariant):
+            elif isinstance(j, ppg._FunctionInvariant):
                 nodes.append(
                     f"job_{counter[0]} = ppg.FunctionInvariant('{counter[0]}', lambda: 55) #{j.job_id}"
                 )
@@ -589,7 +605,7 @@ class Job:
                     f"job_{counter[0]} = ppg.FileGeneratingJob('{counter[0]}', dummy_fg, depend_on_function=False) #{j.job_id}"
                 )
             elif isinstance(j, ppg.MultiTempFileGeneratingJob):
-                files = [counter[0] + "/" + x.name for x in j.files]
+                files = [f"{counter[0]}/{x.name}" for x in j.files]
                 nodes.append(
                     f"job_{counter[0]} = ppg.MultiTempFileGeneratingJob({files!r}, dummy_mfg, depend_on_function=False) #{j.job_id}"
                 )
@@ -607,7 +623,7 @@ class Job:
                     f"job_{counter[0]} = ppg.AttributeLoadingJob('{counter[0]}', DummyObject(), 'attr_{counter[0]}', lambda: None, depend_on_function=False) #{j.job_id}"
                 )
             else:
-                raise ValueError(j)
+                raise TypeError(j)
             node_to_counters[node] = counter[0]
             counter[0] += 1
             for parent in dag.predecessors(node):
@@ -637,7 +653,7 @@ class Job:
         )
         for job_id in job_ids:
             build_edges(job_id)
-        edges = (
+        edges_list = (
             ["edges = []", "ea = edges.append"]
             + list(edges)
             + [
@@ -667,9 +683,9 @@ def dummy_fg(of):
     of.parent.mkdir(exist_ok=True, parents=True)
     of.write_text("fg")
 
-""".split("\n")
+""".split("\n") # noqa: SIM905
             lines += nodes
-            lines += edges
+            lines += edges_list
             lines += ["", "ppg.run()", "ppg.run"]
 
             op.write("\n".join(["        "] + [ll for ll in lines]))
@@ -690,8 +706,9 @@ class MultiFileGeneratingJob(Job):
 
     def __init__(
         self,
-        files: List[Path],  # todo: extend type attribute to allow mapping
-        generating_function: Callable[List[Path]],
+        files: list[Path | str]
+        | dict[str, Path | str],  # todo: extend type attribute to allow mapping
+        generating_function: Callable[[list[Path | str] | dict[str, Path | str]]],
         resources: Resources = Resources.SingleCore,
         depend_on_function: bool = True,
         empty_ok=True,
@@ -707,7 +724,7 @@ class MultiFileGeneratingJob(Job):
         self.generating_function = self._validate_func_argument(
             generating_function,
             allowed_non_locals,
-            ":::".join((str(x) for x in self.files)),
+            ":::".join(str(x) for x in self.files),
         )
         if len(self.files) != len(set(self.files)):
             raise ValueError(
@@ -1431,10 +1448,10 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
 
     def __init__(
         self,
-        function,
-        name=None,
+        function: Callable,
+        name: str | None = None,
         check_non_locals=True,
-        allowed_non_locals: Optional[List[str]] = None,
+        allowed_non_locals: list[str] | None = None,
     ):  # must support the inverse calling with name, function, for compatibility to pypipegraph
         name, function = self._parse_args(function, name)
 
@@ -1987,7 +2004,7 @@ def FunctionInvariant(
     name=None,
     check_non_locals=True,
     allowed_non_locals: Optional[List[str]] = None,
-):
+) -> _FunctionInvariant | list[_FunctionInvariant]:
     if isinstance(function, (str, Path)):
         name, function = function, name
     if hasattr(function, "wrapped_function"):
