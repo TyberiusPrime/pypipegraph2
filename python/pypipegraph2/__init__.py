@@ -1,4 +1,12 @@
 # -*- coding: utf-8 -*-
+"""pypipegraph2 - a pipeline (DAG) engine that reruns exactly what changed.
+
+Writing or changing job code (especially as a coding agent)? Read
+agent_summary.md next to this file first: what is and isn't tracked,
+where code runs (fork vs main process), PlotJob tuples, shared job outputs,
+and a checklist.
+"""
+
 __version__ = "3.5.1"
 
 import logging

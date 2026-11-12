@@ -50,8 +50,38 @@ python_version = ".".join(
 )  # we only care about major.minor
 
 DependsOnInvariant = namedtuple("DependsOnInvariant", ["invariant", "self"])
-CachedJobTuple = namedtuple("CachedJobTuple", ["load", "calc"])
-PlotJobTuple = namedtuple("PlotJobTuple", ["plot", "cache", "table"])
+class _JobTupleHints:
+    """Turn job.depends_on*(...) on a job tuple into an explanation,
+    instead of a bare AttributeError"""
+
+    __slots__ = ()
+    _depends_on_targets = ""
+
+    def __getattr__(self, name):
+        if name.startswith("depends_on"):
+            raise AttributeError(
+                f"{type(self).__name__} is a tuple of jobs, not a job - call {name} on"
+                f" one of them: {self._depends_on_targets}"
+                " (see agent_summary.md in the pypipegraph2 package)"
+            )
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}"
+        )
+
+
+class CachedJobTuple(_JobTupleHints, namedtuple("CachedJobTuple", ["load", "calc"])):
+    __slots__ = ()
+    _depends_on_targets = ".calc for what the calculation needs, .load rarely"
+
+
+class PlotJobTuple(
+    _JobTupleHints, namedtuple("PlotJobTuple", ["plot", "cache", "table"])
+):
+    __slots__ = ()
+    _depends_on_targets = (
+        ".cache.calc for the data function's inputs and helpers,"
+        " .plot for helpers of the plot function"
+    )
 
 type Jobs = Job | Sequence[Job]
 # what Job.depends_on accepts: a job, a job id, a (nested) sequence of those,
@@ -225,6 +255,11 @@ def _verify_function_outside_variables(func, allowed_non_locals, job_id="Unknown
             msg += "Either add them as default parameters (prefered), or pass their names in  allowed_non_locals=[...]\n"
             msg += "e.g. " + ", ".join(f"{k}={k}" for k in vars) + "\n"
             msg += f"or allowed_non_locals = {vars!r}" + "\n"
+            msg += (
+                "Note: default parameter values and module-level globals are not part of"
+                " the function's hash - use depends_on_params for values that should"
+                " trigger a rerun. See agent_summary.md in the pypipegraph2 package.\n"
+            )
             msg += "Trace:\n"
             msg += str(e)
             raise exceptions.FunctionUsesUndeclaredNonLocalsError(msg)
@@ -401,6 +436,7 @@ class Job:
         if isinstance(other_job, (CachedJobTuple, PlotJobTuple)):
             raise TypeError(
                 "You passed in a CachedJobTuple/PlotJobTuple - unclear what to depend on. Pass in either .load/.calc or .plot/.cache/.table"
+                " (see agent_summary.md in the pypipegraph2 package)"
             )
         elif hasattr(other_job, "__iter__") and not isinstance(other_job, (Job, str)):
             for x in other_job:  # type: ignore
