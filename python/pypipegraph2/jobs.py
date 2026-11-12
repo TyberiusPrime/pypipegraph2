@@ -683,7 +683,7 @@ def dummy_fg(of):
     of.parent.mkdir(exist_ok=True, parents=True)
     of.write_text("fg")
 
-""".split("\n") # noqa: SIM905
+""".split("\n")  # noqa: SIM905
             lines += nodes
             lines += edges_list
             lines += ["", "ppg.run()", "ppg.run"]
@@ -2376,8 +2376,13 @@ class AttributeLoadingJob(
         self.do_cleanup = True
         super().__init__([job_id], resources=resources)
 
-    def cleanup(self, _runmode):
-        delattr(self.object, self.attribute_name)
+    def cleanup(self, runmode):
+        if runmode != RunMode.CONSOLE_INTERACTIVE:
+            delattr(self.object, self.attribute_name)
+            try:
+                delattr(self.object, f"_{self.attribute_name}_hash")
+            except AttributeError:
+                pass
 
     def get_value(self):
         return getattr(self.object, self.attribute_name)
@@ -2424,7 +2429,7 @@ class AttributeLoadingJob(
                 # arbitrary in-memory object (dict, DataFrame, ...): default to
                 # input-based hashing instead of the unreliable deepdiff path.
                 # See DataLoadingJob.run for the rationale.
-                hash = current_hash
+                hash = current_hash  # than's self._derived_output_name
                 self.store_hash(hash)
         else:
             log_warning(f"Reused cached value for {self.job_id}")
@@ -2476,7 +2481,7 @@ class DictEntryLoadingJob(AttributeLoadingJob):
         if runmode != RunMode.CONSOLE_INTERACTIVE:
             del self.object[self.attribute_name]
             try:
-                del self.object["_" + self.attribute_name + "_hash"]
+                del self.object[f"_{self.attribute_name}_hash"]
             except KeyError:
                 pass
 
