@@ -1848,16 +1848,15 @@ def gen_20211221(func):
 def test_pandas_hashing():
     import pandas as pd
 
-
     df_a = pd.DataFrame(
         {"A": [1, 2, 3], "B": ["4", "5", "6"]},
         index=pd.MultiIndex.from_tuples(
             [(1, "2"), (3, "4"), (5, "6")], names=["a", "b"]
         ),
     )
-    # we no longer accept pandas hashing. 
+    # we no longer accept pandas hashing.
     with pytest.raises(TypeError):
-         ppg.jobs._hash_object(df_a)[1]
+        ppg.jobs._hash_object(df_a)[1]
 
 
 def gen_20241121(change_edge=False):
@@ -1901,3 +1900,41 @@ def gen_20241121(change_edge=False):
             cjobs_by_no[a].depends_on(cjobs_by_no[b])
             # print(f"ea(('{a}', '{b}'))")
 
+
+@pytest.mark.usefixtures("ppg2_per_test")
+class TestFunctionHashing:
+    def test_source_code_only_changes(self):
+        # This job exposes a discrepancy between regular invalidation
+        # an dwhat UseInputHashesForOutput does.
+        # it should work (since A *should* return the same hash)
+        # but it does not...
+        def a_function():
+            return 24 + 37
+
+        jobA = ppg.DataLoadingJob("a", lambda: UseInputHashesForOutput(a_function()))
+        jobA.depends_on_func(a_function, 'a_function')
+
+        jobB = ppg.FileGeneratingJob(
+            "b", lambda of: of.write_text(str(a_function())) and counter("b_count")
+        )
+        jobB.depends_on(jobA)
+        ppg.run()
+        assert Path("b_count").read_text() == "1"
+        assert Path("b").read_text() == str(24 + 37)
+        ppg.new()
+
+        # fmt: off
+        def a_function():
+            return 24+37  # whitespace only change
+        # fmt: on
+
+        jobA = ppg.DataLoadingJob("a", lambda: UseInputHashesForOutput(a_function()))
+        jobA.depends_on_func(a_function, 'a_function')
+        jobB = ppg.FileGeneratingJob(
+            "b", lambda of: of.write_text(str(a_function())) and counter("b_count")
+        )
+        jobB.depends_on(jobA)
+        jobB.depends_on_params('redoit') # so we have to rerun jobA, go get the data
+        ppg.run()
+        assert Path("b_count").read_text() == "1"
+        assert Path("b").read_text() == str(24 + 37)
