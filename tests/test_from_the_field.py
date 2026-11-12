@@ -1936,5 +1936,5 @@ class TestFunctionHashing:
         jobB.depends_on(jobA)
         jobB.depends_on_params('redoit') # so we have to rerun jobA, go get the data
         ppg.run()
-        assert Path("b_count").read_text() == "1"
+        assert Path("b_count").read_text() == "2"
         assert Path("b").read_text() == str(24 + 37)

@@ -15,6 +15,7 @@ from io import StringIO
 from collections import namedtuple
 from collections.abc import Sequence
 from threading import Lock, Event, local
+from _pytest import python
 from deepdiff.deephash import DeepHash, UNPROCESSED_KEY
 from functools import total_ordering
 from . import localscope
@@ -1553,6 +1554,28 @@ class _FunctionInvariant(_InvariantMixin, Job, _FileInvariantMixin):
             )  # returns an empty string for cython functions
         else:
             closure = ""
+
+        # Bytecode + closure unchanged -> semantically the same function.
+        # Keep the historical source so that extract_strict_hash (and thus
+        # UseInputHashesForOutput-derived hashes downstream) stays stable,
+        # mirroring what compare_hashes considers 'unchanged'.
+        # it's a dirty hack, but the only way forward I see to make this
+        # work in all cases
+        def unwrap_dis(dis):
+            # dis can be a string, or as 1-string-tuple
+            # can't change that without a lot of invalidation
+            while isinstance(dis, (tuple, list)):
+                dis = dis[0]
+            return dis
+
+        if (
+            historical_output
+            and python_version in historical_output
+            and "source" in historical_output
+            and unwrap_dis(dis) == unwrap_dis(historical_output[python_version][0])
+            and closure == historical_output[python_version][1]
+        ):
+            source = historical_output["source"]
 
         res = {"source": source, "source_line_no": line_no}
         res[python_version] = (dis, closure)
