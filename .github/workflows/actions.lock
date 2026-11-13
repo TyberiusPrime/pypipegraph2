@@ -19,7 +19,6 @@ workflows:
         - 'pyo3/maturin-action@v1.51.0'
     '.github/workflows/verify-lockfile.yml':
         - 'actions/checkout@v7.0.1'
-        - 'j178/prek-action@v3.1.0'
 dependencies:
     'actions/checkout@v6.0.3':
         ref: 'v6.0.3'
@@ -73,11 +72,6 @@ dependencies:
         commit: 'sha1-786fff0690178f1234e4e1fe9b536e94f5433196'
         owner_id: 80991770
         repo_id: 588678074
-    'j178/prek-action@v3.1.0':
-        ref: 'v3.1.0'
-        commit: 'sha1-44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d'
-        owner_id: 10510431
-        repo_id: 1052387486
     'pyo3/maturin-action@v1.51.0':
         ref: 'v1.51.0'
         commit: 'sha1-e83996d129638aa358a18fbd1dfb82f0b0fb5d3b'
