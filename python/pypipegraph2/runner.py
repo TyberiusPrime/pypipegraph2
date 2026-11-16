@@ -787,8 +787,11 @@ class Runner:
                     log("(no stack available)")
 
             except Exception as e:
+                exception_type, exception_value, tb = sys.exc_info()
+                captured_tb = ppg_traceback.Trace(exception_type, exception_value, tb)
                 log_error(
-                    f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed."
+                    f"An exception ocurred reporting on a job failure for {job_id}: {e}. The original job failure has been swallowed. Trace: "
+                    + captured_tb._format_rich_traceback_fallback(True, True, False)
                 )
 
     def _executing_thread(self):

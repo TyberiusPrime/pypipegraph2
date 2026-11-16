@@ -152,9 +152,10 @@ class Trace:
             def render_locals(frame):
                 out.append(bold("Locals") + ":")
                 scope = frame.locals
-                items = sorted(scope.items())
-                len_longest_key = max((len(x[0]) for x in items))
+                items = sorted(scope.items(), key=lambda x: str(x[0]))
+                len_longest_key = max((len(str(x[0])) for x in items))
                 for key, value in items:
+                    key = str(key)
                     v = str(value)
                     if len(v) > 1000:
                         v = v[:1000] + "…"
